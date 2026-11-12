@@ -1,0 +1,6 @@
+# 各子项目有自己的 .gitignore，这里只放全局的
+.claude/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

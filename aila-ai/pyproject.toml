@@ -1,0 +1,9 @@
+[project]
+name = "aila-ai"
+version = "0.1.0"
+description = "艾拉的本地 AI 服务：对话、表情动作标签解析"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,242 @@
+<script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Vector3 } from 'three'
+import SpeechBubble from './components/SpeechBubble.vue'
+import ChatInput from './components/ChatInput.vue'
+import { Behavior } from './behavior/Behavior'
+import { Conversation } from './chat/Conversation'
+import { createTransport } from './chat/transport'
+import { Stage, type HitRegion } from './scene/Stage'
+import { PlaceholderAvatar } from './avatar/PlaceholderAvatar'
+import { loadVrmAvatar } from './avatar/VrmAvatar'
+import { lines } from './persona/lines'
+import { bridge } from './platform/bridge'
+
+const stageEl = ref<HTMLDivElement>()
+const fileInput = ref<HTMLInputElement>()
+const chatInput = ref<InstanceType<typeof ChatInput>>()
+const bubbleText = ref('')
+const bubbleVisible = ref(false)
+const overAvatar = ref(false)
+const chatOpen = ref(false)
+
+const behavior = new Behavior()
+const conversation = new Conversation(behavior, createTransport())
+let stage: Stage | null = null
+let usingPlaceholder = true
+let bubbleTimer = 0
+const lookTarget = new Vector3()
+
+/** holdMs 为 null 时一直显示，直到下一次更新 */
+function showBubble(text: string, holdMs: number | null): void {
+  bubbleText.value = text
+  bubbleVisible.value = true
+  clearTimeout(bubbleTimer)
+  if (holdMs !== null) bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
+}
+
+behavior.onSay = showBubble
+conversation.onBubble = showBubble
+
+// ---------- 对话框 ----------
+
+async function openChat(): Promise<void> {
+  if (!chatOpen.value) {
+    chatOpen.value = true
+    if (!conversation.busy) behavior.listen()
+  }
+  bridge?.focusWindow() // 窗口平时不抢焦点，打字前要拿到
+  await nextTick()
+  chatInput.value?.focus()
+}
+
+function closeChat(): void {
+  chatOpen.value = false
+  bridge?.blurWindow() // 把焦点还给之前在用的程序
+}
+
+function onSend(text: string): void {
+  conversation.send(text)
+}
+
+// ---------- 模型 ----------
+
+async function useModel(data: ArrayBuffer): Promise<void> {
+  try {
+    const avatar = await loadVrmAvatar(data)
+    stage?.setAvatar(avatar)
+    usingPlaceholder = false
+    behavior.react('happy')
+    behavior.say(lines.modelLoaded)
+  } catch (err) {
+    console.error('加载 VRM 失败', err)
+    behavior.react('sad')
+    behavior.say(lines.modelFailed)
+  }
+}
+
+async function onFile(e: Event): Promise<void> {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (file) await useModel(await file.arrayBuffer())
+}
+
+// ---------- 鼠标：穿透、视线、点击、拖动 ----------
+
+let lastHoverCheck = 0
+let acceptingMouse = false
+
+/** 鼠标在界面控件（对话框等）上 */
+function overUi(x: number, y: number): boolean {
+  return document.elementFromPoint(x, y)?.closest('[data-interactive]') != null
+}
+
+/** 只有鼠标在角色或对话框上时窗口才接收点击，其他地方点击会穿透到桌面 */
+function updateHover(x: number, y: number): void {
+  // 读像素会让 GPU 等待，限制在每秒最多 25 次
+  const now = performance.now()
+  if (now - lastHoverCheck < 40) return
+  lastHoverCheck = now
+  overAvatar.value = stage?.hitTest(x, y) != null
+  const accept = overAvatar.value || overUi(x, y)
+  if (accept === acceptingMouse) return
+  acceptingMouse = accept
+  bridge?.setIgnoreMouse(!accept)
+}
+
+function lookAt(x: number, y: number): void {
+  if (!stage) return
+  behavior.cursorMoved(stage.screenToLookTarget(x, y, lookTarget))
+}
+
+let press: { x: number; y: number; screenX: number; region: HitRegion } | null = null
+let dragging = false
+/** 单击要等一下，看是不是双击（双击打开对话框，不算戳她） */
+const DOUBLE_CLICK_MS = 260
+let pendingPoke = 0
+
+function onPointerDown(e: PointerEvent): void {
+  if (e.button !== 0 || !stage) return
+  const region = stage.hitTest(e.clientX, e.clientY)
+  if (!region) return
+  press = { x: e.clientX, y: e.clientY, screenX: e.screenX, region }
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+function onPointerMove(e: PointerEvent): void {
+  if (!press) return
+  if (!dragging && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4) {
+    dragging = true
+    bridge?.dragStart()
+    behavior.dragStart()
+  }
+  if (dragging) {
+    bridge?.dragMove()
+    behavior.dragMove(e.screenX - press.screenX)
+    press.screenX = e.screenX
+  }
+}
+
+function onPointerUp(): void {
+  if (!press) return
+  if (dragging) {
+    bridge?.dragEnd()
+    behavior.dragEnd()
+  } else if (pendingPoke) {
+    clearTimeout(pendingPoke)
+    pendingPoke = 0
+    void openChat()
+  } else {
+    const region = press.region
+    pendingPoke = window.setTimeout(() => {
+      pendingPoke = 0
+      behavior.poke(region)
+    }, DOUBLE_CLICK_MS)
+  }
+  press = null
+  dragging = false
+}
+
+function onContextMenu(e: MouseEvent): void {
+  if (!stage?.hitTest(e.clientX, e.clientY)) return
+  if (bridge) bridge.showMenu()
+  else fileInput.value?.click() // 浏览器调试时直接选文件
+}
+
+function onMouseMove(e: MouseEvent): void {
+  updateHover(e.clientX, e.clientY)
+  if (!bridge) lookAt(e.clientX, e.clientY) // 桌面版的视线由主进程的全局光标驱动
+}
+
+// ---------- 启动 ----------
+
+onMounted(async () => {
+  stage = new Stage(stageEl.value!, behavior)
+  stage.onStep = (dt) => conversation.tick(dt)
+  stage.setAvatar(new PlaceholderAvatar())
+  stage.start()
+  if (import.meta.env.DEV) {
+    // 开发调试入口：控制台里可以直接操作舞台、行为和对话
+    ;(window as unknown as Record<string, unknown>).__aila = { stage, behavior, conversation, openChat }
+    console.log(`[aila] 舞台已启动，渲染器：${stage.rendererInfo()}`)
+  }
+
+  document.addEventListener('mousemove', onMouseMove)
+  bridge?.onCursor((p) => lookAt(p.x, p.y))
+  bridge?.onModelLoaded((data) => void useModel(data))
+  bridge?.onChatOpen(() => void openChat())
+
+  const last = await bridge?.getLastModel()
+  if (last) await useModel(last)
+
+  setTimeout(() => behavior.greet(), 600)
+  setTimeout(() => {
+    if (usingPlaceholder) behavior.say(lines.noModel, 4000)
+  }, 4800)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onMouseMove)
+  conversation.interrupt()
+  stage?.dispose()
+})
+</script>
+
+<template>
+  <div class="root" :class="{ grab: overAvatar }" @contextmenu.prevent="onContextMenu">
+    <div
+      ref="stageEl"
+      class="stage"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+    ></div>
+    <SpeechBubble :text="bubbleText" :visible="bubbleVisible" />
+    <ChatInput v-if="chatOpen" ref="chatInput" @send="onSend" @close="closeChat" />
+    <input ref="fileInput" type="file" accept=".vrm" hidden @change="onFile" />
+  </div>
+</template>
+
+<style>
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  user-select: none;
+}
+
+.root,
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.root.grab {
+  cursor: grab;
+}
+</style>

@@ -1,0 +1,5 @@
+# 仓库里统一用 LF 换行，Windows 上检出时按本机习惯转换
+* text=auto
+*.vrm binary
+*.png binary
+*.jpg binary
