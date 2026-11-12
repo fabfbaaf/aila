@@ -1,20 +1,32 @@
 """大模型接入：兼容 OpenAI 接口的真模型，和不联网的假模型"""
 
 import asyncio
+import json
+import re
 from collections.abc import AsyncIterator
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 import openai
 from openai import AsyncOpenAI
 
 from .config import Settings
 
+Message = dict[str, Any]
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # JSON 字符串，原样来自大模型，可能不合法
+
 
 class ChatModel(Protocol):
     name: str
 
-    def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
-        """流式返回回复文本（可能夹着表情和动作标签）"""
+    def stream(self, messages: list[Message], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str | ToolCall]:
+        """流式返回回复文本（可能夹着表情和动作标签）；要调用工具时，最后给出 ToolCall"""
         ...
 
 
@@ -30,17 +42,37 @@ class OpenAICompatibleModel:
             max_retries=1,
         )
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str | ToolCall]:
+        kwargs: dict[str, Any] = {}
+        if tools:
+            kwargs["tools"] = tools
         response = await self._client.chat.completions.create(
             model=self.name,
             messages=messages,  # type: ignore[arg-type]
             stream=True,
             temperature=0.8,
-            max_tokens=500,
+            max_tokens=800,
+            **kwargs,
         )
+        # 工具调用在流里是分片来的：同一个 index 的参数要拼起来，流结束后才完整
+        pending: dict[int, dict[str, str]] = {}
         async for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                yield delta.content
+            for tc in delta.tool_calls or []:
+                slot = pending.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function and tc.function.name and not slot["name"]:
+                    slot["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    slot["arguments"] += tc.function.arguments
+        for index in sorted(pending):
+            s = pending[index]
+            yield ToolCall(id=s["id"] or f"call_{index}", name=s["name"], arguments=s["arguments"] or "{}")
 
 
 class MockModel:
@@ -51,12 +83,45 @@ class MockModel:
     def __init__(self, delay: float = 0.04) -> None:
         self._delay = delay
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
-        reply = _mock_reply(messages[-1]["content"])
+    async def stream(self, messages: list[Message], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str | ToolCall]:
+        last = messages[-1]
+        names = {t["function"]["name"] for t in tools or []}
+        call: ToolCall | None = None
+
+        if last["role"] == "tool":
+            reply = _mock_summary(str(last["content"]))
+        else:
+            text = str(last["content"])
+            url = re.search(r"https?://[^\s，。]+", text)
+            if url and "read_page" in names:
+                reply = "[nod]好，我看一下。"
+                call = ToolCall("mock-read", "read_page", json.dumps({"url": url.group(0)}))
+            elif any(w in text for w in ("搜", "查一下", "search")) and "web_search" in names:
+                reply = "[think]我查一下……"
+                query = re.sub(r"^(帮我|请)?(搜一下|搜索|搜|查一下)", "", text).strip() or text
+                call = ToolCall("mock-search", "web_search", json.dumps({"query": query}, ensure_ascii=False))
+            else:
+                reply = _mock_reply(text)
+
         # 每 3 个字一块，故意把标签拆开，和真模型一样
         for i in range(0, len(reply), 3):
             await asyncio.sleep(self._delay)
             yield reply[i : i + 3]
+        if call:
+            yield call
+
+
+def _mock_summary(tool_result: str) -> str:
+    """假模型不会真的总结，只把工具结果的第一条有用信息念出来"""
+    for line in tool_result.splitlines():
+        line = line.strip()
+        if line.startswith("1. "):
+            return f"[nod]查到了。第一条是「{line[3:]}」。[relaxed]……我现在是假模型，只能念标题给你听。"
+        if line.startswith("网页标题："):
+            return f"[nod]读完了，标题是「{line[5:]}」。[relaxed]……我现在是假模型，还不会总结。"
+        if line.startswith("读取失败") or line.startswith("网络出错") or line.startswith("请求失败"):
+            return f"[sad]……没读成。{line}"
+    return "[tilt]……工具返回了内容，但我现在是假模型，看不懂。"
 
 
 def _mock_reply(text: str) -> str:

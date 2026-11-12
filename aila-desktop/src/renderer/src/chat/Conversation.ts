@@ -3,7 +3,16 @@ import type { Behavior } from '../behavior/Behavior'
 import { lines } from '../persona/lines'
 import type { ChatStream, ChatTransport } from './transport'
 
-type Item = { kind: 'char'; ch: string } | { kind: 'emotion'; name: Emotion } | { kind: 'action'; name: Gesture }
+type Item =
+  | { kind: 'char'; ch: string }
+  | { kind: 'emotion'; name: Emotion }
+  | { kind: 'action'; name: Gesture }
+  | { kind: 'status'; text: string }
+
+/** 进度提示太长会把气泡撑满，截短 */
+const MAX_STATUS_CHARS = 24
+/** 进度提示至少显示这么久，工具返回很快时也看得清她在干什么 */
+const STATUS_MIN_SECONDS = 0.8
 
 /** 打字速度：不管网络一次来多少字，都按这个节奏一个个说出来 */
 const CHARS_PER_SECOND = 18
@@ -31,6 +40,8 @@ export class Conversation {
    * 标签也留着，大模型看到自己之前用过标签，后面会继续用。
    */
   private spoken = ''
+  /** 正在搜索、阅读时显示在气泡最后一行；她开口说下一句时清掉。不算说出口的话，不进历史 */
+  private status = ''
   private committed = false
   private receiving = false
   private replying = false
@@ -59,6 +70,7 @@ export class Conversation {
     this.queue = []
     this.shown = ''
     this.spoken = ''
+    this.status = ''
     this.committed = false
     this.budget = 0
     this.pause = 0
@@ -96,7 +108,7 @@ export class Conversation {
       return
     }
 
-    this.behavior.setThinking(false)
+    if (!this.status) this.behavior.setThinking(false) // 显示进度时保持思考的样子
     if (this.pause > 0) {
       this.pause -= dt
       this.behavior.setTalking(false)
@@ -113,9 +125,16 @@ export class Conversation {
       } else if (item.kind === 'action') {
         this.behavior.gesture(item.name)
         this.spoken += `[${item.name}]`
+      } else if (item.kind === 'status') {
+        // 说完「我查一下」才显示进度，然后摆出思考的样子等结果
+        this.status = item.text
+        this.behavior.setThinking(true)
+        this.pause = STATUS_MIN_SECONDS
+        changed = true
       } else {
         if (this.budget < 1) break
         this.budget -= 1
+        this.status = ''
         this.shown += item.ch
         this.spoken += item.ch
         changed = true
@@ -124,8 +143,14 @@ export class Conversation {
       }
       this.queue.shift()
     }
-    if (changed) this.onBubble(this.shown, null)
+    if (changed) this.onBubble(this.bubbleText(), null)
     this.behavior.setTalking(this.pause <= 0 && this.queue.length > 0)
+  }
+
+  private bubbleText(): string {
+    if (!this.status) return this.shown
+    const s = this.status.length > MAX_STATUS_CHARS ? this.status.slice(0, MAX_STATUS_CHARS) + '…' : this.status
+    return `${this.shown}${this.shown ? '\n' : ''}（${s}……）`
   }
 
   private onEvent(ev: ChatEvent): void {
@@ -139,6 +164,9 @@ export class Conversation {
         break
       case 'action':
         this.queue.push({ kind: 'action', name: ev.name })
+        break
+      case 'status':
+        this.queue.push({ kind: 'status', text: ev.text })
         break
       case 'done':
         // 收完了，但可能还没说完：等 tick 把队列放空再结束
@@ -164,7 +192,10 @@ export class Conversation {
     this.replying = false
     this.behavior.setTalking(false)
     this.behavior.endReply()
+    this.status = ''
+    // 什么都没说（比如只调了工具就结束）时收起气泡，不让「……」一直挂着
     if (this.shown) this.onBubble(this.shown, Math.min(10000, 2500 + this.shown.length * 80))
+    else this.onBubble('', 0)
   }
 
   private fail(code: ChatErrorCode, detail: string): void {

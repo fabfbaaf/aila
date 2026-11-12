@@ -1,13 +1,17 @@
 import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
+from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import load_settings
-from app.llm import MockModel, OpenAICompatibleModel
-from app.main import ChatMessage, app, build_messages, get_model
+from app.llm import MockModel, OpenAICompatibleModel, ToolCall
+from app.main import ChatMessage, app, build_messages, get_model, get_toolbox
+from app.tools import Toolbox
+from app.tools.search import MockSearch
 
 
 class FakeModel:
@@ -16,9 +20,9 @@ class FakeModel:
     def __init__(self, chunks: list[str], fail: Exception | None = None) -> None:
         self.chunks = chunks
         self.fail = fail
-        self.received: list[dict[str, str]] = []
+        self.received: list[dict[str, Any]] = []
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str | ToolCall]:
         self.received = messages
         for c in self.chunks:
             yield c
@@ -26,8 +30,19 @@ class FakeModel:
             raise self.fail
 
 
+def offline_toolbox() -> Toolbox:
+    """不联网的工具箱：假搜索；读网页时任何请求都返回 404"""
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(404)))
+
+    async def resolve(_: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    return Toolbox(client, MockSearch(), resolve)
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
+    app.dependency_overrides[get_toolbox] = offline_toolbox
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -98,7 +113,7 @@ def test_build_messages_trims_and_merges() -> None:
 
 def test_health(client: TestClient) -> None:
     use_model(FakeModel([]))
-    assert client.get("/health").json() == {"ok": True, "model": "fake"}
+    assert client.get("/health").json() == {"ok": True, "model": "fake", "tools": ["web_search", "read_page"]}
 
 
 def test_unreachable_model_is_reported_as_network_error(client: TestClient) -> None:

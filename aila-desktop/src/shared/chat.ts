@@ -15,6 +15,8 @@ export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'emotion'; name: Emotion }
   | { type: 'action'; name: Gesture }
+  /** 她在用工具（搜索、读网页），text 是给用户看的进度，比如「正在搜索「xxx」」 */
+  | { type: 'status'; text: string }
   | { type: 'done' }
   | { type: 'error'; code: ChatErrorCode; message: string }
 

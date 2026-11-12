@@ -8,7 +8,7 @@
 - [x] 透明置顶桌面窗口，鼠标只在角色身上生效，其他地方穿透到桌面
 - [x] VRM 3D 角色：待机呼吸眨眼、视线跟随全屏鼠标、点击反应、拖动贴边、犯困
 - [x] 文字对话：流式回复按说话节奏输出，表情和动作与对应句子同步，可打断
-- [ ] 联网搜索和网页阅读
+- [x] 联网搜索和网页阅读：她自己判断要不要查，查的时候气泡显示进度；读链接有 SSRF 防护（开着代理的 fake-ip 模式也拦得住）
 - [ ] 语音：唤醒词「你好艾拉」、识别、合成、口型同步、语音打断
 - [ ] 账号与对话同步（Spring Boot）、长期记忆、个人知识库
 - [ ] 浏览器操作、工具调用、屏幕感知报错
@@ -18,7 +18,7 @@
 
 ```
 aila-desktop/   桌面端：Electron + Vue 3 + Three.js（@pixiv/three-vrm）
-aila-ai/        本地 AI 服务：Python + FastAPI，调用大模型、解析表情动作标签
+aila-ai/        本地 AI 服务：Python + FastAPI，调用大模型、工具调用（搜索、读网页）、解析表情动作标签
 ```
 
 后面还会加 Spring Boot 云端服务。
@@ -32,7 +32,7 @@ aila-ai/        本地 AI 服务：Python + FastAPI，调用大模型、解析�
 cd aila-ai
 py -3.12 -m venv .venv
 .venv\Scripts\pip install -r requirements-dev.txt
-copy .env.example .env          # 填大模型密钥；不填就用内置假模型
+copy .env.example .env          # 填大模型密钥（和可选的搜索密钥）；不填就用内置假模型
 .venv\Scripts\python -m app     # 监听 127.0.0.1:8765
 
 # 2. 桌面端（另开一个终端）
@@ -52,10 +52,10 @@ npm run dev
 │    主进程：窗口、快捷键、转发对话请求      │
 │                 │ HTTP + SSE              │
 │  aila-ai（FastAPI，只监听本机）           │
-│    人设提示词、流式标签解析、错误归类      │
-└─────────────────┼─────────────────────────┘
-                  │ OpenAI 兼容接口
-           大模型（DeepSeek 等）
+│    人设提示词、工具调用循环、标签解析      │
+└──────────┼───────────────────┼────────────┘
+           │ OpenAI 兼容接口   │ HTTPS（只许公网地址）
+    大模型（DeepSeek 等）   搜索服务（博查/Tavily）、网页
 ```
 
 各部分的设计说明见子目录的 README。
