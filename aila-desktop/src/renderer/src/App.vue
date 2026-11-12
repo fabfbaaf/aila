@@ -4,13 +4,18 @@ import { Vector3 } from 'three'
 import SpeechBubble from './components/SpeechBubble.vue'
 import ChatInput from './components/ChatInput.vue'
 import { Behavior } from './behavior/Behavior'
-import { Conversation } from './chat/Conversation'
+import { Conversation, type Voice } from './chat/Conversation'
 import { createTransport } from './chat/transport'
 import { Stage, type HitRegion } from './scene/Stage'
 import { PlaceholderAvatar } from './avatar/PlaceholderAvatar'
 import { loadVrmAvatar } from './avatar/VrmAvatar'
 import { lines } from './persona/lines'
 import { bridge } from './platform/bridge'
+import { Speaker } from './voice/Speaker'
+import { VoiceController } from './voice/VoiceController'
+import { VoiceLink } from './voice/VoiceLink'
+import { MIC_SAMPLE_RATE } from './voice/Microphone'
+import type { VoiceMenuAction } from '../../shared/voice'
 
 const stageEl = ref<HTMLDivElement>()
 const fileInput = ref<HTMLInputElement>()
@@ -21,7 +26,26 @@ const overAvatar = ref(false)
 const chatOpen = ref(false)
 
 const behavior = new Behavior()
-const conversation = new Conversation(behavior, createTransport())
+const transport = createTransport()
+const speaker = new Speaker()
+/** 她的「嗓子」：合成走 AI 服务，播放和口型在本地 */
+const voice: Voice = {
+  get enabled() {
+    return voiceControl.speakEnabled
+  },
+  synthesize: async (text) => {
+    const wav = await transport.synthesize(text)
+    return wav ? speaker.decode(wav) : null
+  },
+  play: (buffer) => speaker.play(buffer),
+  stop: () => speaker.stop(),
+  get playing() {
+    return speaker.playing
+  },
+  mouth: () => speaker.mouth()
+}
+const conversation = new Conversation(behavior, transport, voice)
+const voiceControl = new VoiceController(behavior, conversation, speaker, new VoiceLink(transport.voiceUrl))
 let stage: Stage | null = null
 let usingPlaceholder = true
 let bubbleTimer = 0
@@ -37,6 +61,21 @@ function showBubble(text: string, holdMs: number | null): void {
 
 behavior.onSay = showBubble
 conversation.onBubble = showBubble
+voiceControl.onBubble = showBubble
+
+function onVoiceMenu(action: VoiceMenuAction): void {
+  if (action === 'toggle-wake') void voiceControl.toggleWake()
+  else if (action === 'toggle-speak') voiceControl.toggleSpeak()
+  else void voiceControl.listenNow()
+}
+
+/** 调试：用她自己的合成声音模拟用户说一句话，整条语音链路照常走一遍（不需要麦克风） */
+async function hear(text: string): Promise<void> {
+  const wav = await transport.synthesize(text)
+  if (!wav) return
+  const audio = await new OfflineAudioContext(1, 1, MIC_SAMPLE_RATE).decodeAudioData(wav) // 顺便重采样到 16kHz
+  await voiceControl.simulate(audio.getChannelData(0))
+}
 
 // ---------- 对话框 ----------
 
@@ -158,7 +197,7 @@ function onPointerUp(): void {
 
 function onContextMenu(e: MouseEvent): void {
   if (!stage?.hitTest(e.clientX, e.clientY)) return
-  if (bridge) bridge.showMenu()
+  if (bridge) bridge.showMenu(voiceControl.menuState())
   else fileInput.value?.click() // 浏览器调试时直接选文件
 }
 
@@ -175,8 +214,16 @@ onMounted(async () => {
   stage.setAvatar(new PlaceholderAvatar())
   stage.start()
   if (import.meta.env.DEV) {
-    // 开发调试入口：控制台里可以直接操作舞台、行为和对话
-    ;(window as unknown as Record<string, unknown>).__aila = { stage, behavior, conversation, openChat }
+    // 开发调试入口：控制台里可以直接操作舞台、行为、对话和语音
+    ;(window as unknown as Record<string, unknown>).__aila = {
+      stage,
+      behavior,
+      conversation,
+      openChat,
+      voice: voiceControl,
+      speaker,
+      hear
+    }
     console.log(`[aila] 舞台已启动，渲染器：${stage.rendererInfo()}`)
   }
 
@@ -184,6 +231,8 @@ onMounted(async () => {
   bridge?.onCursor((p) => lookAt(p.x, p.y))
   bridge?.onModelLoaded((data) => void useModel(data))
   bridge?.onChatOpen(() => void openChat())
+  bridge?.onVoiceMenu(onVoiceMenu)
+  void voiceControl.init()
 
   const last = await bridge?.getLastModel()
   if (last) await useModel(last)
@@ -197,6 +246,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onMouseMove)
   conversation.interrupt()
+  voiceControl.dispose()
   stage?.dispose()
 })
 </script>

@@ -19,6 +19,14 @@ class Settings:
     host: str
     port: int
     max_history: int
+    voice: bool
+    models_dir: Path
+    tts_engine: str
+    tts_speaker: int
+    tts_speed: float
+    wake_threshold: float
+    end_silence: float
+    asr_language: str
 
     @property
     def mock(self) -> bool:
@@ -36,4 +44,12 @@ def load_settings() -> Settings:
         host=os.getenv("AILA_HOST", "127.0.0.1"),
         port=int(os.getenv("AILA_PORT", "8765")),
         max_history=int(os.getenv("AILA_MAX_HISTORY", "20")),
+        voice=os.getenv("AILA_VOICE", "on").strip().lower() not in ("off", "0", "false"),
+        models_dir=Path(os.getenv("AILA_MODELS_DIR", str(Path(__file__).resolve().parent.parent / "models"))),
+        tts_engine=os.getenv("AILA_TTS_ENGINE", "melo").strip().lower(),
+        tts_speaker=int(os.getenv("AILA_TTS_SPEAKER", "0")),
+        tts_speed=float(os.getenv("AILA_TTS_SPEED", "1.0")),
+        wake_threshold=float(os.getenv("AILA_WAKE_THRESHOLD", "0.25")),
+        end_silence=float(os.getenv("AILA_END_SILENCE", "0.4")),
+        asr_language=os.getenv("AILA_ASR_LANGUAGE", "zh").strip().lower(),
     )

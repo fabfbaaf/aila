@@ -16,6 +16,7 @@ export default defineConfig({
     proxy: {
       '/ai': {
         target: 'http://127.0.0.1:8765',
+        ws: true, // 语音的 WebSocket 也转过去
         rewrite: (p) => p.replace(/^\/ai/, ''),
         // 连不上 AI 服务时回 502（Vite 默认回 500），好和「服务内部出错」区分开
         configure: (proxy) =>

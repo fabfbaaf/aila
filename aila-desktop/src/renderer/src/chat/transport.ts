@@ -9,6 +9,10 @@ export interface ChatStream {
 /** 把对话历史发给本地 AI 服务，事件按顺序回调，最后一定是 done 或 error（取消后不再回调） */
 export interface ChatTransport {
   start(messages: ChatMessage[], onEvent: (ev: ChatEvent) => void): ChatStream
+  /** 一句话转语音，返回 WAV；没有能念的内容时返回 null，服务不可用时抛错 */
+  synthesize(text: string): Promise<ArrayBuffer | null>
+  /** 语音（耳朵）的 WebSocket 地址 */
+  voiceUrl: string
 }
 
 /** 桌面版：请求由主进程发出再转发回来 */
@@ -33,7 +37,10 @@ function desktopTransport(api: AilaApi): ChatTransport {
           api.chatCancel(id)
         }
       }
-    }
+    },
+    synthesize: (text) => api.synthesize(text),
+    // WebSocket 不受跨域限制，CSP 也允许 ws:，渲染层直接连；服务端会检查 Origin
+    voiceUrl: api.aiUrl.replace(/^http/, 'ws') + '/voice'
   }
 }
 
@@ -44,7 +51,18 @@ function webTransport(): ChatTransport {
       const controller = new AbortController()
       void streamChat('/ai', messages, controller.signal, onEvent)
       return { cancel: () => controller.abort() }
-    }
+    },
+    synthesize: async (text) => {
+      const res = await fetch('/ai/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+      if (res.status === 204) return null
+      if (!res.ok) throw new Error(`语音合成返回 ${res.status}`)
+      return res.arrayBuffer()
+    },
+    voiceUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ai/voice`
   }
 }
 

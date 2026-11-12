@@ -113,7 +113,11 @@ def test_build_messages_trims_and_merges() -> None:
 
 def test_health(client: TestClient) -> None:
     use_model(FakeModel([]))
-    assert client.get("/health").json() == {"ok": True, "model": "fake", "tools": ["web_search", "read_page"]}
+    body = client.get("/health").json()
+    assert body["ok"] is True
+    assert body["model"] == "fake"
+    assert body["tools"] == ["web_search", "read_page"]
+    assert set(body["voice"]) == {"ears", "tts"}
 
 
 def test_unreachable_model_is_reported_as_network_error(client: TestClient) -> None:

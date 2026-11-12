@@ -1,12 +1,21 @@
 import type { Object3D, Vector3 } from 'three'
 
-/** 用到的表情，名字和 VRM 1.0 的预设表情一致（aa = 张嘴说「啊」的口型） */
-export type ExpressionName = 'happy' | 'sad' | 'surprised' | 'relaxed' | 'blink' | 'aa'
+/** 五个元音口型，名字和 VRM 1.0 一致：啊、衣、乌、诶、哦 */
+export type Vowel = 'aa' | 'ih' | 'ou' | 'ee' | 'oh'
+export const VOWELS: readonly Vowel[] = ['aa', 'ih', 'ou', 'ee', 'oh']
+export type Mouth = Record<Vowel, number>
+
+/** 用到的表情，名字和 VRM 1.0 的预设表情一致 */
+export type ExpressionName = 'happy' | 'sad' | 'surprised' | 'relaxed' | 'blink' | Vowel
 
 export type Expressions = Record<ExpressionName, number>
 
 export function emptyExpressions(): Expressions {
-  return { happy: 0, sad: 0, surprised: 0, relaxed: 0, blink: 0, aa: 0 }
+  return { happy: 0, sad: 0, surprised: 0, relaxed: 0, blink: 0, aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 }
+}
+
+export function closedMouth(): Mouth {
+  return { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 }
 }
 
 /** 行为系统每帧算出的姿态，角色只负责把它画出来 */

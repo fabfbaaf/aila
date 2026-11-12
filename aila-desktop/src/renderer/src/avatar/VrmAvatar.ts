@@ -1,11 +1,12 @@
 import { Object3D, Vector3 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM, type VRMHumanBoneName } from '@pixiv/three-vrm'
-import type { Avatar, ExpressionName, Expressions, PoseState } from './types'
+import { VOWELS, type Avatar, type ExpressionName, type Expressions, type PoseState } from './types'
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 
-const EXPRESSIONS: ExpressionName[] = ['happy', 'sad', 'surprised', 'relaxed', 'blink', 'aa']
+// VRM 0.x 的 A/I/U/E/O 口型，three-vrm 加载时会映射成 aa/ih/ou/ee/oh
+const EXPRESSIONS: ExpressionName[] = ['happy', 'sad', 'surprised', 'relaxed', 'blink', ...VOWELS]
 
 /** 从 VRoid Studio 等工具导出的 .vrm 文件加载角色 */
 export async function loadVrmAvatar(data: ArrayBuffer): Promise<VrmAvatar> {

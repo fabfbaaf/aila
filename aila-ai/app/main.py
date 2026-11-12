@@ -1,14 +1,23 @@
-"""HTTP 接口：桌面端发来对话历史，这里流式返回文字、表情、动作和进度事件（SSE）"""
+"""HTTP 接口：
+- POST /chat：桌面端发来对话历史，流式返回文字、表情、动作和进度事件（SSE）
+- POST /tts：一句话转语音（WAV）
+- WS /voice：麦克风音频进来，唤醒、说话开始/结束、识别结果出去
+"""
 
+import asyncio
 import json
 import logging
+import os
+import re
+import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -19,6 +28,7 @@ from .persona import SYSTEM_PROMPT
 from .tags import Event
 from .tools import Toolbox
 from .tools.search import BochaSearch, MockSearch, SearchProvider, TavilySearch
+from .voice import float_to_wav, pcm16_to_float
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("aila")
@@ -30,11 +40,15 @@ http_client = httpx.AsyncClient()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # 语音模型加载要几秒，放到后台，文字对话不用等
+    preload = asyncio.gather(asyncio.to_thread(get_ears), asyncio.to_thread(get_voice)) if settings.voice else None
     yield
+    if preload:
+        await preload
     await http_client.aclose()
 
 
-app = FastAPI(title="艾拉 AI 服务", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="艾拉 AI 服务", version="0.3.0", lifespan=lifespan)
 
 
 @lru_cache
@@ -58,6 +72,63 @@ def get_toolbox() -> Toolbox:
         search = MockSearch()  # 假模型配假搜索，整条链路不联网也能调
     log.info("联网搜索：%s", search.name if search else "未配置（只能读用户给的链接）")
     return Toolbox(http_client, search)
+
+
+# ---------- 语音模型：第一次用到时加载，加载失败就关掉语音，不影响文字对话 ----------
+
+# /health 用：loading / ready / off / 出错原因
+voice_status: dict[str, str] = {"ears": "off", "tts": "off"}
+_ears_lock, _voice_lock = threading.Lock(), threading.Lock()
+
+
+def _load(kind: str, build: Any) -> Any:
+    if not settings.voice:
+        voice_status[kind] = "off"
+        return None
+    voice_status[kind] = "loading"
+    try:
+        t0 = time.perf_counter()
+        obj = build()
+        voice_status[kind] = "ready"
+        log.info("语音模型（%s）加载完成，%.1f 秒", kind, time.perf_counter() - t0)
+        return obj
+    except Exception as err:  # 缺模型、配置写错：语音不可用，但服务照常启动
+        voice_status[kind] = str(err)
+        log.warning("语音模型（%s）加载失败：%s", kind, err)
+        return None
+
+
+@lru_cache
+def _ears() -> Any:
+    from .voice.engines import EarConfig, Ears  # sherpa-onnx 只在用到语音时才导入
+
+    cfg = EarConfig(
+        settings.models_dir,
+        wake_threshold=settings.wake_threshold,
+        end_silence=settings.end_silence,
+        language=settings.asr_language,
+    )
+    return _load("ears", lambda: Ears(cfg))
+
+
+@lru_cache
+def _voice() -> Any:
+    from .voice.tts import TtsConfig, Voice
+
+    # 合成越快她开口越早：用一半逻辑核，最多 8 个（实测 4 → 8 线程，短句 330 → 230 毫秒）
+    threads = min(8, max(2, (os.cpu_count() or 4) // 2))
+    cfg = TtsConfig(settings.models_dir, settings.tts_engine, settings.tts_speaker, settings.tts_speed, threads)
+    return _load("tts", lambda: Voice(cfg))
+
+
+def get_ears() -> Any:
+    with _ears_lock:  # 后台预加载和第一个请求可能同时到，只加载一次
+        return _ears()
+
+
+def get_voice() -> Any:
+    with _voice_lock:
+        return _voice()
 
 
 class ChatMessage(BaseModel):
@@ -90,7 +161,12 @@ def sse(event: Event) -> str:
 
 @app.get("/health")
 def health(model: ChatModel = Depends(get_model), toolbox: Toolbox = Depends(get_toolbox)) -> dict[str, object]:
-    return {"ok": True, "model": model.name, "tools": [t["function"]["name"] for t in toolbox.specs]}
+    return {
+        "ok": True,
+        "model": model.name,
+        "tools": [t["function"]["name"] for t in toolbox.specs],
+        "voice": dict(voice_status),
+    }
 
 
 @app.post("/chat")
@@ -115,3 +191,67 @@ async def chat(
 
     # 客户端断开时 Starlette 会取消这个生成器，大模型请求和工具调用也随之停止
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
+
+
+@app.post("/tts")
+async def tts(req: TtsRequest, voice: Any = Depends(get_voice)) -> Response:
+    """一句话转语音。没有能念的内容（只有标点、网址）时返回 204"""
+    if voice is None:
+        raise HTTPException(status_code=503, detail=f"语音合成不可用：{voice_status['tts']}")
+    t0 = time.perf_counter()
+    samples = await asyncio.to_thread(voice.synthesize, req.text, req.speed)
+    if samples is None:
+        return Response(status_code=204)
+    ms = round((time.perf_counter() - t0) * 1000)
+    return Response(float_to_wav(samples, voice.sample_rate), media_type="audio/wav", headers={"X-Synth-Ms": str(ms)})
+
+
+# 浏览器里任何网页都能连 ws://127.0.0.1，所以只接受本机页面和桌面端（没有 Origin 或 file://）
+LOCAL_ORIGIN = re.compile(r"^(https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?|file://|null)$")
+
+
+@app.websocket("/voice")
+async def voice_ws(ws: WebSocket, ears: Any = Depends(get_ears)) -> None:
+    """二进制消息：16kHz 单声道 16 位 PCM。文本消息：{"type": "mode", "mode": "off|wake|listen"}"""
+    origin = ws.headers.get("origin")
+    if origin and not LOCAL_ORIGIN.match(origin):
+        log.warning("拒绝了来自 %s 的语音连接", origin)
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    if ears is None:
+        await ws.send_json({"type": "error", "message": f"语音识别不可用：{voice_status['ears']}"})
+        await ws.close()
+        return
+
+    listener = ears.new_listener()
+    await ws.send_json({"type": "ready", "mode": listener.mode})
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                # 识别要一两百毫秒，放到线程里；同一条连接按顺序处理
+                for event in await asyncio.to_thread(listener.feed, pcm16_to_float(msg["bytes"])):
+                    await ws.send_json(event)
+            elif msg.get("text"):
+                cmd = _parse_command(msg["text"])
+                if cmd.get("type") == "mode" and cmd.get("mode") in ("off", "wake", "listen"):
+                    listener.set_mode(cmd["mode"])
+                    await ws.send_json({"type": "mode", "mode": listener.mode})
+    except WebSocketDisconnect:
+        pass
+
+
+def _parse_command(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}

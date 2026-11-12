@@ -22,7 +22,17 @@ export const lines = {
   sleepy: ['……（小小地打了个哈欠）'],
   noModel: '……我的样子还没做好。右键可以加载 VRM 模型。',
   modelLoaded: '……换好了。这样可以吗？',
-  modelFailed: '对不起……这个模型我打不开。'
+  modelFailed: '对不起……这个模型我打不开。',
+
+  // 语音
+  listening: '（在听……）',
+  wakeHere: ['……我在。有什么需要吗？', '……嗯，我在听。'],
+  wakeOn: '……好。叫我「你好艾拉」就可以了。',
+  wakeOff: '……那我先不听了。',
+  speakOn: '……以后我会出声说话。',
+  speakOff: '……那我只打字。',
+  micDenied: '……我听不到声音。请检查麦克风权限。',
+  earsUnavailable: '……我的耳朵还没准备好。请先下载语音模型，再重启 aila-ai。'
 }
 
 export function greeting(hour: number): string {

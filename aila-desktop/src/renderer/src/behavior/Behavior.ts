@@ -1,6 +1,6 @@
 import { Vector3 } from 'three'
 import type { Emotion, Gesture } from '../../../shared/chat'
-import { emptyExpressions, type Expressions, type PoseState } from '../avatar/types'
+import { emptyExpressions, VOWELS, type Expressions, type Mouth, type PoseState } from '../avatar/types'
 import { greeting, lines, pick } from '../persona/lines'
 
 type Offsets = Pick<PoseState, 'headPitch' | 'headYaw' | 'headRoll' | 'bodyLean' | 'bodySway'>
@@ -92,8 +92,11 @@ export class Behavior {
   /** 对话中的表情：一直保持到这次回复说完，之后几秒淡出 */
   private mood: { expr: Partial<Expressions>; until: number } | null = null
   private thinking = false
+  private listening = false
   private talking = false
   private talkT = 0
+  /** 出声说话时由声音算出的口型；没有声音时用 talking 的假口型 */
+  private mouth: Mouth | null = null
 
   constructor(cfg: Partial<BehaviorConfig> = {}) {
     this.cfg = { ...DEFAULT_CONFIG, ...cfg }
@@ -122,9 +125,34 @@ export class Behavior {
     else this.lookAtUser()
   }
 
-  /** 正在说话：嘴巴一张一合 */
+  /** 正在说话（没有声音时）：嘴巴一张一合 */
   setTalking(on: boolean): void {
     this.talking = on
+  }
+
+  /** 出声说话：口型跟着声音走，每帧更新；null 表示闭嘴 */
+  setMouth(mouth: Mouth | null): void {
+    this.mouth = mouth
+  }
+
+  /** 听到唤醒词：抬头看向你、轻轻点头 */
+  hearWake(): void {
+    this.markActive()
+    this.lookAtUser()
+    this.play([
+      { dur: 0.22, expr: { surprised: 0.25 }, pose: { headPitch: -0.08 } },
+      { dur: 0.3, expr: { relaxed: 0.25 }, pose: { headPitch: 0.14 } },
+      { dur: 0.6, expr: { relaxed: 0.25 }, pose: { headPitch: 0.02 } }
+    ])
+  }
+
+  /** 用户在说话：看着用户，微微歪头听 */
+  setListening(on: boolean): void {
+    this.listening = on
+    if (on) {
+      this.markActive()
+      this.lookAtUser()
+    }
   }
 
   emote(name: Emotion): void {
@@ -257,6 +285,12 @@ export class Behavior {
       else this.mood = null
     }
 
+    if (this.listening) {
+      exprTarget.relaxed = Math.max(exprTarget.relaxed, 0.2)
+      offsetTarget.headRoll = 0.07
+      offsetTarget.headPitch = 0.03
+    }
+
     if (this.thinking) {
       exprTarget.relaxed = Math.max(exprTarget.relaxed, 0.15)
       offsetTarget.headRoll = -0.08
@@ -280,8 +314,10 @@ export class Behavior {
       this.dragVel *= Math.exp(-6 * dt)
     }
 
-    // 说话的口型：两个不同频率的波叠起来，开合大小不规律，看起来更自然（有了语音后换成按音量驱动）
-    if (this.talking) {
+    // 说话的口型：出声时由声音驱动五个元音；只打字时用两个不同频率的波叠起来，开合不规律，看起来更自然
+    if (this.mouth) {
+      Object.assign(exprTarget, this.mouth)
+    } else if (this.talking) {
       this.talkT += dt
       const wave = Math.abs(Math.sin(this.talkT * 11)) * (0.65 + 0.35 * Math.sin(this.talkT * 3.7))
       exprTarget.aa = 0.12 + 0.5 * wave
@@ -289,7 +325,7 @@ export class Behavior {
 
     // 平滑过渡，避免动作生硬跳变；嘴巴要跟得上说话节奏，单独用快一点的速度
     for (const k of Object.keys(exprTarget) as (keyof Expressions)[]) {
-      this.expr[k] = approach(this.expr[k], exprTarget[k], k === 'aa' ? 30 : 12, dt)
+      this.expr[k] = approach(this.expr[k], exprTarget[k], (VOWELS as readonly string[]).includes(k) ? 30 : 12, dt)
     }
     for (const k of Object.keys(offsetTarget) as (keyof Offsets)[]) {
       this.pose[k] = approach(this.pose[k], offsetTarget[k], 8, dt)

@@ -130,11 +130,10 @@ export class PlaceholderAvatar implements Avatar {
     }
     const blush = clamp(expr.relaxed * 0.8 + expr.happy * 0.3, 0, 0.85)
     for (const b of this.blush) (b.material as MeshBasicMaterial).opacity = blush
-    this.mouth.scale.set(
-      0.028 * (1 + 0.5 * expr.happy - 0.35 * expr.surprised - 0.25 * expr.sad),
-      0.006 + 0.016 * expr.surprised + 0.02 * expr.aa,
-      0.01
-    )
+    // 口型：张开程度看 aa/oh，嘴角宽窄看 ih/ee（咧开）和 ou/oh（嘟起）
+    const opening = expr.aa + 0.7 * expr.oh + 0.35 * expr.ee + 0.25 * expr.ih + 0.3 * expr.ou
+    const width = 1 + 0.5 * expr.happy - 0.35 * expr.surprised - 0.25 * expr.sad + 0.3 * (expr.ih + expr.ee) - 0.4 * (expr.ou + expr.oh)
+    this.mouth.scale.set(0.028 * width, 0.006 + 0.016 * expr.surprised + 0.02 * opening, 0.01)
   }
 
   getNeckWorldPosition(target: Vector3): Vector3 {

@@ -1,6 +1,7 @@
 # aila-ai：艾拉的本地 AI 服务
 
 桌面端把对话历史发过来，这里调用大模型，需要时让她搜索、读网页，把回复里的表情、动作标签拆出来，用 SSE 流式推回去。
+语音也在这里：听（唤醒词、断句、识别）和说（合成），全部在本机 CPU 上跑，声音不出这台电脑。
 只监听 `127.0.0.1`，不对外开放。
 
 ## 运行
@@ -9,11 +10,14 @@
 cd aila-ai
 py -3.12 -m venv .venv
 .venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\python scripts\download_models.py   # 语音模型，约 370MB，只需一次
 copy .env.example .env      # 填 LLM_API_KEY；不填就用假模型
 .venv\Scripts\python -m app # 监听 127.0.0.1:8765
 ```
 
-测试：`.venv\Scripts\python -m pytest`
+测试：`.venv\Scripts\python -m pytest`（下载了语音模型时，会额外用真实模型跑一遍「合成 → 唤醒 → 识别」）
+
+没下载语音模型也能启动，只是语音不可用（`/health` 里会写原因）。
 
 ### 联网搜索
 
@@ -54,7 +58,19 @@ data: {"type": "done"}
 | `done` | 正常结束 |
 | `error` | 出错，最后一个事件：`{"code": "auth" \| "rate_limit" \| "quota" \| "network" \| "unknown", "message": "..."}` |
 
-`GET /health` → `{"ok": true, "model": "deepseek-chat", "tools": ["web_search", "read_page"]}`
+`GET /health` → `{"ok": true, "model": "deepseek-chat", "tools": ["web_search", "read_page"], "voice": {"ears": "ready", "tts": "ready"}}`
+
+`POST /tts`：`{"text": "我查一下。"}` → `audio/wav`（响应头 `X-Synth-Ms` 是合成耗时）；没有能念的内容（只有标点、网址）时返回 204。
+
+`WS /voice`：上行二进制消息是 16kHz 单声道 16 位 PCM（建议 100ms 一块），文本消息 `{"type": "mode", "mode": "off" | "wake" | "listen"}` 切换模式。下行事件：
+
+| 事件 | 含义 |
+|---|---|
+| `ready` / `mode` | 连上了 / 模式切换了 |
+| `wake` | 听到「你好艾拉」，自动切到 listen |
+| `speech_start` | 开始说话（她正在说话时，桌面端据此压低音量） |
+| `speech_end` | 说完一段，紧跟着 `transcript`（识别结果）或 `empty`（没听出内容） |
+| `error` | 语音模型不可用 |
 
 ## 设计
 
@@ -83,6 +99,28 @@ data: {"type": "done"}
 
 已知不足：检查和真正连接是两次解析，中间有极小的 DNS 重绑定窗口；对桌面助手来说可以接受。
 
+### 语音
+
+目标是从说完到她开口不超过 1.5 秒。链路：唤醒词 → 断句 → 识别 →（大模型）→ 按句合成。全部用 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 跑在 CPU 上，不需要显卡。
+
+| 环节 | 模型 | 实测（Ryzen 7 H 255） |
+|---|---|---|
+| 唤醒 | Zipformer 关键词识别（3M 参数），关键词写成拼音 `n ǐ h ǎo ài l ā` | 每 100ms 音频 1–20ms |
+| 断句 | Silero VAD，停顿 0.4 秒算说完 | 可忽略 |
+| 识别 | SenseVoice（int8，2024-07-17 版） | 一句 3 秒的话 150–300ms |
+| 合成 | MeloTTS（中英混读） | 短句约 230ms，长句 0.4–0.6 秒（8 线程） |
+
+用假模型实测「说完到开口」P50 约 1.6 秒（断句等待 400 + 识别约 200 + 回复和首句合成约 900）；换真模型后中间那段取决于大模型首字速度。
+
+几个选择：
+
+- **合成引擎实测后选 MeloTTS**：Kokoro 音色多，但 int8 版在 CPU 上比实时还慢（RTF 1.4），非量化版 RTF 0.5、短句 0.65 秒起；Matcha 最快（短句 0.1 秒），但只会中文，`Python`、`Vue` 这种词直接跳过，程序员聊天用不了。MeloTTS RTF 0.3、中英混读、MIT 许可。文档原计划的 CosyVoice 要 PyTorch 和 CUDA，Windows 上难装，开源后别人也跑不起来，留作以后的高音质选项。
+- **识别模型用 2024 版**：2025-09-09 版在 sherpa-onnx 2.0 下语种参数不生效，中文、英文全被当成粤语识别；2024-07-17 版中英混说「帮我搜一下 python3.13 新特性」能完整识别，还会加标点、把数字写成阿拉伯数字。语种设成 `zh` 后「等一下」这种短句也准了。
+- **唤醒词和指令可以一口气说**：唤醒器一直缓存最近 2 秒音频，听到唤醒词后把这 2 秒也交给断句，所以「你好艾拉，明天天气怎么样」不会丢掉后半句；识别结果里再把唤醒词去掉。只说了唤醒词时返回 `empty`，桌面端让她回一声「我在」。
+- **没唤醒时只跑唤醒词识别**：断句和识别都不运行，CPU 占用很低，说的话也不会被识别成文字。
+- **WebSocket 检查 Origin**：浏览器里任何网页都能连 `ws://127.0.0.1`，所以只接受本机页面、桌面端（`file://`）和没有 Origin 的客户端。
+- **模型后台加载**：服务启动时在后台加载语音模型（约 2.5 秒），这期间文字对话照常可用；加载失败只关掉语音，不影响别的。
+
 ## 目录
 
 ```
@@ -97,5 +135,12 @@ app/
     __init__.py    工具定义、执行、进度文字
     search.py      搜索服务（博查 / Tavily / 假搜索）
     reader.py      读网页：地址检查、跳转、正文提取
-tests/             标签解析、接口、工具调用循环、搜索解析、读网页安全检查
+  voice/
+    listener.py    「耳朵」的状态机：等唤醒词 / 断句识别，模型可替换
+    engines.py     sherpa-onnx 的唤醒、断句、识别
+    tts.py         「嗓子」：三种合成引擎、念之前清理文字
+    audio.py       PCM、WAV 格式转换
+scripts/
+  download_models.py  下载语音模型
+tests/             标签解析、接口、工具调用、搜索、读网页安全、语音状态机、语音接口、真实模型
 ```

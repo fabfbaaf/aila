@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, screen } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, screen, session } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { AI_SERVICE_URL, streamChat, type ChatMessage } from '../shared/chat'
+import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 
 // 桌面窗口：透明、无边框、置顶，只在角色身上响应鼠标
 const WIN_WIDTH = 300
@@ -9,6 +10,8 @@ const WIN_HEIGHT = 480
 const SNAP_DISTANCE = 24
 /** 随时叫出对话框的全局快捷键（A = Aila） */
 const CHAT_SHORTCUT = 'Alt+Shift+A'
+/** 不用唤醒词，直接开始听（V = Voice） */
+const LISTEN_SHORTCUT = 'Alt+Shift+V'
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
 
 let win: BrowserWindow | null = null
@@ -146,6 +149,38 @@ function openChat(): void {
   win.webContents.send('chat:open')
 }
 
+function voiceMenu(action: VoiceMenuAction): void {
+  win?.webContents.send('voice:menu', action)
+}
+
+// ---------- 麦克风权限：只给自己的页面 ----------
+
+function isOwnPage(url: string): boolean {
+  const dev = process.env['ELECTRON_RENDERER_URL']
+  return dev ? url.startsWith(dev) : url.startsWith('file://')
+}
+
+function restrictPermissions(): void {
+  const ses = session.defaultSession
+  ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    callback(permission === 'media' && isOwnPage(details.requestingUrl))
+  })
+  ses.setPermissionCheckHandler((_wc, permission, origin) => permission === 'media' && isOwnPage(origin))
+}
+
+// ---------- 语音合成：和对话一样由主进程转发 ----------
+
+async function synthesize(text: string): Promise<ArrayBuffer | null> {
+  const res = await fetch(`${AI_URL}/tts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text })
+  })
+  if (res.status === 204) return null
+  if (!res.ok) throw new Error(`语音合成返回 ${res.status}`)
+  return res.arrayBuffer()
+}
+
 // ---------- 对话：转发给本地 AI 服务 ----------
 // 由主进程发请求，渲染层不用放开 CSP 和跨域，打包后也一样能用
 
@@ -189,11 +224,16 @@ function registerIpc(): void {
 
   ipcMain.on('chat:start', (_e, id: number, messages: ChatMessage[]) => void relayChat(id, messages))
   ipcMain.on('chat:cancel', (_e, id: number) => chats.get(id)?.abort())
+  ipcMain.handle('tts:synthesize', (_e, text: string) => synthesize(text))
 
-  ipcMain.on('menu:show', () => {
+  ipcMain.on('menu:show', (_e, voice: VoiceMenuState) => {
     if (!win) return
     Menu.buildFromTemplate([
       { label: '和她说话', accelerator: CHAT_SHORTCUT, click: openChat },
+      { label: '听我说', accelerator: LISTEN_SHORTCUT, click: () => voiceMenu('listen') },
+      { type: 'separator' },
+      { label: '语音唤醒「你好艾拉」', type: 'checkbox', checked: voice.wake, click: () => voiceMenu('toggle-wake') },
+      { label: '出声说话', type: 'checkbox', checked: voice.speak, click: () => voiceMenu('toggle-speak') },
       { type: 'separator' },
       { label: '加载 VRM 模型…', click: () => void chooseModel() },
       { label: '回到右下角', click: resetPosition },
@@ -208,10 +248,14 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
+  restrictPermissions()
   registerIpc()
   createWindow()
   if (!globalShortcut.register(CHAT_SHORTCUT, openChat)) {
     console.warn(`快捷键 ${CHAT_SHORTCUT} 被其他程序占用了，可以双击艾拉或者右键菜单打开对话`)
+  }
+  if (!globalShortcut.register(LISTEN_SHORTCUT, () => voiceMenu('listen'))) {
+    console.warn(`快捷键 ${LISTEN_SHORTCUT} 被其他程序占用了，可以用右键菜单「听我说」`)
   }
 })
 
