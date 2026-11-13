@@ -1,7 +1,7 @@
 """下载语音模型到 aila-ai/models/（不进 Git）。都来自 sherpa-onnx 官方发布页。
 
 用法：
-    .venv\\Scripts\\python scripts\\download_models.py              # 默认四个，约 370MB
+    .venv\\Scripts\\python scripts\\download_models.py              # 默认：语音四个 + 向量模型，约 460MB
     .venv\\Scripts\\python scripts\\download_models.py tts-kokoro   # 可选的合成引擎
 
 已经下载过的会跳过。开着代理也能用（httpx 会读系统代理设置）。
@@ -86,14 +86,29 @@ def download(asset: Asset, client: httpx.Client) -> None:
     print(f"完成：{asset.target}")
 
 
+def download_embedder() -> None:
+    """向量模型（记忆、知识库用）：bge-small-zh，约 90MB，由 fastembed 从 Hugging Face 下载"""
+    if (MODELS_DIR / "embed").exists():
+        print("已存在，跳过：embed")
+        return
+    print("下载向量模型 BAAI/bge-small-zh-v1.5 ……")
+    sys.path.insert(0, str(MODELS_DIR.parent))
+    from app.memory.embedder import FastEmbedder
+
+    FastEmbedder(MODELS_DIR).embed(["测试一下"])
+    print("完成：embed")
+
+
 def main(groups: list[str]) -> None:
     MODELS_DIR.mkdir(exist_ok=True)
     selected = ASSETS if not groups else [a for a in ASSETS + OPTIONAL if a.group in groups]
-    if not selected:
-        sys.exit(f"没有这一类：{groups}，可选 {sorted({a.group for a in ASSETS + OPTIONAL})}")
+    if not selected and groups != ["embed"]:
+        sys.exit(f"没有这一类：{groups}，可选 {sorted({a.group for a in ASSETS + OPTIONAL} | {'embed'})}")
     with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(30, read=120)) as client:
         for asset in selected:
             download(asset, client)
+    if not groups or "embed" in groups:
+        download_embedder()
 
 
 if __name__ == "__main__":

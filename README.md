@@ -10,7 +10,11 @@
 - [x] 文字对话：流式回复按说话节奏输出，表情和动作与对应句子同步，可打断
 - [x] 联网搜索和网页阅读：她自己判断要不要查，查的时候气泡显示进度；读链接有 SSRF 防护（开着代理的 fake-ip 模式也拦得住）
 - [x] 语音：唤醒词「你好艾拉」、断句、识别、按句合成、五个元音口型同步、插话打断、回声过滤，全部离线跑在 CPU 上
-- [ ] 账号与对话同步（Spring Boot）、长期记忆、个人知识库
+- [x] 账号与多设备同步（Spring Boot）：注册登录，对话和设置在几台电脑之间实时同步；断网先存本地、连上补传，断线重连补拉，不丢不重
+- [x] 长期记忆：聊天后她自己整理记住的事（会更新、会忘掉、会过期），按相关程度带进对话，多设备同步，删除优先不会被复活
+- [x] 个人资料库：放进 txt/md/pdf/docx/html，关键词和语义混合检索，回答时说出自哪份资料；只存在本机
+- [x] 技能包框架：联网、资料库、外部 MCP 服务都是技能包，可以单独开关；会改东西的工具要你确认
+- [x] 设置窗口：大模型和密钥、语音、技能包、资料库、记忆、账号、形象、运行状态都在一个窗口里改，保存立刻生效
 - [ ] 浏览器操作、工具调用、屏幕感知报错
 - [ ] 魔法工作台：3D 代码星图、手势操控、代码 RAG、Agent 修复与自动回滚
 
@@ -19,27 +23,31 @@
 ```
 aila-desktop/   桌面端：Electron + Vue 3 + Three.js（@pixiv/three-vrm）
 aila-ai/        本地 AI 服务：Python + FastAPI，调用大模型、工具调用（搜索、读网页）、解析表情动作标签、语音（sherpa-onnx）
+aila-server/    云端后端：Java 21 + Spring Boot 4 + PostgreSQL，账号和多设备同步
 ```
 
-后面还会加 Spring Boot 云端服务。
+三种语言各管一层：桌面端负责表现，本地 AI 服务负责思考和办事（语音不出本机），云端负责账号和数据。
 
 ## 快速开始
 
-需要 Node.js 20+、Python 3.11+。
+需要 Node.js 20+、Python 3.11+；用同步功能还要 Java 21。
 
 ```powershell
 # 1. 本地 AI 服务
 cd aila-ai
 py -3.12 -m venv .venv
 .venv\Scripts\pip install -r requirements-dev.txt
-.venv\Scripts\python scripts\download_models.py   # 语音模型，约 370MB
-copy .env.example .env          # 填大模型密钥（和可选的搜索密钥）；不填就用内置假模型
-.venv\Scripts\python -m app     # 监听 127.0.0.1:8765
+.venv\Scripts\python scripts\download_models.py   # 语音和向量模型，约 470MB
+.venv\Scripts\python -m app     # 监听 127.0.0.1:8765；没填大模型密钥时用内置假模型
 
-# 2. 桌面端（另开一个终端）
+# 2. 桌面端（另开一个终端），然后右键艾拉 →「设置…」→「对话」填大模型密钥
 cd aila-desktop
 npm install
 npm run dev
+
+# 3. 可选：云端同步（另开一个终端），然后「设置…」→「账号与同步」登录
+cd aila-server
+.\mvnw spring-boot:test-run     # 内嵌数据库，不用装 PostgreSQL；监听 8790
 ```
 
 角色模型不在仓库里（体积大），下载方式见 [aila-desktop/README.md](aila-desktop/README.md)。没有模型时会显示一个简易占位角色。
@@ -49,15 +57,19 @@ npm run dev
 ```
 ┌──────────────── 你的电脑 ────────────────┐
 │  aila-desktop（Electron）                │
-│    渲染层：3D 角色、行为、气泡、麦克风   │
-│    主进程：窗口、快捷键、转发对话和合成  │
+│    渲染层：3D 角色、气泡、麦克风；设置窗 │
+│    主进程：窗口、转发对话、同步、记忆    │
 │                 │ HTTP + SSE、WebSocket  │
 │  aila-ai（FastAPI，只监听本机）          │
-│    对话：人设、工具调用、标签解析        │
+│    对话：人设、技能包和工具、标签解析    │
+│    记忆挑选和整理、资料库检索、MCP       │
 │    语音：唤醒、断句、识别、合成          │
 └──────────┼───────────────────┼───────────┘
            │ OpenAI 兼容接口   │ HTTPS（只许公网地址）
     大模型（DeepSeek 等）   搜索服务（博查/Tavily）、网页
+
+桌面端主进程 ── REST 上传、按序号拉取 ──▶ aila-server（Spring Boot）── PostgreSQL
+             ◀─ WebSocket「有新变更」─── 账号、对话、记忆和设置同步
 ```
 
 各部分的设计说明见子目录的 README。

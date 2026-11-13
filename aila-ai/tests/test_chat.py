@@ -9,9 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.config import load_settings
 from app.llm import MockModel, OpenAICompatibleModel, ToolCall
-from app.main import ChatMessage, app, build_messages, get_model, get_toolbox
-from app.tools import Toolbox
+from app.main import ChatMessage, app, build_messages, get_model, get_registry
+from app.tools import SkillRegistry, Toolbox
 from app.tools.search import MockSearch
+from app.tools.web import web_skill
 
 
 class FakeModel:
@@ -30,19 +31,23 @@ class FakeModel:
             raise self.fail
 
 
-def offline_toolbox() -> Toolbox:
-    """不联网的工具箱：假搜索；读网页时任何请求都返回 404"""
+def offline_registry() -> SkillRegistry:
+    """不联网的技能包：假搜索；读网页时任何请求都返回 404"""
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(404)))
 
     async def resolve(_: str) -> list[str]:
         return ["93.184.216.34"]
 
-    return Toolbox(client, MockSearch(), resolve)
+    return SkillRegistry([web_skill(client, MockSearch(), resolve)])
+
+
+def offline_toolbox() -> Toolbox:
+    return offline_registry().toolbox()
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    app.dependency_overrides[get_toolbox] = offline_toolbox
+    app.dependency_overrides[get_registry] = offline_registry
     yield TestClient(app)
     app.dependency_overrides.clear()
 

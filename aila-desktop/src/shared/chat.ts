@@ -61,7 +61,9 @@ export async function streamChat(
   baseUrl: string,
   messages: ChatMessage[],
   signal: AbortSignal,
-  onEvent: (ev: ChatEvent) => void
+  onEvent: (ev: ChatEvent) => void,
+  /** 一起发给 AI 服务的其他内容（她记得的事、开着的技能包） */
+  extra: Record<string, unknown> = {}
 ): Promise<void> {
   let finished = false
   let connected = false
@@ -75,7 +77,7 @@ export async function streamChat(
     const res = await fetch(`${baseUrl}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ ...extra, messages }),
       signal
     })
     if (!res.ok || !res.body) {

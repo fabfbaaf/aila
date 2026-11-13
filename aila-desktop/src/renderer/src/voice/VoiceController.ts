@@ -21,6 +21,8 @@ const ECHO_WINDOW_MS = 1200
 /** AI 服务判断「说完了」要等的静音时长（AILA_END_SILENCE 的默认值），算延迟时加上 */
 const END_SILENCE_MS = 400
 const PREFS_KEY = 'aila.voice'
+/** 云端同步的设置键 */
+export const SPEAK_SETTING = 'voice.speak'
 
 interface Prefs {
   wake: boolean
@@ -42,6 +44,10 @@ export interface LatencySample {
  */
 export class VoiceController {
   onBubble: (text: string, holdMs: number | null) => void = () => {}
+  /** 用户改了要跨设备同步的设置（目前是「出声说话」；唤醒涉及麦克风，每台电脑单独决定） */
+  onSettingChanged: (key: string, value: unknown) => void = () => {}
+  /** 开关变了（设置窗口要显示） */
+  onPrefsChanged: (prefs: VoiceMenuState) => void = () => {}
   readonly latencies: LatencySample[] = []
 
   private prefs: Prefs
@@ -96,7 +102,13 @@ export class VoiceController {
 
   toggleSpeak(): void {
     this.setPrefs({ speak: !this.prefs.speak })
+    this.onSettingChanged(SPEAK_SETTING, this.prefs.speak)
     this.conversation.announce(this.prefs.speak ? lines.speakOn : lines.speakOff)
+  }
+
+  /** 别的设备改了设置，同步过来（安静地生效，不说话） */
+  applySetting(key: string, value: unknown, deleted: boolean): void {
+    if (key === SPEAK_SETTING && !deleted && typeof value === 'boolean') this.setPrefs({ speak: value })
   }
 
   /** 不用唤醒词，直接开始听（快捷键、菜单「听我说」） */
@@ -267,6 +279,7 @@ export class VoiceController {
 
   private setPrefs(p: Partial<Prefs>): void {
     this.prefs = { ...this.prefs, ...p }
+    this.onPrefsChanged({ ...this.prefs })
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs))
     } catch {

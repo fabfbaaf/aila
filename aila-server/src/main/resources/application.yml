@@ -1,0 +1,33 @@
+# 本机开发：先用 scripts/create-db.sql 建库，再按需用环境变量覆盖
+# 不想装数据库：./mvnw spring-boot:test-run 会启动一个内嵌的 PostgreSQL
+server:
+  port: ${AILA_SERVER_PORT:8790}
+
+spring:
+  application:
+    name: aila-server
+  datasource:
+    url: ${AILA_DB_URL:jdbc:postgresql://127.0.0.1:5432/aila}
+    username: ${AILA_DB_USER:aila}
+    password: ${AILA_DB_PASSWORD:aila}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate # 表结构只由 Flyway 管，Hibernate 只检查对不对得上
+
+aila:
+  jwt:
+    # 32 字节以上的 Base64。留空时每次启动随机生成（开发用：重启后访问令牌失效，客户端会用刷新令牌自动续上）
+    secret: ${AILA_JWT_SECRET:}
+    access-ttl: 15m
+    refresh-ttl: 30d
+  login:
+    # 同一个邮箱连续输错这么多次后锁定一段时间
+    max-failures: 5
+    lock-duration: 15m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics

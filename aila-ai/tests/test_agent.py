@@ -10,10 +10,11 @@ from fastapi.testclient import TestClient
 
 from app.agent import MAX_TOOL_ROUNDS, run_agent
 from app.llm import MockModel, ToolCall
-from app.main import app, get_model, get_toolbox
+from app.main import app, get_model, get_registry
 from app.tools import Toolbox
+from app.tools.web import web_toolbox
 
-from .test_chat import offline_toolbox, parse_sse
+from .test_chat import offline_registry, offline_toolbox, parse_sse
 
 
 class ScriptedModel:
@@ -94,7 +95,7 @@ async def test_read_failure_is_reported_back() -> None:
 @pytest.mark.anyio
 async def test_search_tool_hidden_when_not_configured() -> None:
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(404)))
-    toolbox = Toolbox(client, search=None)
+    toolbox = web_toolbox(client, search=None)
     model = ScriptedModel([["好的"]])
     await collect(model, toolbox)
 
@@ -105,7 +106,7 @@ async def test_search_tool_hidden_when_not_configured() -> None:
 
 def test_mock_model_searches_end_to_end() -> None:
     app.dependency_overrides[get_model] = lambda: MockModel(delay=0)
-    app.dependency_overrides[get_toolbox] = offline_toolbox
+    app.dependency_overrides[get_registry] = offline_registry
     try:
         res = TestClient(app).post("/chat", json={"messages": [{"role": "user", "content": "帮我搜一下 Python 3.13 新特性"}]})
     finally:

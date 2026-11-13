@@ -74,6 +74,23 @@ class OpenAICompatibleModel:
             s = pending[index]
             yield ToolCall(id=s["id"] or f"call_{index}", name=s["name"], arguments=s["arguments"] or "{}")
 
+    async def ping(self) -> None:
+        """设置界面的「测试连接」：发一个最短的请求，看密钥、地址、模型名对不对"""
+        await self._client.chat.completions.create(
+            model=self.name, messages=[{"role": "user", "content": "你好"}], max_tokens=1
+        )
+
+    async def complete(self, messages: list[Message]) -> str:
+        """一次性拿到完整回答（整理记忆这类后台任务用）：温度低一点，要求输出 JSON"""
+        response = await self._client.chat.completions.create(
+            model=self.name,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=0.2,
+            max_tokens=600,
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content or ""
+
 
 class MockModel:
     """没配密钥时用：几句固定回复，按小块慢慢吐出来，模拟真实的流式输出"""
@@ -96,6 +113,9 @@ class MockModel:
             if url and "read_page" in names:
                 reply = "[nod]好，我看一下。"
                 call = ToolCall("mock-read", "read_page", json.dumps({"url": url.group(0)}))
+            elif any(w in text for w in ("资料", "文档", "笔记", "文件里")) and "search_knowledge" in names:
+                reply = "[think]我翻一下资料……"
+                call = ToolCall("mock-kb", "search_knowledge", json.dumps({"query": text}, ensure_ascii=False))
             elif any(w in text for w in ("搜", "查一下", "search")) and "web_search" in names:
                 reply = "[think]我查一下……"
                 query = re.sub(r"^(帮我|请)?(搜一下|搜索|搜|查一下)", "", text).strip() or text
@@ -121,6 +141,8 @@ def _mock_summary(tool_result: str) -> str:
             return f"[nod]读完了，标题是「{line[5:]}」。[relaxed]……我现在是假模型，还不会总结。"
         if line.startswith("读取失败") or line.startswith("网络出错") or line.startswith("请求失败"):
             return f"[sad]……没读成。{line}"
+        if line.startswith("在用户的资料里没有找到"):
+            return "[shake]……资料里没有找到相关的内容。"
     return "[tilt]……工具返回了内容，但我现在是假模型，看不懂。"
 
 

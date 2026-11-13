@@ -32,7 +32,11 @@ export const lines = {
   speakOn: '……以后我会出声说话。',
   speakOff: '……那我只打字。',
   micDenied: '……我听不到声音。请检查麦克风权限。',
-  earsUnavailable: '……我的耳朵还没准备好。请先下载语音模型，再重启 aila-ai。'
+  earsUnavailable: '……我的耳朵还没准备好。请先下载语音模型，再重启 aila-ai。',
+
+  // 记忆
+  forgetOne: ['……嗯，这件事我不记得了。', '……好，忘掉了。'],
+  forgetAll: '……都忘掉了。我们重新认识一下吧。'
 }
 
 export function greeting(hour: number): string {

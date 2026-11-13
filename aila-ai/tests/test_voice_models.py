@@ -1,5 +1,6 @@
 """用真实模型走一遍：合成「你好艾拉，……」，再让耳朵去听。没下载模型时跳过。"""
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def voice() -> Voice:
-    return Voice(TtsConfig(MODELS, "melo"))
+    return Voice(TtsConfig(MODELS, "melo", deterministic=True))  # 合成结果固定，测试不会时好时坏
 
 
 @pytest.fixture(scope="module")
@@ -71,8 +72,10 @@ def test_mixed_chinese_english_command(voice: Voice, ears: Ears) -> None:
     events = []
     for i in range(0, len(audio), SAMPLE_RATE // 10):
         events += listener.feed(audio[i : i + SAMPLE_RATE // 10])
-    text = next(str(e["text"]) for e in events if e["type"] == "transcript")
-    assert "python" in text.lower() and "3.13" in text
+    text = next(str(e["text"]) for e in events if e["type"] == "transcript").lower()
+    # 英文词要被识别成字母（而不是「拍站」这种谐音），版本号和中文部分都对
+    assert re.search(r"py\w*on", text), text
+    assert "3.13" in text and "新特性" in text, text
 
 
 def test_no_wake_word_no_reaction(voice: Voice, ears: Ears) -> None:

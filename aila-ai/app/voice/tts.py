@@ -22,14 +22,17 @@ class TtsConfig:
     speaker: int = 0
     speed: float = 1.0
     threads: int = 4
+    # MeloTTS（VITS）合成时带随机噪声，同一句话每次念得略有不同，更自然。测试时设为 True 让结果固定
+    deterministic: bool = False
 
 
 def _fsts(d: Path, *names: str) -> str:
     return ",".join(str(d / n) for n in names if (d / n).exists())
 
 
-def _melo(m: Path, threads: int) -> so.OfflineTtsConfig:
+def _melo(m: Path, threads: int, deterministic: bool = False) -> so.OfflineTtsConfig:
     d = m / "vits-melo-tts-zh_en"
+    noise = {"noise_scale": 0.0, "noise_scale_w": 0.0} if deterministic else {}
     return so.OfflineTtsConfig(
         model=so.OfflineTtsModelConfig(
             vits=so.OfflineTtsVitsModelConfig(
@@ -37,6 +40,7 @@ def _melo(m: Path, threads: int) -> so.OfflineTtsConfig:
                 lexicon=str(d / "lexicon.txt"),
                 tokens=str(d / "tokens.txt"),
                 dict_dir=str(d / "dict"),
+                **noise,
             ),
             num_threads=threads,
         ),
@@ -106,7 +110,9 @@ class Voice:
         if cfg.engine not in ENGINES:
             raise ValueError(f"AILA_TTS_ENGINE 只能是 {' / '.join(ENGINES)}")
         self._cfg = cfg
-        self._tts = so.OfflineTts(ENGINES[cfg.engine](cfg.models_dir, cfg.threads))
+        build = ENGINES[cfg.engine]
+        config = _melo(cfg.models_dir, cfg.threads, cfg.deterministic) if build is _melo else build(cfg.models_dir, cfg.threads)
+        self._tts = so.OfflineTts(config)
         self.sample_rate: int = self._tts.sample_rate
         # 合成很吃 CPU，一次只合成一句；桌面端会提前请求下一句，排队等着就行
         self._lock = threading.Lock()

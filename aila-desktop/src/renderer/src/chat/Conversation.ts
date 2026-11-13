@@ -1,4 +1,5 @@
 import type { ChatErrorCode, ChatEvent, ChatMessage, Emotion, Gesture } from '../../../shared/chat'
+import type { RemoteChanges, StoredMessage } from '../../../shared/cloud'
 import type { Mouth } from '../avatar/types'
 import type { Behavior } from '../behavior/Behavior'
 import { lines } from '../persona/lines'
@@ -71,8 +72,11 @@ export class Conversation {
   onReplyEnd: () => void = () => {}
   /** 开口了：第一句声音开始播放，或第一个字显示出来 */
   onFirstWords: () => void = () => {}
+  /** 一句话正式进入对话记录（用户说的，或她说出口的部分）：交给主进程保存和同步 */
+  onCommit: (m: StoredMessage) => void = () => {}
 
-  private history: ChatMessage[] = []
+  /** 对话记录：带 id 和时间，方便本地保存、多设备合并 */
+  private history: StoredMessage[] = []
   private stream: ChatStream | null = null
   private shown = ''
   /**
@@ -125,14 +129,34 @@ export class Conversation {
   }
 
   get messages(): readonly ChatMessage[] {
-    return this.history
+    return this.history.map(({ role, content }) => ({ role, content }))
+  }
+
+  /** 启动时恢复上次的对话记录 */
+  restore(saved: StoredMessage[]): void {
+    this.history = saved.filter((m) => !m.deleted).slice(-MAX_HISTORY)
+  }
+
+  /** 别的设备说的话同步过来了（或者记录被删了、退出登录清空了） */
+  applyRemote(changes: RemoteChanges): void {
+    if (changes.removed.includes('*')) {
+      this.history = []
+      return
+    }
+    const removed = new Set(changes.removed)
+    const known = new Set(this.history.map((m) => m.id))
+    const merged = this.history.filter((m) => !removed.has(m.id))
+    for (const m of changes.added) {
+      if (!known.has(m.id) && !m.deleted) merged.push(m)
+    }
+    merged.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
+    this.history = merged.slice(-MAX_HISTORY)
   }
 
   /** heard：这句话是听来的（语音），气泡里先复述一下，让用户知道她听对了没有 */
   send(text: string, heard = false): void {
     this.begin(false)
-    this.history.push({ role: 'user', content: text })
-    this.history = this.history.slice(-MAX_HISTORY)
+    this.record('user', text)
     this.receiving = true
     this.behavior.setThinking(true)
     this.onBubble(heard ? `「${text}」\n……` : '……', null)
@@ -423,7 +447,14 @@ export class Conversation {
   private commit(): void {
     if (this.committed || !this.spoken || this.announcing) return
     this.committed = true
-    this.history.push({ role: 'assistant', content: this.spoken })
+    this.record('assistant', this.spoken)
+  }
+
+  private record(role: StoredMessage['role'], content: string): void {
+    const m: StoredMessage = { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() }
+    this.history.push(m)
+    this.history = this.history.slice(-MAX_HISTORY)
+    this.onCommit(m)
   }
 
   private finish(): void {

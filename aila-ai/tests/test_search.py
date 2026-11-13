@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.llm import ToolCall
-from app.tools import SNIPPET_CHARS, Toolbox
+from app.tools.web import SNIPPET_CHARS, web_toolbox
 from app.tools.search import BochaSearch, SearchResult, TavilySearch
 
 
@@ -67,7 +67,7 @@ async def test_bocha_without_results() -> None:
 async def test_search_results_given_to_model() -> None:
     reply = {"results": [{"title": "标题", "url": "https://a.example/", "content": "字" * 1000}]}
     client = recording_client(reply, [])
-    toolbox = Toolbox(client, TavilySearch("k", client))
+    toolbox = web_toolbox(client, TavilySearch("k", client))
     text = await toolbox.run(ToolCall("c", "web_search", '{"query": "测试"}'))
 
     assert text.startswith("搜索「测试」的结果。")
@@ -78,5 +78,5 @@ async def test_search_results_given_to_model() -> None:
 @pytest.mark.anyio
 async def test_bad_search_key_is_reported() -> None:
     client = recording_client({"detail": "invalid key"}, [], status=401)
-    toolbox = Toolbox(client, TavilySearch("wrong", client))
+    toolbox = web_toolbox(client, TavilySearch("wrong", client))
     assert await toolbox.run(ToolCall("c", "web_search", '{"query": "x"}')) == "请求失败（HTTP 401）"

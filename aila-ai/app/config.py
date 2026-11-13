@@ -6,7 +6,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+ROOT = Path(__file__).resolve().parent.parent
+# 一般就是 aila-ai/.env；同一台电脑跑两份服务（或测试）时可以指定别的文件
+ENV_FILE = Path(os.getenv("AILA_ENV_FILE", str(ROOT / ".env")))
+load_dotenv(ENV_FILE)
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,8 @@ class Settings:
     wake_threshold: float
     end_silence: float
     asr_language: str
+    data_dir: Path
+    mcp_config: Path
 
     @property
     def mock(self) -> bool:
@@ -45,11 +50,15 @@ def load_settings() -> Settings:
         port=int(os.getenv("AILA_PORT", "8765")),
         max_history=int(os.getenv("AILA_MAX_HISTORY", "20")),
         voice=os.getenv("AILA_VOICE", "on").strip().lower() not in ("off", "0", "false"),
-        models_dir=Path(os.getenv("AILA_MODELS_DIR", str(Path(__file__).resolve().parent.parent / "models"))),
+        models_dir=Path(os.getenv("AILA_MODELS_DIR", str(ROOT / "models"))),
         tts_engine=os.getenv("AILA_TTS_ENGINE", "melo").strip().lower(),
         tts_speaker=int(os.getenv("AILA_TTS_SPEAKER", "0")),
         tts_speed=float(os.getenv("AILA_TTS_SPEED", "1.0")),
         wake_threshold=float(os.getenv("AILA_WAKE_THRESHOLD", "0.25")),
         end_silence=float(os.getenv("AILA_END_SILENCE", "0.4")),
         asr_language=os.getenv("AILA_ASR_LANGUAGE", "zh").strip().lower(),
+        # 知识库等本机数据（不进 Git）
+        data_dir=Path(os.getenv("AILA_DATA_DIR", str(ROOT / "data"))),
+        # 外部 MCP 服务的配置，参考 mcp.example.json
+        mcp_config=Path(os.getenv("AILA_MCP_CONFIG", str(ROOT / "mcp.json"))),
     )

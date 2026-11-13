@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "time": {
+      "name": "时间",
+      "command": "uvx",
+      "args": ["mcp-server-time", "--local-timezone=Asia/Shanghai"],
+      "readOnly": true
+    },
+    "docs": {
+      "name": "团队文档",
+      "url": "http://localhost:8000/mcp",
+      "disabled": true
+    }
+  }
+}

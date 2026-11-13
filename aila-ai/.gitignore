@@ -3,5 +3,8 @@
 __pycache__/
 .pytest_cache/
 *.log
-# 语音模型，用 scripts/download_models.py 下载
+# 语音和向量模型，用 scripts/download_models.py 下载
 models/
+# 本机数据（知识库）和个人配置
+data/
+mcp.json

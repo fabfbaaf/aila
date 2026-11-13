@@ -9,3 +9,10 @@ trafilatura>=2.0
 # 语音：唤醒、断句、识别、合成（模型另外下载，见 scripts/download_models.py）
 sherpa-onnx>=2.0
 numpy>=2.0
+# 记忆和知识库的文本向量（bge-small-zh，本地 CPU）
+fastembed>=0.5
+# 资料库：解析 PDF、Word
+pypdf>=5
+python-docx>=1.1
+# 接入外部工具（MCP 协议）
+mcp>=2.0

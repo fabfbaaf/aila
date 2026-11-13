@@ -1,0 +1,151 @@
+"""对话：/chat（流式回复）、/memory/extract（整理记忆）、/skills（技能包）、/health"""
+
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+from datetime import datetime
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from .. import deps
+from ..agent import run_agent
+from ..deps import get_embedder, get_model, get_registry, status
+from ..llm import ChatModel, Message, classify_error
+from ..memory import Memory, Turn, describe, extract, recall
+from ..persona import SYSTEM_PROMPT
+from ..tags import Event
+from ..tools import SkillRegistry
+
+log = logging.getLogger("aila")
+router = APIRouter()
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class MemoryIn(BaseModel):
+    """桌面端保存的一条记忆（云端同步过来的）"""
+
+    id: str = Field(min_length=1, max_length=64)
+    content: str = Field(min_length=1, max_length=500)
+    kind: str = "other"
+    expiresAt: datetime | None = None
+    updatedAt: datetime | None = None
+
+    def to_memory(self) -> Memory:
+        return Memory(self.id, self.content, self.kind, _aware(self.expiresAt), _aware(self.updatedAt))
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=200)
+    # 她记得的所有事：这里挑出和这次话题相关的几条放进提示词
+    memories: list[MemoryIn] = Field(default_factory=list, max_length=2000)
+    # 用户对技能包的开关（覆盖默认值），比如 {"web": false, "mcp:time": true}
+    skills: dict[str, bool] = Field(default_factory=dict)
+
+
+def _aware(t: datetime | None) -> datetime | None:
+    return t.astimezone() if t is not None else None
+
+
+def build_messages(history: list[ChatMessage], max_history: int, context: str = "") -> list[Message]:
+    """系统提示词（加上日期和记忆）+ 最近几条对话。连续同一角色的消息合并，有些模型不接受连续两条用户消息。"""
+    recent = history[-max_history:]
+    while recent and recent[0].role != "user":
+        recent = recent[1:]  # 截断后要从用户消息开始
+
+    merged: list[Message] = []
+    for m in recent:
+        if merged and merged[-1]["role"] == m.role:
+            merged[-1]["content"] += "\n" + m.content
+        else:
+            merged.append({"role": m.role, "content": m.content})
+    system = SYSTEM_PROMPT + ("\n\n" + context if context else "")
+    return [{"role": "system", "content": system}, *merged]
+
+
+async def memory_context(req: ChatRequest, embedder: Any) -> str:
+    """今天的日期 + 和最近两句话相关的记忆"""
+    now = datetime.now().astimezone()
+    if not req.memories:
+        return describe([], now)
+    query = "\n".join(m.content for m in req.messages if m.role == "user")[-300:]
+    picked = await asyncio.to_thread(recall, [m.to_memory() for m in req.memories], query, embedder, now)
+    return describe(picked, now)
+
+
+def sse(event: Event) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@router.get("/health")
+def health(model: ChatModel = Depends(get_model), registry: SkillRegistry = Depends(get_registry)) -> dict[str, object]:
+    return {
+        "ok": True,
+        "model": model.name,
+        "tools": registry.toolbox().names,
+        "voice": {"ears": status["ears"], "tts": status["tts"]},
+        "embed": status["embed"],
+    }
+
+
+@router.get("/skills")
+def skills(registry: SkillRegistry = Depends(get_registry)) -> list[dict[str, Any]]:
+    """所有技能包和默认开关（桌面端右键菜单里显示）"""
+    return registry.describe()
+
+
+@router.post("/chat")
+async def chat(
+    req: ChatRequest,
+    model: ChatModel = Depends(get_model),
+    registry: SkillRegistry = Depends(get_registry),
+    embedder: Any = Depends(get_embedder),
+) -> StreamingResponse:
+    if req.messages[-1].role != "user":
+        raise HTTPException(status_code=422, detail="最后一条必须是用户消息")
+    messages = build_messages(req.messages, deps.settings.max_history, await memory_context(req, embedder))
+    # 这次能用哪些工具：用户开着的技能包里的（资料库空着时不给）
+    toolbox = await asyncio.to_thread(registry.toolbox, req.skills)
+
+    async def events() -> AsyncIterator[str]:
+        try:
+            async for event in run_agent(model, messages, toolbox):
+                yield sse(event)
+            yield sse({"type": "done"})
+        except Exception as err:  # 出错也要告诉桌面端，让艾拉有反应，而不是一直等
+            code, message = classify_error(err)
+            log.warning("大模型调用失败（%s）：%s", code, err)
+            yield sse({"type": "error", "code": code, "message": message})
+
+    # 客户端断开时 Starlette 会取消这个生成器，大模型请求和工具调用也随之停止
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+class ExtractRequest(BaseModel):
+    # 最近几轮对话（通常是刚结束的那一轮，再加上前面一两轮做上下文）
+    messages: list[ChatMessage] = Field(min_length=1, max_length=20)
+    memories: list[MemoryIn] = Field(default_factory=list, max_length=2000)
+
+
+@router.post("/memory/extract")
+async def memory_extract(
+    req: ExtractRequest,
+    model: ChatModel = Depends(get_model),
+    embedder: Any = Depends(get_embedder),
+) -> dict[str, list[dict[str, Any]]]:
+    """返回记忆要做的操作：add（新增）、update（修改，id 是原来那条）、delete（删除）。由桌面端执行并同步"""
+    turns = [Turn(m.role, m.content) for m in req.messages]
+    memories = [m.to_memory() for m in req.memories]
+    try:
+        ops = await extract(model, turns, memories, embedder, datetime.now().astimezone())
+    except Exception as err:  # 整理记忆是后台的事，失败了就这轮不记，不影响聊天
+        log.warning("整理记忆失败：%s", err)
+        ops = []
+    return {"ops": ops}

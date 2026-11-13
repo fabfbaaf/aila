@@ -3,13 +3,14 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Vector3 } from 'three'
 import SpeechBubble from './components/SpeechBubble.vue'
 import ChatInput from './components/ChatInput.vue'
+import type { CharacterEvent } from '../../shared/settings'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
 import { createTransport } from './chat/transport'
 import { Stage, type HitRegion } from './scene/Stage'
 import { PlaceholderAvatar } from './avatar/PlaceholderAvatar'
 import { loadVrmAvatar } from './avatar/VrmAvatar'
-import { lines } from './persona/lines'
+import { lines, pick } from './persona/lines'
 import { bridge } from './platform/bridge'
 import { Speaker } from './voice/Speaker'
 import { VoiceController } from './voice/VoiceController'
@@ -96,6 +97,44 @@ function closeChat(): void {
 
 function onSend(text: string): void {
   conversation.send(text)
+}
+
+// ---------- 设置窗口里做的事，她在桌面上有点反应 ----------
+
+function onCharacterEvent(ev: CharacterEvent): void {
+  switch (ev.kind) {
+    case 'forget-one':
+      behavior.say(pick(lines.forgetOne), 2200)
+      break
+    case 'forget-all':
+      behavior.react('sad')
+      behavior.say(lines.forgetAll, 3500)
+      break
+    case 'knowledge-added':
+      behavior.react('happy')
+      behavior.say(ev.names.length === 1 ? `……《${ev.names[0]}》我读完了。` : `……${ev.names.length} 份资料我都读完了。`, 3500)
+      break
+    case 'settings-saved':
+      behavior.gesture('nod')
+      break
+  }
+}
+
+/** 对话记录：启动时从本地恢复；说出口的话交给主进程保存、同步；别的设备的话合并进来 */
+async function connectHistory(): Promise<void> {
+  if (!bridge) return // 浏览器调试时只在内存里
+  const api = bridge
+  conversation.restore(await api.historyLoad())
+  conversation.onCommit = (m) => api.historyAppend(m)
+  api.onHistoryRemote((changes) => {
+    conversation.applyRemote(changes)
+    for (const s of changes.settings) voiceControl.applySetting(s.key, s.value, s.deleted)
+  })
+  voiceControl.onSettingChanged = (key, value) => api.settingPut(key, value)
+  // 语音开关存在这里，设置窗口通过主进程读写
+  voiceControl.onPrefsChanged = (prefs) => api.voiceReport(prefs)
+  api.voiceReport(voiceControl.menuState())
+  api.onCharacterEvent(onCharacterEvent)
 }
 
 // ---------- 模型 ----------
@@ -222,7 +261,8 @@ onMounted(async () => {
       openChat,
       voice: voiceControl,
       speaker,
-      hear
+      hear,
+      openSettings: (section?: Parameters<NonNullable<typeof bridge>['openSettings']>[0]) => bridge?.openSettings(section)
     }
     console.log(`[aila] 舞台已启动，渲染器：${stage.rendererInfo()}`)
   }
@@ -233,6 +273,7 @@ onMounted(async () => {
   bridge?.onChatOpen(() => void openChat())
   bridge?.onVoiceMenu(onVoiceMenu)
   void voiceControl.init()
+  await connectHistory()
 
   const last = await bridge?.getLastModel()
   if (last) await useModel(last)
