@@ -20,9 +20,11 @@ from .config import load_settings
 from .confirm import Confirmations
 from .knowledge import KnowledgeBase, knowledge_skill
 from .llm import ChatModel, MockModel, OpenAICompatibleModel
+from .browser import BrowserSession
 from .tools import Skill, SkillRegistry
-from .tools.browser import browser_skill
+from .tools.browser import browse_skill, browser_skill
 from .tools.mcp import McpHub, load_config
+from .tools.reader import make_resolver
 from .tools.search import BochaSearch, MockSearch, SearchProvider, TavilySearch
 from .tools.web import web_skill
 
@@ -146,10 +148,18 @@ _mcp_skills: list[Skill] = []
 
 
 @lru_cache
+def get_browser() -> BrowserSession:
+    """她自己的浏览器窗口（第一次用到才真正打开），配置目录在 data/browser，和用户的浏览器分开"""
+    return BrowserSession(settings.data_dir / "browser", make_resolver(http_client))
+
+
+@lru_cache
 def get_registry() -> SkillRegistry:
     search = _search_provider()
     log.info("联网搜索：%s", search.name if search else "未配置（只能读用户给的链接）")
-    registry = SkillRegistry([web_skill(http_client, search), knowledge_skill(get_knowledge()), browser_skill()])
+    registry = SkillRegistry([
+        web_skill(http_client, search), knowledge_skill(get_knowledge()), browser_skill(), browse_skill(get_browser()),
+    ])
     for skill in _mcp_skills:
         registry.add(skill)
     return registry

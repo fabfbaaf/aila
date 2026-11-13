@@ -100,8 +100,8 @@ export interface SkillInfo {
   description: string
   enabled: boolean
   available: boolean
-  /** risk 不是 read 的工具要用户确认才能执行 */
-  tools?: { name: string; risk: string }[]
+  /** read：直接用；write：每次都要用户确认；mixed：看情况（比如点普通链接不用，点提交按钮要） */
+  tools?: { name: string; risk: 'read' | 'write' | 'mixed' | string }[]
 }
 
 /** 用户对技能包的开关（覆盖默认值），跟着账号同步 */

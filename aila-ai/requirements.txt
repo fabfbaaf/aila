@@ -16,3 +16,5 @@ pypdf>=5
 python-docx>=1.1
 # 接入外部工具（MCP 协议）
 mcp>=2.0
+# 她自己的浏览器窗口：驱动本机的 Edge / Chrome（不用 playwright install 另外下载浏览器）
+playwright>=1.50

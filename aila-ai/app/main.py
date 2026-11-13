@@ -39,6 +39,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     if mcp:
         await mcp.stop()
+    if deps.get_browser.cache_info().currsize:  # 打开过浏览器的话关掉
+        await deps.get_browser().shutdown()
     await preload
     await deps.http_client.aclose()
 

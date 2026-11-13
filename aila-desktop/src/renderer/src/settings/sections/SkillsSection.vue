@@ -52,7 +52,7 @@ onActivated(load)
     </div>
     <div v-if="s.tools?.length" class="tools">
       <span v-for="t in s.tools" :key="t.name" class="tag" :class="{ warn: t.risk !== 'read' }">
-        {{ t.name }}{{ t.risk !== 'read' ? ' · 要你确认' : '' }}
+        {{ t.name }}{{ t.risk === 'mixed' ? ' · 有时要你确认' : t.risk !== 'read' ? ' · 要你确认' : '' }}
       </span>
     </div>
   </div>

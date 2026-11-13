@@ -110,7 +110,10 @@ class MockModel:
         else:
             text = str(last["content"])
             url = re.search(r"https?://[^\s，。]+", text)
-            if url and "打开" in text and "open_url" in names:
+            if url and ("网页上" in text or "你的浏览器" in text) and "browser_open" in names:
+                reply = "[nod]好，我去看看。"
+                call = ToolCall("mock-browse", "browser_open", json.dumps({"url": url.group(0)}))
+            elif url and "打开" in text and "open_url" in names:
                 reply = "[nod]好，我帮你打开。"
                 call = ToolCall("mock-open", "open_url", json.dumps({"url": url.group(0)}))
             elif url and "read_page" in names:
@@ -142,7 +145,7 @@ def _mock_summary(tool_result: str) -> str:
             return f"[nod]查到了。第一条是「{line[3:]}」。[relaxed]……我现在是假模型，只能念标题给你听。"
         if line.startswith("网页标题："):
             return f"[nod]读完了，标题是「{line[5:]}」。[relaxed]……我现在是假模型，还不会总结。"
-        if line.startswith("读取失败") or line.startswith("网络出错") or line.startswith("请求失败"):
+        if line.startswith(("读取失败", "网络出错", "请求失败", "打不开", "网页打不开")):
             return f"[sad]……没读成。{line}"
         if line.startswith("在用户的资料里没有找到"):
             return "[shake]……资料里没有找到相关的内容。"

@@ -15,8 +15,11 @@ from .llm import ChatModel, Message, ToolCall
 from .tags import Event, TagParser
 from .tools import Toolbox
 
-# 最多调用几轮工具；最后一轮不再提供工具，逼它根据已有信息直接回答
-MAX_TOOL_ROUNDS = 3
+# 最多调用几轮工具；最后一轮不再提供工具，逼它根据已有信息直接回答。
+# 网页操作一步一轮（打开 → 搜索 → 点结果 → 看内容），所以给得比较宽
+MAX_TOOL_ROUNDS = 8
+# 网页快照这类「现在的样子」：有了新的，旧的换成这句话，对话不会越来越长
+STALE_NOTE = "（这是之前的页面，已经省略；以最新的为准）"
 
 # 没执行时交给大模型的话：明确告诉它别换个办法绕过去
 NOT_DONE: dict[Result, str] = {
@@ -31,6 +34,16 @@ async def run_agent(
     """confirms 为 None 时没法问用户，要确认的工具一律不执行"""
     convo = list(messages)
     parser = TagParser()
+    snapshots: list[int] = []  # convo 里网页快照的位置
+
+    def add_result(call: ToolCall, content: str) -> None:
+        # 出错时返回的是一句话，不是快照，不能把之前的页面挤掉（快照里都有「网页标题：」这一行）
+        if toolbox.is_ephemeral(call.name) and "网页标题：" in content:
+            for i in snapshots:
+                convo[i] = {**convo[i], "content": STALE_NOTE}
+            snapshots.clear()
+            snapshots.append(len(convo))
+        convo.append({"role": "tool", "tool_call_id": call.id, "content": content})
 
     for round_no in range(MAX_TOOL_ROUNDS + 1):
         tools = toolbox.specs if round_no < MAX_TOOL_ROUNDS else None
@@ -67,7 +80,7 @@ async def run_agent(
                     continue
                 approved = True
             yield {"type": "status", "text": toolbox.status(call)}
-            convo.append({"role": "tool", "tool_call_id": call.id, "content": await toolbox.run(call, approved)})
+            add_result(call, await toolbox.run(call, approved))
 
 
 def _assistant_tool_message(text: str, calls: list[ToolCall]) -> dict[str, Any]:
