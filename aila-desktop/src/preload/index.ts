@@ -11,7 +11,15 @@ import type {
   StoredMemory,
   StoredMessage
 } from '../shared/cloud'
-import type { AiResult, AiSettings, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
+import type {
+  AiResult,
+  AiSettings,
+  AiSettingsUpdate,
+  CharacterEvent,
+  ScreenStatus,
+  SettingsSection,
+  VoicePrefs
+} from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 
 // 渲染层能用的全部能力都在这里，渲染层不直接接触 Node 和 Electron
@@ -112,6 +120,8 @@ const api = {
   voiceReport: (prefs: VoicePrefs): void => ipcRenderer.send('voice:state', prefs),
   voiceGet: (): Promise<VoicePrefs> => ipcRenderer.invoke('voice:get'),
   voiceSet: (key: keyof VoicePrefs, on: boolean): void => ipcRenderer.send('voice:set', key, on),
+  /** 看屏幕的状态和上次的统计 */
+  screenStatus: (): Promise<AiResult<ScreenStatus>> => ipcRenderer.invoke('screen:status'),
   onVoiceState: (cb: (prefs: VoicePrefs) => void): void => {
     ipcRenderer.on('voice:state', (_e, prefs) => cb(prefs))
   },

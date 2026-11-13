@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import type { ConfirmAsk } from '../../../shared/chat'
+import type { BubbleAsk } from './bubble'
 
-const props = defineProps<{ text: string; visible: boolean; ask?: ConfirmAsk | null }>()
-const emit = defineEmits<{ answer: [approved: boolean] }>()
+const props = defineProps<{ text: string; visible: boolean; ask?: BubbleAsk | null }>()
+const emit = defineEmits<{ answer: [value: string] }>()
 const body = ref<HTMLDivElement>()
 
 // 回复比气泡长时，始终显示最新的那几行
@@ -20,15 +20,22 @@ watch(
   <Transition name="bubble">
     <div v-if="visible" class="bubble">
       <div ref="body" class="body">{{ text }}</div>
-      <!-- 要用户确认的操作：具体内容由 AI 服务从参数生成，照原样显示 -->
+      <!-- 等用户回答：要确认的操作（具体内容由 AI 服务从参数生成，照原样显示）、屏幕上看到的报错 -->
       <div v-if="ask" class="ask" data-interactive>
         <div class="detail">
-          <span v-if="ask.skill" class="skill">{{ ask.skill }}</span>
+          <span v-if="ask.tag" class="skill">{{ ask.tag }}</span>
           {{ ask.detail }}
         </div>
+        <div v-if="ask.note" class="note">{{ ask.note }}</div>
         <div class="buttons">
-          <button class="yes" @click="emit('answer', true)">好</button>
-          <button class="no" @click="emit('answer', false)">不要</button>
+          <button
+            v-for="b in ask.buttons"
+            :key="b.value"
+            :class="[b.value, { yes: b.primary }]"
+            @click="emit('answer', b.value)"
+          >
+            {{ b.label }}
+          </button>
         </div>
       </div>
     </div>
@@ -90,16 +97,23 @@ watch(
   font-size: 11px;
 }
 
+.note {
+  margin-top: 3px;
+  color: #7a8099;
+  font-size: 11px;
+}
+
 .buttons {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: flex-end;
   margin-top: 6px;
 }
 
 button {
-  min-width: 56px;
-  padding: 3px 12px;
+  min-width: 52px;
+  padding: 3px 10px;
   border: 1px solid #c9cfdd;
   border-radius: 8px;
   background: #fff;

@@ -39,7 +39,15 @@ export const lines = {
   forgetAll: '……都忘掉了。我们重新认识一下吧。',
 
   /** 会改东西的操作执行前问一句（具体内容显示在气泡里，不念出来） */
-  confirmAsk: (action: string): string => `……要我${action}吗？`
+  confirmAsk: (action: string): string => `……要我${action}吗？`,
+
+  // 留意屏幕上的报错
+  watchOn: '……好，我帮你留意报错。只看写代码的窗口，看到了先问你。',
+  watchOff: '……那我不看了。',
+  watchAsk: (app: string): string => `……${app}里好像出错了。要我帮你看看吗？`,
+  watchDeclined: '……嗯，有需要再叫我。',
+  watchMuted: '……好，一个小时内不提醒你。',
+  watchUnavailable: (why: string): string => `……我看不了屏幕。${why}`
 }
 
 export function greeting(hour: number): string {

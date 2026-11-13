@@ -11,7 +11,16 @@ import {
   shell,
   type MenuItemConstructorOptions
 } from 'electron'
-import { addKnowledge, deleteKnowledge, getAiSettings, listKnowledge, listSkills, putAiSettings, testLlm } from './ai'
+import {
+  addKnowledge,
+  deleteKnowledge,
+  getAiSettings,
+  getScreenStatus,
+  listKnowledge,
+  listSkills,
+  putAiSettings,
+  testLlm
+} from './ai'
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import WebSocket from 'ws'
@@ -42,7 +51,7 @@ let win: BrowserWindow | null = null
 let settingsWin: BrowserWindow | null = null
 let account: Account | null = null
 /** 角色窗口里的语音开关，设置窗口要显示 */
-let voicePrefs: VoicePrefs = { wake: false, speak: true }
+let voicePrefs: VoicePrefs = { wake: false, speak: true, watch: false }
 let cursorTimer: NodeJS.Timeout | null = null
 let drag: { cursorX: number; cursorY: number; winX: number; winY: number } | null = null
 const chats = new Map<number, AbortController>()
@@ -430,15 +439,17 @@ function registerIpc(): void {
     else void shell.openPath(dirname(path)) // 文件还没建（比如 mcp.json），打开所在的文件夹
   })
 
-  // 语音开关存在角色窗口里：它报告状态，设置窗口来读、来改
+  // 语音和看屏幕的开关存在角色窗口里：它报告状态，设置窗口来读、来改
   ipcMain.on('voice:state', (_e, prefs: VoicePrefs) => {
-    voicePrefs = { wake: Boolean(prefs.wake), speak: Boolean(prefs.speak) }
+    voicePrefs = { wake: Boolean(prefs.wake), speak: Boolean(prefs.speak), watch: Boolean(prefs.watch) }
     broadcast('voice:state', voicePrefs)
   })
   ipcMain.handle('voice:get', () => voicePrefs)
   ipcMain.on('voice:set', (_e, key: keyof VoicePrefs, on: boolean) => {
-    if (voicePrefs[key] !== on) voiceMenu(key === 'wake' ? 'toggle-wake' : 'toggle-speak')
+    const actions: Record<keyof VoicePrefs, VoiceMenuAction> = { wake: 'toggle-wake', speak: 'toggle-speak', watch: 'toggle-watch' }
+    if (Object.hasOwn(actions, key) && voicePrefs[key] !== on) voiceMenu(actions[key])
   })
+  ipcMain.handle('screen:status', () => getScreenStatus(AI_URL))
 
   ipcMain.on('menu:show', async (_e, voice: VoiceMenuState) => {
     if (!win) return
@@ -460,6 +471,13 @@ function registerIpc(): void {
       { type: 'separator' },
       { label: '语音唤醒「你好艾拉」', type: 'checkbox', checked: voice.wake, click: () => voiceMenu('toggle-wake') },
       { label: '出声说话', type: 'checkbox', checked: voice.speak, click: () => voiceMenu('toggle-speak') },
+      {
+        label: '留意屏幕上的报错',
+        type: 'checkbox',
+        checked: voice.watch,
+        toolTip: '只看写代码的窗口（编辑器、终端），看到报错先问你',
+        click: () => voiceMenu('toggle-watch')
+      },
       { type: 'separator' },
       { label: '技能包', submenu: skillItems },
       { label: '资料库…', click: () => openSettings('knowledge') },

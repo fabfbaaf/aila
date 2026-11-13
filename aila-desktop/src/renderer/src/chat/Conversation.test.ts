@@ -25,6 +25,7 @@ class FakeTransport implements ChatTransport {
   cancelled = 0
   answers: [string, boolean][] = []
   voiceUrl = ''
+  screenUrl = ''
 
   start(_m: unknown, onEvent: (ev: ChatEvent) => void): { cancel(): void } {
     this.push = onEvent

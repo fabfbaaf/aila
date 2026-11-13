@@ -15,6 +15,8 @@ export interface ChatTransport {
   synthesize(text: string): Promise<ArrayBuffer | null>
   /** 语音（耳朵）的 WebSocket 地址 */
   voiceUrl: string
+  /** 看屏幕找报错的 WebSocket 地址 */
+  screenUrl: string
 }
 
 /** 桌面版：请求由主进程发出再转发回来 */
@@ -43,7 +45,8 @@ function desktopTransport(api: AilaApi): ChatTransport {
     confirm: (id, approved) => api.chatConfirm(id, approved),
     synthesize: (text) => api.synthesize(text),
     // WebSocket 不受跨域限制，CSP 也允许 ws:，渲染层直接连；服务端会检查 Origin
-    voiceUrl: api.aiUrl.replace(/^http/, 'ws') + '/voice'
+    voiceUrl: api.aiUrl.replace(/^http/, 'ws') + '/voice',
+    screenUrl: api.aiUrl.replace(/^http/, 'ws') + '/screen'
   }
 }
 
@@ -66,7 +69,8 @@ function webTransport(): ChatTransport {
       if (!res.ok) throw new Error(`语音合成返回 ${res.status}`)
       return res.arrayBuffer()
     },
-    voiceUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ai/voice`
+    voiceUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ai/voice`,
+    screenUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ai/screen`
   }
 }
 

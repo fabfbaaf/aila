@@ -1,11 +1,16 @@
 // 语音相关的类型：主进程、预加载和渲染层共用
 
-/** 右键菜单里语音开关的当前状态 */
-export interface VoiceMenuState {
+/** 语音的两个开关 */
+export interface VoiceSwitches {
   wake: boolean
   speak: boolean
 }
-export type VoiceMenuAction = 'toggle-wake' | 'toggle-speak' | 'listen'
+
+/** 右键菜单里的开关：语音两个，加上「留意屏幕上的报错」 */
+export interface VoiceMenuState extends VoiceSwitches {
+  watch: boolean
+}
+export type VoiceMenuAction = 'toggle-wake' | 'toggle-speak' | 'toggle-watch' | 'listen'
 
 // ---------- 本地 AI 服务 /voice 推过来的事件（「耳朵」） ----------
 

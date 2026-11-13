@@ -79,6 +79,8 @@ data: {"type": "done"}
 
 `GET /settings`、`PUT /settings`、`POST /settings/test`：设置窗口读写配置、测试大模型连接。密钥只能写不能读。
 
+`WS /screen`：看屏幕找报错。桌面端发 `{"type": "start"}` 开始、`stop` 停下、`{"type": "pause", "seconds": 3600}` 暂停提醒、`declined`（用户说不用，安静 10 分钟）；服务端推 `started`、`error_seen`（`app`、`title`、`summary`、`snippet`）、`error`（看不了的原因）。连接一断就停。`GET /screen/status`：在不在看、看哪些程序、上次各层过滤的计数。
+
 `GET /health` → `{"ok": true, "model": "deepseek-chat", "tools": [...], "voice": {"ears": "ready", "tts": "ready"}, "embed": "ready"}`
 
 `POST /tts`：`{"text": "我查一下。"}` → `audio/wav`（响应头 `X-Synth-Ms` 是合成耗时）；没有能念的内容（只有标点、网址）时返回 204。
@@ -198,6 +200,24 @@ data: {"type": "done"}
 - 不下载文件；弹窗（alert / confirm）自动关掉；新开的标签页自动切过去。
 - 一次回复最多调用 8 轮工具（网页操作一步一轮）。
 
+### 看屏幕找报错
+
+用户在桌面端打开「留意屏幕上的报错」后，每 2 秒看一眼前台窗口，看到报错就让她问一句「要我帮你看看吗？」。一层层过滤，越往后越贵、越少走到：
+
+| 层 | 做什么 | 过滤掉的 |
+|---|---|---|
+| 0 | 前台窗口是不是写代码的程序（VS Code、JetBrains 全家、Visual Studio、各种终端，`AILA_SCREEN_APPS` 可以追加） | 不是就**不截图**，连像素都不读 |
+| 1 | 16×16 像素一格比较平均灰度：和上次识别时一样就跳过；和 2 秒前不一样说明还在滚动、输出，等它停下 | 光标闪烁、没动静的窗口 |
+| 2 | 本地 OCR（RapidOCR，PP-OCR 模型随安装包自带），**只识别变了的那几行**（往上多带几行，免得 Traceback 开头被切掉） | |
+| 3 | 规则判断：Python Traceback、`XxxError: …`、TS、npm、Java、Maven/Gradle、Rust、Go、C/C++、pytest、jest……按「错误信息长什么样」写，编辑器里的 `raise ValueError(...)`、`except KeyError:` 不会命中 | 没报错的画面 |
+| 4 | 同一个错误（忽略行号、引号里的内容）30 分钟内只问一次；用户说「不用」安静 10 分钟，「一小时内别提醒」就一小时连截图都不做 | 重复的 |
+
+最后交给桌面端问用户；用户点「好」，才把报错附近的十几行交给大模型。
+
+- **隐私**：只有桌面端连着 `/screen` 并发了开始才看，桌面端一关就停；截图和识别出的文字只在内存里，日志只记次数；交给大模型之前把密钥、令牌、`Authorization` 头这类打码。
+- **OCR 参数是对着长报错行调的**：默认参数会漏掉一整行很长的 `TypeError: …`（检测时图缩得太小、文本框扩得不够），改成最长边 1600、扩张系数 2.0，屏幕上的字不会倒着，关掉方向分类。1400×520 的终端截图识别约 0.7 秒。
+- **计数**：每层过滤掉多少都有统计（`GET /screen/status`），设置窗口里能看到；实测前台是浏览器、聊天这些时 100% 不截图。
+
 ### 设置和安全
 
 - `PUT /settings` 只改传了的项，写回 `.env`（注释和其他行原样保留，先写临时文件再改名），然后只重新加载受影响的部分：改大模型就换模型对象，改搜索就重建技能包（接进来的 MCP 不会丢），改声音就在后台重新加载语音模型。
@@ -212,7 +232,7 @@ app/
   deps.py          配置、大模型、各种本地模型的加载、技能包、设置热更新
   security.py      只接受本机的请求
   envfile.py       改 .env（保留注释）
-  routes/          接口：chat（对话、整理记忆、技能包）、voice、knowledge、settings
+  routes/          接口：chat（对话、整理记忆、技能包）、voice、knowledge、settings、screen
   agent.py         工具调用循环：说话 → 调工具（要确认的先问）→ 把结果交回 → 继续说
   confirm.py       等用户回答的操作确认
   llm.py           大模型接入（OpenAI 兼容 / 假模型）、流式工具调用拼接、错误归类
@@ -222,6 +242,7 @@ app/
   memory/          长期记忆：向量（embedder）、回想（recall）、整理（extract）
   knowledge/       资料库：解析（parse）、切块（chunk）、存储和两路检索（store）
   browser/         她自己的浏览器窗口：会话（启动、地址检查、操作、要不要确认）、页面快照
+  screen/          看屏幕找报错：前台窗口截图（capture）、OCR、报错规则和打码（detect）、过滤漏斗（watcher）
   tools/
     __init__.py    技能包框架：Tool、Skill、SkillRegistry、Toolbox（权限检查）
     web.py         「联网」技能包

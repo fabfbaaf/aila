@@ -2,10 +2,30 @@
 
 export type SettingsSection = 'model' | 'voice' | 'skills' | 'knowledge' | 'memory' | 'account' | 'appearance' | 'status'
 
-/** 角色窗口里的语音开关（存在角色窗口那边，设置窗口通过主进程读写） */
+/** 角色窗口里的开关：语音唤醒、出声说话、留意屏幕上的报错（存在角色窗口那边，设置窗口通过主进程读写） */
 export interface VoicePrefs {
   wake: boolean
   speak: boolean
+  watch: boolean
+}
+
+/** AI 服务看屏幕的状态（GET /screen/status） */
+export interface ScreenStatus {
+  available: boolean
+  watching: boolean
+  apps: string[]
+  /** 上一次看屏幕的统计：每一层过滤掉多少 */
+  stats: {
+    ticks: number
+    other_app: number
+    unchanged: number
+    unsettled: number
+    ocr: number
+    ocr_avg_ms: number
+    errors: number
+    duplicates: number
+    asked: number
+  } | null
 }
 
 /** 在设置窗口里做了某件事，让她在桌面上有点反应 */

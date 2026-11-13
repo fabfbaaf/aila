@@ -1,8 +1,13 @@
-// 主进程调用本地 AI 服务的几个接口：设置、资料库、技能包。对话和语音合成在 index.ts 里
+// 主进程调用本地 AI 服务的几个接口：设置、资料库、技能包、看屏幕的状态。对话和语音合成在 index.ts 里
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AiResult, AiSettings, AiSettingsUpdate } from '../shared/settings'
+import type { AiResult, AiSettings, AiSettingsUpdate, ScreenStatus } from '../shared/settings'
+
+/** 看屏幕的状态和上次的统计（设置窗口显示） */
+export function getScreenStatus(aiUrl: string): Promise<AiResult<ScreenStatus>> {
+  return attempt(async () => json<ScreenStatus>(await fetch(`${aiUrl}/screen/status`, { signal: AbortSignal.timeout(3000) })))
+}
 
 /** 设置窗口用：成功、失败都返回一个结果对象，失败原因能直接显示 */
 async function attempt<T>(fn: () => Promise<T>): Promise<AiResult<T>> {

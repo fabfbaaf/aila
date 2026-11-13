@@ -1,4 +1,4 @@
-import type { ListenMode, VoiceEvent, VoiceMenuState } from '../../../shared/voice'
+import type { ListenMode, VoiceEvent, VoiceSwitches } from '../../../shared/voice'
 import type { Behavior } from '../behavior/Behavior'
 import type { Conversation } from '../chat/Conversation'
 import { lines, pick } from '../persona/lines'
@@ -47,7 +47,7 @@ export class VoiceController {
   /** 用户改了要跨设备同步的设置（目前是「出声说话」；唤醒涉及麦克风，每台电脑单独决定） */
   onSettingChanged: (key: string, value: unknown) => void = () => {}
   /** 开关变了（设置窗口要显示） */
-  onPrefsChanged: (prefs: VoiceMenuState) => void = () => {}
+  onPrefsChanged: (prefs: VoiceSwitches) => void = () => {}
   readonly latencies: LatencySample[] = []
 
   private prefs: Prefs
@@ -77,7 +77,7 @@ export class VoiceController {
     return this.prefs.speak
   }
 
-  menuState(): VoiceMenuState {
+  menuState(): VoiceSwitches {
     return { ...this.prefs }
   }
 

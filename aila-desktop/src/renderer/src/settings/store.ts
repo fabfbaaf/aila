@@ -10,7 +10,7 @@ import { bridge } from '../platform/bridge'
 export const store = reactive({
   account: null as AccountStatus | null,
   memories: [] as StoredMemory[],
-  voice: { wake: false, speak: true } as VoicePrefs,
+  voice: { wake: false, speak: true, watch: false } as VoicePrefs,
   knowledgeBusy: '',
   modelPath: null as string | null
 })

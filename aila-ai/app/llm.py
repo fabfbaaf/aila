@@ -163,8 +163,10 @@ def _mock_reply(text: str) -> str:
         return "[happy]你好。……我是艾拉。[nod]今天也请多指教。"
     if any(w in text for w in ("谢谢", "辛苦")):
         return "[relaxed]……不用客气。[tilt]能帮上忙就好。"
+    if text.startswith("我这边报错了"):  # 看屏幕看到的报错，用户同意让她看看
+        return "[think]我看到了……[sad]不过我现在是假模型，还分析不了原因。[nod]填好大模型密钥，我就能帮你看了。"
     if any(w in text for w in ("报错", "bug", "错误", "Error")):
-        return "[surprised]诶……出错了吗？[think]现在的我还看不到代码，[sad]对不起。"
+        return "[surprised]诶……出错了吗？[think]把报错贴给我，或者打开「留意屏幕上的报错」，[nod]我帮你看看。"
     return "[think]……现在还没有接上大模型。[tilt]在 aila-ai/.env 里填好密钥，[nod]我就能好好回答你了。"
 
 
