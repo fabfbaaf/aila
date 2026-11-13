@@ -62,7 +62,7 @@ onActivated(load)
     <p class="hint" style="margin-top: 0">
       支持 MCP 协议的工具服务都能接进来，每个服务是一个技能包（默认关闭）。在
       <code>{{ mcpPath || 'aila-ai/mcp.json' }}</code>
-      里配置（格式见 mcp.example.json），改完重启 aila-ai。只读的工具可以直接用；会改东西的工具要等「操作确认」做好以后才能用。
+      里配置（格式见 mcp.example.json），改完重启 aila-ai。只读的工具可以直接用；会改东西的工具每次用之前她都会先问你，气泡里列出具体内容，你点「好」才执行。
     </p>
     <table v-if="mcp.length" class="list">
       <tr v-for="m in mcp" :key="m.id">

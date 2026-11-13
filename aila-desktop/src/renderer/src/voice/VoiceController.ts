@@ -202,6 +202,8 @@ export class VoiceController {
     clearTimeout(this.timer)
     this.session = 'conversing'
     this.behavior.setListening(false)
+    // 她在等确认时说「好」「不要」就是回答，这一轮回复接着往下走；说别的就当新话题（操作不执行）
+    if (this.conversation.answerText(text)) return
     this.pending = { at: performance.now(), asr: asrMs }
     this.conversation.send(text, true) // 她正在说的话会被打断
   }

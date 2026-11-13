@@ -59,7 +59,11 @@ async def test_disabled_tools_are_refused_even_if_the_model_asks() -> None:
 async def test_write_tools_need_confirmation() -> None:
     box = make_registry().toolbox({"mcp:mail": True})
     assert await box.run(call("mail__read")) == "echo 1"
+    assert box.confirmation(call("mail__read")) is None
     assert "需要用户确认" in await box.run(call("mail__send"))
+    ask = box.confirmation(call("mail__send"))
+    assert ask is not None and ask.skill == "邮件" and ask.detail == "x：1"
+    assert await box.run(call("mail__send"), approved=True) == "echo 1"
 
 
 @pytest.mark.anyio

@@ -1,9 +1,10 @@
-import type { ChatErrorCode, ChatEvent, ChatMessage, Emotion, Gesture } from '../../../shared/chat'
+import type { ChatErrorCode, ChatEvent, ChatMessage, ConfirmAsk, Emotion, Gesture } from '../../../shared/chat'
 import type { RemoteChanges, StoredMessage } from '../../../shared/cloud'
 import type { Mouth } from '../avatar/types'
 import type { Behavior } from '../behavior/Behavior'
 import { lines } from '../persona/lines'
 import { sentenceCut, speakableLength } from '../voice/sentences'
+import { confirmIntent } from './confirmIntent'
 import type { ChatStream, ChatTransport } from './transport'
 
 type Item =
@@ -11,6 +12,8 @@ type Item =
   | { kind: 'emotion'; name: Emotion }
   | { kind: 'action'; name: Gesture }
   | { kind: 'status'; text: string }
+  /** 问完「要我……吗？」，轮到这里时显示「好 / 不要」 */
+  | { kind: 'ask'; ask: ConfirmAsk }
 
 /** 让她出声：合成一句、播放一句。没有或关掉时她只打字 */
 export interface Voice {
@@ -74,6 +77,8 @@ export class Conversation {
   onFirstWords: () => void = () => {}
   /** 一句话正式进入对话记录（用户说的，或她说出口的部分）：交给主进程保存和同步 */
   onCommit: (m: StoredMessage) => void = () => {}
+  /** 开始 / 结束等用户确认（界面显示或收起「好 / 不要」） */
+  onAsk: (ask: ConfirmAsk | null) => void = () => {}
 
   /** 对话记录：带 id 和时间，方便本地保存、多设备合并 */
   private history: StoredMessage[] = []
@@ -93,6 +98,10 @@ export class Conversation {
   private announcing = false
   private pause = 0
   private spokeYet = false
+  /** 正在等用户回答的确认 */
+  private ask: ConfirmAsk | null = null
+  /** 已经结束的确认（用户回答了、超时了）：还排在队列里的按钮不再显示 */
+  private endedAsks = new Set<string>()
 
   // 只打字
   private queue: Item[] = []
@@ -130,6 +139,32 @@ export class Conversation {
 
   get messages(): readonly ChatMessage[] {
     return this.history.map(({ role, content }) => ({ role, content }))
+  }
+
+  /** 正在等用户回答的确认（没有时为 null） */
+  get asking(): ConfirmAsk | null {
+    return this.ask
+  }
+
+  /** 用户回答了确认（点按钮，或者打字、说话被认出是在回答）。没有在等确认时返回 false */
+  answer(approved: boolean): boolean {
+    const ask = this.ask
+    if (!ask) return false
+    this.endedAsks.add(ask.id)
+    this.setAsk(null)
+    if (approved) this.behavior.gesture('nod')
+    this.behavior.setThinking(true) // 等结果：同意了要去执行，不同意她也要回一句
+    void this.transport.confirm(ask.id, approved).then((ok) => {
+      if (!ok) console.warn('[chat] 这个确认已经结束了', ask.id)
+    })
+    return true
+  }
+
+  /** 打字或说的话：是在回答确认就处理掉并返回 true；否则调用方照常当成新的一句话 */
+  answerText(text: string): boolean {
+    if (!this.ask) return false
+    const intent = confirmIntent(text)
+    return intent !== null && this.answer(intent === 'yes')
   }
 
   /** 启动时恢复上次的对话记录 */
@@ -342,9 +377,16 @@ export class Conversation {
     this.pause = 0
     this.budget = 0
     this.spokeYet = false
+    this.endedAsks.clear()
     this.replying = true
     this.voiced = this.voice?.enabled ?? false
     this.behavior.attend()
+  }
+
+  private setAsk(ask: ConfirmAsk | null): void {
+    if (this.ask === ask) return
+    this.ask = ask
+    this.onAsk(ask)
   }
 
   /** 让一个条目生效（字显示出来、标签触发）。返回气泡内容是否变了 */
@@ -369,6 +411,13 @@ export class Conversation {
         this.shown += item.ch
         this.spoken += item.ch
         if (!this.voiced) this.firstWords()
+        return true
+      case 'ask':
+        // 问完了，显示按钮等回答；回复流在 AI 服务那边暂停着
+        if (this.endedAsks.has(item.ask.id)) return false
+        this.status = ''
+        this.behavior.setThinking(false)
+        this.setAsk(item.ask)
         return true
     }
   }
@@ -416,6 +465,24 @@ export class Conversation {
           this.queue.push(item!)
         }
         break
+      case 'confirm': {
+        // 先问一句（和平常说话一样打字或出声），问完再显示按钮；具体内容只显示，不念
+        this.onEvent({ type: 'action', name: 'tilt' })
+        this.onEvent({ type: 'text', text: lines.confirmAsk(ev.action) })
+        const ask: Item = { kind: 'ask', ask: { id: ev.id, skill: ev.skill, action: ev.action, detail: ev.detail } }
+        if (this.voiced) {
+          this.closeSentence(true)
+          this.sentences.push({ items: [ask], text: '', audio: null, requested: true })
+        } else {
+          this.queue.push(ask)
+        }
+        break
+      }
+      case 'confirm_end':
+        // 回答过了，或者等太久 AI 服务那边放弃了
+        this.endedAsks.add(ev.id)
+        if (this.ask?.id === ev.id) this.setAsk(null)
+        break
       case 'done':
         // 收完了，但可能还没说完：等 tick 把剩下的说完再结束
         this.receiving = false
@@ -439,6 +506,7 @@ export class Conversation {
     this.sentenceCount = 0
     this.current = null
     this.recent = []
+    this.setAsk(null) // 回复被打断：AI 服务那边的确认随着流关闭作废，操作不会执行
     this.behavior.setThinking(false)
     this.behavior.setTalking(false)
     this.behavior.setMouth(null)
@@ -459,6 +527,7 @@ export class Conversation {
 
   private finish(): void {
     this.commit()
+    this.setAsk(null)
     this.replying = false
     this.behavior.setTalking(false)
     this.behavior.setMouth(null)

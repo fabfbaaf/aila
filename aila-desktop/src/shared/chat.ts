@@ -11,12 +11,27 @@ export interface ChatMessage {
 /** offline：连不上本地 AI 服务；其余由 AI 服务归类 */
 export type ChatErrorCode = 'offline' | 'auth' | 'rate_limit' | 'quota' | 'network' | 'unknown'
 
+/** 要用户点头的操作。detail 由 AI 服务从工具参数生成（比如完整网址），不是大模型自己的描述 */
+export interface ConfirmAsk {
+  id: string
+  /** 哪个技能包，比如「浏览器」 */
+  skill: string
+  /** 要做的事，她会问「要我{action}吗？」 */
+  action: string
+  detail: string
+}
+
+export type ConfirmResult = 'approved' | 'rejected' | 'timeout'
+
 export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'emotion'; name: Emotion }
   | { type: 'action'; name: Gesture }
   /** 她在用工具（搜索、读网页），text 是给用户看的进度，比如「正在搜索「xxx」」 */
   | { type: 'status'; text: string }
+  /** 会改东西的操作（打开网页、发消息……）：回复暂停，等用户回答（POST /chat/confirm） */
+  | ({ type: 'confirm' } & ConfirmAsk)
+  | { type: 'confirm_end'; id: string; result: ConfirmResult }
   | { type: 'done' }
   | { type: 'error'; code: ChatErrorCode; message: string }
 
@@ -50,6 +65,20 @@ export function parseChatEvent(data: string): ChatEvent | null {
     return typeof ev?.type === 'string' ? ev : null
   } catch {
     return null
+  }
+}
+
+/** 回答一次确认。返回 false：这个确认已经结束了（超时、回复被取消），或者连不上 AI 服务 */
+export async function answerConfirm(baseUrl: string, id: string, approved: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl}/chat/confirm`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, approved })
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }
 

@@ -1,4 +1,4 @@
-"""对话：/chat（流式回复）、/memory/extract（整理记忆）、/skills（技能包）、/health"""
+"""对话：/chat（流式回复）、/chat/confirm（回答工具确认）、/memory/extract（整理记忆）、/skills（技能包）、/health"""
 
 import asyncio
 import json
@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from .. import deps
 from ..agent import run_agent
-from ..deps import get_embedder, get_model, get_registry, status
+from ..confirm import Confirmations
+from ..deps import get_confirmations, get_embedder, get_model, get_registry, status
 from ..llm import ChatModel, Message, classify_error
 from ..memory import Memory, Turn, describe, extract, recall
 from ..persona import SYSTEM_PROMPT
@@ -107,6 +108,7 @@ async def chat(
     model: ChatModel = Depends(get_model),
     registry: SkillRegistry = Depends(get_registry),
     embedder: Any = Depends(get_embedder),
+    confirms: Confirmations = Depends(get_confirmations),
 ) -> StreamingResponse:
     if req.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="最后一条必须是用户消息")
@@ -116,7 +118,7 @@ async def chat(
 
     async def events() -> AsyncIterator[str]:
         try:
-            async for event in run_agent(model, messages, toolbox):
+            async for event in run_agent(model, messages, toolbox, confirms):
                 yield sse(event)
             yield sse({"type": "done"})
         except Exception as err:  # 出错也要告诉桌面端，让艾拉有反应，而不是一直等
@@ -124,8 +126,21 @@ async def chat(
             log.warning("大模型调用失败（%s）：%s", code, err)
             yield sse({"type": "error", "code": code, "message": message})
 
-    # 客户端断开时 Starlette 会取消这个生成器，大模型请求和工具调用也随之停止
+    # 客户端断开时 Starlette 会取消这个生成器，大模型请求和工具调用也随之停止，等着的确认也作废
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+class ConfirmAnswer(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    approved: bool
+
+
+@router.post("/chat/confirm")
+async def chat_confirm(ans: ConfirmAnswer, confirms: Confirmations = Depends(get_confirmations)) -> dict[str, bool]:
+    """用户对工具确认的回答（桌面端的「好 / 不要」）。要在事件循环里执行，所以是 async"""
+    if not confirms.answer(ans.id, ans.approved):
+        raise HTTPException(status_code=404, detail="这个确认已经结束了")
+    return {"ok": True}
 
 
 class ExtractRequest(BaseModel):

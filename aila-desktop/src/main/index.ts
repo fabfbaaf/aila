@@ -15,7 +15,7 @@ import { addKnowledge, deleteKnowledge, getAiSettings, listKnowledge, listSkills
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import WebSocket from 'ws'
-import { AI_SERVICE_URL, streamChat, type ChatMessage } from '../shared/chat'
+import { AI_SERVICE_URL, answerConfirm, streamChat, type ChatMessage } from '../shared/chat'
 import type { AuthForm, MemoryOp, StoredMessage } from '../shared/cloud'
 import type { AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
@@ -357,6 +357,13 @@ function registerIpc(): void {
 
   ipcMain.on('chat:start', (_e, id: number, messages: ChatMessage[]) => void relayChat(id, messages))
   ipcMain.on('chat:cancel', (_e, id: number) => chats.get(id)?.abort())
+  // 「好 / 不要」只认角色窗口发来的（设置窗口和别的页面不能替用户点头）
+  ipcMain.handle('chat:confirm', (e, id: unknown, approved: unknown) => {
+    if (e.sender !== win?.webContents || typeof id !== 'string' || id.length > 64 || typeof approved !== 'boolean') {
+      return false
+    }
+    return answerConfirm(AI_URL, id, approved)
+  })
   ipcMain.handle('tts:synthesize', (_e, text: string) => synthesize(text))
 
   ipcMain.handle('history:load', () => account?.history.visible() ?? [])

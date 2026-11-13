@@ -4,6 +4,7 @@ import { Vector3 } from 'three'
 import SpeechBubble from './components/SpeechBubble.vue'
 import ChatInput from './components/ChatInput.vue'
 import type { CharacterEvent } from '../../shared/settings'
+import type { ConfirmAsk } from '../../shared/chat'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
 import { createTransport } from './chat/transport'
@@ -25,6 +26,8 @@ const bubbleText = ref('')
 const bubbleVisible = ref(false)
 const overAvatar = ref(false)
 const chatOpen = ref(false)
+/** 她在等用户确认的操作（气泡里显示「好 / 不要」） */
+const ask = ref<ConfirmAsk | null>(null)
 
 const behavior = new Behavior()
 const transport = createTransport()
@@ -63,6 +66,7 @@ function showBubble(text: string, holdMs: number | null): void {
 behavior.onSay = showBubble
 conversation.onBubble = showBubble
 voiceControl.onBubble = showBubble
+conversation.onAsk = (a) => (ask.value = a)
 
 function onVoiceMenu(action: VoiceMenuAction): void {
   if (action === 'toggle-wake') void voiceControl.toggleWake()
@@ -96,6 +100,8 @@ function closeChat(): void {
 }
 
 function onSend(text: string): void {
+  // 她在等确认时打「好」「不要」就是回答；打别的话当新话题（这个操作不执行）
+  if (conversation.answerText(text)) return
   conversation.send(text)
 }
 
@@ -301,7 +307,7 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
     ></div>
-    <SpeechBubble :text="bubbleText" :visible="bubbleVisible" />
+    <SpeechBubble :text="bubbleText" :visible="bubbleVisible" :ask="ask" @answer="(ok) => conversation.answer(ok)" />
     <ChatInput v-if="chatOpen" ref="chatInput" @send="onSend" @close="closeChat" />
     <input ref="fileInput" type="file" accept=".vrm" hidden @change="onFile" />
   </div>

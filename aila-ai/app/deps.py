@@ -17,9 +17,11 @@ import httpx
 from . import envfile
 from .config import ENV_FILE as CONFIG_ENV_FILE
 from .config import load_settings
+from .confirm import Confirmations
 from .knowledge import KnowledgeBase, knowledge_skill
 from .llm import ChatModel, MockModel, OpenAICompatibleModel
 from .tools import Skill, SkillRegistry
+from .tools.browser import browser_skill
 from .tools.mcp import McpHub, load_config
 from .tools.search import BochaSearch, MockSearch, SearchProvider, TavilySearch
 from .tools.web import web_skill
@@ -34,6 +36,12 @@ http_client = httpx.AsyncClient()
 
 # /health 用：off / loading / ready / 出错原因
 status: dict[str, str] = {"ears": "off", "tts": "off", "embed": "off"}
+# 正在等用户回答的工具确认（所有对话共用）
+confirmations = Confirmations()
+
+
+def get_confirmations() -> Confirmations:
+    return confirmations
 
 
 @lru_cache
@@ -141,7 +149,7 @@ _mcp_skills: list[Skill] = []
 def get_registry() -> SkillRegistry:
     search = _search_provider()
     log.info("联网搜索：%s", search.name if search else "未配置（只能读用户给的链接）")
-    registry = SkillRegistry([web_skill(http_client, search), knowledge_skill(get_knowledge())])
+    registry = SkillRegistry([web_skill(http_client, search), knowledge_skill(get_knowledge()), browser_skill()])
     for skill in _mcp_skills:
         registry.add(skill)
     return registry

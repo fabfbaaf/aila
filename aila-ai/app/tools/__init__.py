@@ -4,7 +4,11 @@
 - Skill：一组相关的工具，比如「联网」（搜索、读网页）、「资料库」、接进来的 MCP 服务
 - SkillRegistry：所有技能包；每次对话按用户的开关组装出这次能用的工具（Toolbox）
 - Toolbox：执行前统一检查——不在这次清单里的工具不执行（大模型偶尔会「编」一个关掉的工具名），
-  有副作用的工具（risk="write"）要用户确认才能执行（确认流程和浏览器操作一起做，现在一律拒绝）
+  有副作用的工具（risk="write"）必须用户点头才执行：对话循环先问用户（见 app/confirm.py），
+  同意了才带着 approved=True 调用；没经过确认的调用一律拒绝
+
+确认时给用户看的内容（要做什么、具体参数）由代码从工具参数生成，不用大模型自己的描述：
+大模型可能被网页里的话带偏，嘴上说「打开官网」，实际参数是另一个地址。
 
 所有工具返回的都是文字：出错也返回一句话，让她能告诉用户发生了什么，而不是整次回复失败。
 """
@@ -29,6 +33,11 @@ class ToolError(Exception):
     """工具执行失败，消息原样交给大模型（再由她转告用户）"""
 
 
+# 确认时显示的参数：每项和总长都有上限，免得一大段内容把气泡撑满
+DETAIL_VALUE_CHARS = 200
+DETAIL_CHARS = 600
+
+
 @dataclass
 class Tool:
     name: str
@@ -38,10 +47,35 @@ class Tool:
     # 桌面端气泡里显示的进度，比如「正在搜索「xxx」」
     status: Callable[[dict[str, Any]], str] = lambda _: "正在处理"
     risk: Risk = "read"
+    # 以下只对要确认的工具有用：她问「要我{action}吗？」，气泡里列出 detail（默认把参数逐项列出来）
+    action: str = ""
+    detail: Callable[[dict[str, Any]], str] | None = None
+    # 参数检查：返回错误说明就不执行（也不去打扰用户确认一个注定失败的操作）
+    validate: Callable[[dict[str, Any]], str | None] | None = None
 
     @property
     def spec(self) -> dict[str, Any]:
         return {"type": "function", "function": {"name": self.name, "description": self.description, "parameters": self.parameters}}
+
+
+@dataclass(frozen=True)
+class Confirmation:
+    """要用户确认的一次工具调用"""
+
+    skill: str
+    action: str
+    detail: str
+
+
+def format_args(args: dict[str, Any]) -> str:
+    lines = []
+    for key, value in args.items():
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        if len(text) > DETAIL_VALUE_CHARS:
+            text = text[:DETAIL_VALUE_CHARS] + "…"
+        lines.append(f"{key}：{text}")
+    out = "\n".join(lines) or "（没有参数）"
+    return out if len(out) <= DETAIL_CHARS else out[:DETAIL_CHARS] + "…"
 
 
 @dataclass
@@ -58,9 +92,10 @@ class Skill:
 class Toolbox:
     """这一次对话能用的工具"""
 
-    def __init__(self, tools: list[Tool], blocked: set[str] | None = None) -> None:
+    def __init__(self, tools: list[Tool], blocked: set[str] | None = None, skill_names: dict[str, str] | None = None) -> None:
         self._tools = {t.name: t for t in tools}
         self._blocked = blocked or set()
+        self._skill_names = skill_names or {}
 
     @property
     def specs(self) -> list[dict[str, Any]]:
@@ -74,7 +109,19 @@ class Toolbox:
         tool = self._tools.get(call.name)
         return tool.status(parse_args(call.arguments) or {}) if tool else "正在处理"
 
-    async def run(self, call: ToolCall) -> str:
+    def confirmation(self, call: ToolCall) -> Confirmation | None:
+        """这次调用要不要先问用户；不用问（只读、工具不存在、参数不对）时返回 None，交给 run 处理"""
+        tool = self._tools.get(call.name)
+        args = parse_args(call.arguments)
+        if tool is None or tool.risk == "read" or args is None:
+            return None
+        if tool.validate and tool.validate(args):
+            return None
+        detail = tool.detail(args) if tool.detail else format_args(args)
+        return Confirmation(self._skill_names.get(call.name, ""), tool.action or f"用「{tool.name}」", detail)
+
+    async def run(self, call: ToolCall, approved: bool = False) -> str:
+        """approved：用户已经点头了（只有对话循环在确认之后才会传 True）"""
         args = parse_args(call.arguments)
         if args is None:
             return "工具参数格式不对，请重新调用。"
@@ -83,8 +130,10 @@ class Toolbox:
             if call.name in self._blocked:
                 return "这个能力被用户关掉了，现在用不了。"
             return f"没有叫 {call.name} 的工具。"
-        if tool.risk != "read":
-            # 会改变东西的操作（发消息、改文件……）必须用户点头，确认流程还没做，先一律不执行
+        if tool.validate and (problem := tool.validate(args)):
+            return problem
+        if tool.risk != "read" and not approved:
+            # 会改变东西的操作（打开网页、发消息、改文件……）必须用户点头
             return "这个操作需要用户确认，现在还不能直接执行。"
         try:
             return await tool.run(args)
@@ -121,7 +170,7 @@ class SkillRegistry:
                 tools.extend(s.tools)
             else:
                 blocked.update(t.name for t in s.tools)
-        return Toolbox(tools, blocked)
+        return Toolbox(tools, blocked, {t.name: s.name for s in self._skills.values() for t in s.tools})
 
     def describe(self, overrides: dict[str, bool] | None = None) -> list[dict[str, Any]]:
         """给桌面端的技能包列表（菜单里显示开关）"""

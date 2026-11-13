@@ -34,6 +34,9 @@ const api = {
   // 对话
   chatStart: (id: number, messages: ChatMessage[]): void => ipcRenderer.send('chat:start', id, messages),
   chatCancel: (id: number): void => ipcRenderer.send('chat:cancel', id),
+  /** 回答她的确认（「好 / 不要」）；false 表示这个确认已经结束了 */
+  chatConfirm: (confirmId: string, approved: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('chat:confirm', confirmId, approved),
   onChatEvent: (cb: (id: number, ev: ChatEvent) => void): void => {
     ipcRenderer.on('chat:event', (_e, id, ev) => cb(id, ev))
   },

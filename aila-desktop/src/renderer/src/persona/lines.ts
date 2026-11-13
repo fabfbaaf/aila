@@ -36,7 +36,10 @@ export const lines = {
 
   // 记忆
   forgetOne: ['……嗯，这件事我不记得了。', '……好，忘掉了。'],
-  forgetAll: '……都忘掉了。我们重新认识一下吧。'
+  forgetAll: '……都忘掉了。我们重新认识一下吧。',
+
+  /** 会改东西的操作执行前问一句（具体内容显示在气泡里，不念出来） */
+  confirmAsk: (action: string): string => `……要我${action}吗？`
 }
 
 export function greeting(hour: number): string {

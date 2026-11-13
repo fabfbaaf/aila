@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import deps
-from .deps import get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
+from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
 from .routes import chat, knowledge, settings, voice
 from .routes.chat import ChatMessage, ChatRequest, build_messages
 from .security import LocalOnly
@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 __all__ = [
     "ChatMessage", "ChatRequest", "app", "build_messages",
-    "get_ears", "get_embedder", "get_knowledge", "get_model", "get_registry", "get_voice",
+    "get_confirmations", "get_ears", "get_embedder", "get_knowledge", "get_model", "get_registry", "get_voice",
 ]
 
 

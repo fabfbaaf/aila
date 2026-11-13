@@ -1,4 +1,4 @@
-import { streamChat, type ChatEvent, type ChatMessage } from '../../../shared/chat'
+import { answerConfirm, streamChat, type ChatEvent, type ChatMessage } from '../../../shared/chat'
 import type { AilaApi } from '../../../preload/index'
 import { bridge } from '../platform/bridge'
 
@@ -9,6 +9,8 @@ export interface ChatStream {
 /** 把对话历史发给本地 AI 服务，事件按顺序回调，最后一定是 done 或 error（取消后不再回调） */
 export interface ChatTransport {
   start(messages: ChatMessage[], onEvent: (ev: ChatEvent) => void): ChatStream
+  /** 回答她的确认；false 表示这个确认已经结束了 */
+  confirm(id: string, approved: boolean): Promise<boolean>
   /** 一句话转语音，返回 WAV；没有能念的内容时返回 null，服务不可用时抛错 */
   synthesize(text: string): Promise<ArrayBuffer | null>
   /** 语音（耳朵）的 WebSocket 地址 */
@@ -38,6 +40,7 @@ function desktopTransport(api: AilaApi): ChatTransport {
         }
       }
     },
+    confirm: (id, approved) => api.chatConfirm(id, approved),
     synthesize: (text) => api.synthesize(text),
     // WebSocket 不受跨域限制，CSP 也允许 ws:，渲染层直接连；服务端会检查 Origin
     voiceUrl: api.aiUrl.replace(/^http/, 'ws') + '/voice'
@@ -52,6 +55,7 @@ function webTransport(): ChatTransport {
       void streamChat('/ai', messages, controller.signal, onEvent)
       return { cancel: () => controller.abort() }
     },
+    confirm: (id, approved) => answerConfirm('/ai', id, approved),
     synthesize: async (text) => {
       const res = await fetch('/ai/tts', {
         method: 'POST',

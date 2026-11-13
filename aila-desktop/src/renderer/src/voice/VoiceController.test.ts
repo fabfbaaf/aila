@@ -44,7 +44,8 @@ function setup() {
     onFirstWords: () => {},
     send: vi.fn(),
     announce: vi.fn(),
-    interrupt: vi.fn()
+    interrupt: vi.fn(),
+    answerText: vi.fn((_text: string) => false)
   }
   const speaker = { duck: vi.fn(), lastEndedAt: -Infinity }
   const bubbles: string[] = []
@@ -130,6 +131,24 @@ describe('VoiceController', () => {
     ear.onEvent({ type: 'transcript', text: '等一下', emotion: 'neutral', asr_ms: 90 })
     expect(speaker.duck).toHaveBeenLastCalledWith(false)
     expect(conversation.send).toHaveBeenLastCalledWith('等一下', true)
+  })
+
+  it('她在等确认时说「好」：当作回答，不打断这一轮回复', () => {
+    const { ear, conversation } = setup()
+    ear.onEvent({ type: 'wake', keyword: '你好艾拉' })
+    ear.onEvent({ type: 'transcript', text: '帮我打开 GitHub', emotion: 'neutral', asr_ms: 100 })
+    conversation.send.mockClear()
+    conversation.busy = true
+    conversation.answerText.mockImplementation((text: string) => text === '好的')
+
+    ear.onEvent({ type: 'speech_start' })
+    ear.onEvent({ type: 'transcript', text: '好的', emotion: 'neutral', asr_ms: 80 })
+    expect(conversation.answerText).toHaveBeenLastCalledWith('好的')
+    expect(conversation.send).not.toHaveBeenCalled()
+
+    // 说的不是回答：照常当新的一句话（打断回复，操作不执行）
+    ear.onEvent({ type: 'transcript', text: '先帮我查一下天气', emotion: 'neutral', asr_ms: 80 })
+    expect(conversation.send).toHaveBeenLastCalledWith('先帮我查一下天气', true)
   })
 
   it('听到的是她自己的回声：恢复音量，不打断', () => {
