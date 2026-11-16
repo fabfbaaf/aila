@@ -18,6 +18,7 @@ COMMANDS: dict[str, str] = {
     "/init": "让她读一遍项目，写一份 AGENTS.md（以后每个会话开头都会带上）",
     "/merge": "在新分支上做时：跑测试、合并回你的代码；/merge 直接 = 不跑测试直接合并",
     "/discard": "在新分支上做时：放弃分支，你的代码保持原样",
+    "/rules": "看这个项目记住的命令；/rules forget 编号 删掉一条，下次执行时重新按权限模式确认",
     "/exit": "退出（Ctrl+D 也行）",
 }
 ALIASES = {"/quit": "/exit", "/sessions": "/resume", "/cost": "/usage", "/clear": "/new", "/?": "/help"}

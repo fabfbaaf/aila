@@ -185,3 +185,22 @@ async def answer(req: Answer, rt: Runtime = Depends(get_runtime)) -> dict:
     if not rt.confirms.answer(req.id, req.approved, req.remember):
         raise HTTPException(404, "这个确认已经结束了")
     return {"ok": True}
+
+
+class ForgetRule(BaseModel):
+    project: str = Field(min_length=1, max_length=1000)
+    command: str = Field(min_length=1, max_length=20000)
+
+
+@router.get("/rules")
+async def list_rules(rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """按项目列出用户记住的命令，不执行其中任何内容。"""
+    return [{"project": project, "commands": commands} for project, commands in sorted(rt.rules.all().items())]
+
+
+@router.delete("/rules")
+async def forget_rule(req: ForgetRule, rt: Runtime = Depends(get_runtime)) -> dict:
+    if req.command not in rt.rules.commands(req.project):  # type: ignore[arg-type]
+        raise HTTPException(404, "没有这条记住的命令，可能已经删掉了。")
+    rt.rules.forget(req.project, req.command)  # type: ignore[arg-type]
+    return {"ok": True}

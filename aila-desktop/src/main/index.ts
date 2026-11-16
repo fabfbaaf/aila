@@ -22,6 +22,8 @@ import {
   codeOutline,
   codeProjectAction,
   deleteKnowledge,
+  forgetAgentRule,
+  getAgentRules,
   getAiSettings,
   getFixStats,
   getScreenStatus,
@@ -558,6 +560,15 @@ function registerIpc(): void {
   )
   ipcMain.handle('agent:compact', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.compact(sid) : notAllowed))
   ipcMain.handle('agent:context', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.context(sid) : notAllowed))
+  ipcMain.handle('agent:rules', (e) => (fromAgent(e) ? getAgentRules(AI_URL) : notAllowed))
+  ipcMain.handle('agent:rules:forget', (e, project: unknown, command: unknown) => {
+    if (!fromAgent(e)) return notAllowed
+    if (typeof project !== 'string' || !project.trim() || project.length > 1000 ||
+        typeof command !== 'string' || !command.trim() || command.length > 20000) {
+      return { ok: false, error: '项目路径和命令要是非空文字，路径最多 1000 字，命令最多 20000 字。' }
+    }
+    return forgetAgentRule(AI_URL, project, command)
+  })
   ipcMain.handle('agent:confirm', (e, id: unknown, approved: unknown, remember: unknown) => {
     if (!fromAgent(e) || typeof id !== 'string' || id.length > 64 || typeof approved !== 'boolean') return false
     return agentRelay.confirm(id, approved, remember === true)

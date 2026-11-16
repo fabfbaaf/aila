@@ -11,6 +11,13 @@ export type SettingsSection =
   | 'account'
   | 'appearance'
   | 'status'
+  | 'agent'
+
+/** 一个项目里「以后都允许」的命令；路径和命令都按原文删除。 */
+export interface AgentRuleGroup {
+  project: string
+  commands: string[]
+}
 
 /** 她修代码的记录：修过几次、跑了测试的几次、测试通过几次、改进用户代码几次（GET /code/fixes） */
 export interface FixStats {

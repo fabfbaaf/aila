@@ -10,6 +10,7 @@ import SkillsSection from '../settings/sections/SkillsSection.vue'
 import AccountSection from '../settings/sections/AccountSection.vue'
 import AppearanceSection from '../settings/sections/AppearanceSection.vue'
 import StatusSection from '../settings/sections/StatusSection.vue'
+import AgentSection from '../settings/sections/AgentSection.vue'
 
 const props = defineProps<{ section: SettingsSection }>()
 const emit = defineEmits<{ go: [route: ShellRoute] }>()
@@ -20,7 +21,8 @@ const VIEWS: Partial<Record<SettingsSection, Component>> = {
   skills: SkillsSection,
   account: AccountSection,
   appearance: AppearanceSection,
-  status: StatusSection
+  status: StatusSection,
+  agent: AgentSection
 }
 const view = computed(() => VIEWS[props.section] ?? ModelSection)
 </script>
@@ -39,7 +41,7 @@ const view = computed(() => VIEWS[props.section] ?? ModelSection)
       </button>
     </nav>
     <div class="content">
-      <div v-if="!bridge" class="empty">设置只在桌面版里能用（npm run dev）。</div>
+      <div v-if="!bridge && section !== 'agent'" class="empty">设置只在桌面版里能用（npm run dev）。</div>
       <KeepAlive v-else>
         <component :is="view" :key="section" />
       </KeepAlive>

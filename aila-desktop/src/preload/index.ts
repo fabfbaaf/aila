@@ -12,6 +12,7 @@ import type {
   StoredMessage
 } from '../shared/cloud'
 import type {
+  AgentRuleGroup,
   AiResult,
   AiSettings,
   AiSettingsUpdate,
@@ -139,6 +140,8 @@ const api = {
     ipcRenderer.invoke('agent:confirm', id, approved, remember),
   agentPickFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:pick-folder'),
   agentTakeFocus: (): Promise<string | null> => ipcRenderer.invoke('agent:take-focus'),
+  agentRules: (): Promise<AiResult<AgentRuleGroup[]>> => ipcRenderer.invoke('agent:rules'),
+  agentForgetRule: (project: string, command: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:rules:forget', project, command),
   onAgentEvent: (cb: (sid: string, event: AgentEvent) => void): Unsubscribe => listen('agent:event', cb),
   onAgentStreamEnd: (cb: (sid: string, error?: string) => void): Unsubscribe => listen('agent:stream-end', cb),
   onAgentFocus: (cb: (sid: string) => void): Unsubscribe => listen('agent:focus', cb),
