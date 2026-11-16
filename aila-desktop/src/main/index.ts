@@ -47,6 +47,8 @@ import { AgentRelay } from './agent'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
 import type { SocketLike } from './cloud/sync'
+import { createServiceKeeper } from './serviceNode'
+import { registerServiceIpc } from './serviceIpc'
 
 // 桌面窗口：透明、无边框、置顶，只在角色身上响应鼠标
 const WIN_WIDTH = 300
@@ -59,6 +61,12 @@ const LISTEN_SHORTCUT = 'Alt+Shift+V'
 /** 免打扰：把她藏起来 / 叫回来（H = Hide） */
 const HIDE_SHORTCUT = 'Alt+Shift+H'
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
+const serviceKeeper = createServiceKeeper({
+  packaged: app.isPackaged,
+  appPath: app.getAppPath(),
+  url: AI_URL,
+  changed: (state) => broadcast('service:state', state)
+})
 
 // 开发调试：设置 AILA_REMOTE_DEBUG=端口 时打开远程调试，用脚本驱动真实窗口做端到端测试（打包后无效）
 if (process.env['AILA_REMOTE_DEBUG'] && !app.isPackaged) {
@@ -557,6 +565,7 @@ function registerIpc(): void {
   })
   // 编程 Agent：只认主窗口发来的（角色窗口不能替你开会话、点「可以」）
   const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
+  registerServiceIpc(ipcMain, serviceKeeper, fromAgent)
   const sidOk = (sid: unknown): sid is string => typeof sid === 'string' && /^[\w-]{1,64}$/.test(sid)
   const notAllowed = { ok: false, error: '只有主窗口能用' }
   ipcMain.handle('agent:list', (e) => (fromAgent(e) ? agentRelay.list() : notAllowed))
@@ -783,6 +792,7 @@ app.whenReady().then(() => {
     loadPrefs: () => loadSettings().desktop,
     savePrefs: (prefs: DesktopPrefs) => saveSettings({ ...loadSettings(), desktop: prefs })
   })
+  void serviceKeeper.start()
   createWindow()
   createTray()
   desktop.start()
@@ -797,7 +807,18 @@ app.whenReady().then(() => {
   }
 })
 
-app.on('will-quit', () => {
+let serviceClosing = false
+let serviceClosed = false
+app.on('will-quit', (event) => {
+  // Electron 不等待异步监听器；先拦住这次退出，最多等三秒结束自己开的服务，再继续退出。
+  if (!serviceClosed) {
+    event.preventDefault()
+    if (!serviceClosing) {
+      serviceClosing = true
+      void serviceKeeper.shutdown().finally(() => { serviceClosed = true; app.quit() })
+    }
+    return
+  }
   globalShortcut.unregisterAll()
   agentRelay.stopAll()
   account?.shutdown() // 还没写盘的聊天记录写下去

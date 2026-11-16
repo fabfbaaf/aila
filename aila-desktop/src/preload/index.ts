@@ -27,6 +27,7 @@ import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, A
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
+import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -43,6 +44,11 @@ function listen<A extends unknown[]>(channel: string, cb: (...args: A) => void):
 
 // 渲染层能用的全部能力都在这里，渲染层不直接接触 Node 和 Electron
 const api = {
+  // AI 服务托管：日志和重启在主进程核对主窗口身份。
+  serviceStatus: (): Promise<ServiceState> => ipcRenderer.invoke('service:status'),
+  serviceLogs: (): Promise<AiResult<ServiceLog[]>> => ipcRenderer.invoke('service:logs'),
+  serviceRestart: (): Promise<ServiceResult> => ipcRenderer.invoke('service:restart'),
+  onServiceState: (cb: (state: ServiceState) => void): Unsubscribe => listen('service:state', cb),
   setIgnoreMouse: (ignore: boolean): void => ipcRenderer.send('win:set-ignore-mouse', ignore),
   focusWindow: (): void => ipcRenderer.send('win:focus'),
   blurWindow: (): void => ipcRenderer.send('win:blur'),

@@ -4,14 +4,15 @@
 
 ## 运行
 
-对话和语音要先启动本地 AI 服务（在旁边的 `aila-ai` 目录，见它的 README，语音模型要先下载）：
+开发时桌面端会自己启动旁边的 `aila-ai`，不需要另开服务终端。先在 `aila-ai` 里建好虚拟环境和依赖（语音模型见它的 README）：
 
 ```powershell
 cd ..\aila-ai
-.venv\Scripts\python -m app   # 127.0.0.1:8765；没填密钥时用假模型
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
-然后启动桌面端：
+回到 `aila-desktop` 启动桌面端：
 
 ```bash
 npm install
@@ -22,6 +23,12 @@ npm test           # 单元测试（切句、口型、回声判断、语音会�
 npm run typecheck  # 类型检查
 npm run build      # 打包到 out/
 ```
+
+设置 →「运行状态」最上面的「AI 服务」卡片可以看状态、进程号、最近 200 行日志，或者手动重启。第一次加载模型最多等 60 秒；服务崩溃后按 1、3、9 秒重试，5 分钟内用完 3 次重试会暂停，查看日志后点「重启服务」。退出应用会结束自己开的服务和它的子进程，关闭主窗口则继续运行。
+
+想直接看服务终端输出时，仍可先在 `aila-ai` 里运行 `.venv\Scripts\python -m app`。桌面端检测到后显示「别人开的」，不重启它，退出时也不关它。`npm run dev:web` 只是浏览器页面，没有主进程托管，需要自己启动服务。
+
+服务目录或 Python 在别处时，设置 `AILA_AI_DIR`、`AILA_AI_PYTHON`。`AILA_AI_URL` 可改地址和端口，托管进程会使用这个地址的 host 和 port；健康检查不会经过系统代理。当前安装包的服务入口还没实现（由任务 06 补充），找不到服务时卡片会显示建虚拟环境的说明。日志不枚举环境变量，常见密钥写法会隐藏；不要让服务主动输出敏感信息。
 
 ## 怎么玩
 
