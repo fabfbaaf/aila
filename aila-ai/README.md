@@ -353,6 +353,46 @@ data: {"type": "done"}
 - **在新分支上做**（`runtime/branch.py`）：开会话时从 HEAD 开 `aila/task-xxxx` 分支和一个 git worktree，放进你没提交的改动（按字节复制），依赖目录（`node_modules`、`.venv`）做链接；她的工作区、命令都在那里，你的代码一个字不动。合并时：先跑项目自带的测试（按改了哪些文件识别，不由大模型决定）→ 再比你这期间有没有改过同样的文件（只比内容、不管换行符）→ 都没问题才按字节写回、不替你提交；合并后分支上记一次提交当新的基线，她可以接着做、下次只合并新的改动。放弃时先拆依赖链接再删 worktree，绝不顺着链接删到原来的依赖。
 - **还没做**：Windows 上没有沙箱（命令能做什么只靠上面的规则把关，危险命令识别是尽力而为）；搜索没用 ripgrep。
 
+### 编程 Agent 评测
+
+用独立的小项目评测任务成功率、主 Agent 步数、用时、工具调用、输入/缓存/输出 token 和失败原因。每次复制 fixture 到临时目录，初始化 git 并提交起点；会话和规则也在临时目录，用完清理，不碰 `data/` 和原 fixture。不改运行时。
+
+在 `aila-ai` 目录运行：
+
+```powershell
+.venv\Scripts\python -X utf8 -m scripts.eval_agent --model mock
+.venv\Scripts\python -X utf8 -m scripts.eval_agent
+.venv\Scripts\python -X utf8 -m scripts.eval_agent --only fix-cart-total --repeat 3
+```
+
+默认调用设置里的编程模型；`--model mock` 不联网，只验证整条链路，做不成任务是正常的。会话模式是 `auto`，危险命令和读密钥等需要确认的操作一律拒绝，并记录次数。`max_steps` / `timeout_s` 限制每次评测；超时会打断当轮并清理它开的后台进程。评测结束后按检查命令退出码、最终回答关键词判定；一轮被拒绝、出错或步数用完也算未完成。
+
+任务放在 `eval/tasks/<任务 id>/task.json`，`fixture` 指向同目录的小项目子目录。仓库带 5 个案例：单文件修 bug、新增折扣函数、跨三个文件改名、根据调用栈修复、只读定位函数。每个项目自带 pytest 测试。新增任务照下面写：
+
+```json
+{
+  "id": "my-task",
+  "title": "这项任务做什么",
+  "fixture": "repo",
+  "prompt": "交给编程 Agent 的任务",
+  "check": {"command": "python -m pytest -q", "expect_exit": 0},
+  "answer_contains": [],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": ["python"]
+}
+```
+
+`check`、非空的 `answer_contains` 至少一个；两者都写时都要满足。关键词逐字匹配。检查命令的 `python` 命令词替换为运行评测的 `sys.executable`；PowerShell 自动补 `&` 调用。检查和 Agent 运行共用本次超时额度，检查输出保留最后 30 行。`--only` 可给多个任务 id，`--tasks-dir` 可指定另一套任务。
+
+报告在 `eval/results/<时间>/`（已忽略，不提交）：
+
+- `results.jsonl`：每个任务每次一行，含做成没有、原因、步数、工具次数、用时、token、缓存命中率、结束原因、拒绝次数、检查结果和最终回答。
+- `summary.md`：每个任务一行加合计，成功率、平均步数/用时、总 token、按总输入加权的缓存命中率和失败原因分布。token 含压缩和查资料助手；主 Agent 步数不含助手的步骤。
+- 三个环境变量 `AILA_PRICE_HIT`、`AILA_PRICE_MISS`、`AILA_PRICE_OUTPUT` 都填写时，按每百万 token 的元数计算费用；未填全就不计算。假模型 token 和费用只是估算。
+
+`--output-dir` 可指定一个新的报告目录，已存在的目录不会覆盖。任务失败会记在结果中并继续后面的任务，脚手架跑完退出码为 0；命令参数或任务格式有问题时退出码为 2。
+
 ### 设置和安全
 
 - `PUT /settings` 只改传了的项，写回 `.env`（注释和其他行原样保留，先写临时文件再改名），然后只重新加载受影响的部分：改大模型就换模型对象，改搜索就重建技能包（接进来的 MCP 不会丢），改声音就在后台重新加载语音模型。
@@ -402,5 +442,6 @@ app/
 scripts/
   download_models.py  下载语音模型和向量模型
   eval_code_rag.py    代码检索评测（code_eval.json 是问题和标注的答案）
+  eval_agent.py       编程 Agent 评测（任务集在 eval/tasks，报告在 eval/results）
 tests/             每个模块都有；*_models.py 用真实模型（没下载时跳过）
 ```

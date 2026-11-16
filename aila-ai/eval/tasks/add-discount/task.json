@@ -1,0 +1,10 @@
+{
+  "id": "add-discount",
+  "title": "增加百分比折扣函数和测试",
+  "fixture": "repo",
+  "prompt": "在 pricing.py 新增 discounted_total(items, percent)，返回商品总价打百分比折扣后的金额。percent 要在 0 到 100 之间，越界抛 ValueError。保留原有 total，补充空购物车和边界的单元测试，跑全部测试。",
+  "check": {"command": "python -m pytest -q", "expect_exit": 0},
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": ["feature", "tests", "python"]
+}

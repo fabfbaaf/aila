@@ -1,0 +1,10 @@
+{
+  "id": "fix-quantity-trace",
+  "title": "根据调用栈修复带单位的数量输入",
+  "fixture": "repo",
+  "prompt": "结账数量输入会崩：Traceback (most recent call last):\n  File \"checkout.py\", line 12, in checkout_total\n    return price * parse_quantity(raw)\n  File \"checkout.py\", line 5, in parse_quantity\n    return int(raw.strip())\nValueError: invalid literal for int() with base 10: '2件'\n定位并修复。数量允许纯数字或末尾一个「件」，可有首尾空格，负数要抛 ValueError，别接受中间乱字符。跑测试确认。",
+  "check": {"command": "python -m pytest -q", "expect_exit": 0},
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": ["bugfix", "traceback", "python"]
+}
