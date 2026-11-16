@@ -11,6 +11,7 @@ from rich.console import Console
 
 from app.cli.app import Terminal
 from app.cli.backend import EmbeddedBackend
+from app.cli.render import Renderer
 from app.cli.views import build_trace, ledger_view, trace_view
 from app.llm import ToolCall, Usage
 from app.runtime.runner import Runtime
@@ -37,6 +38,26 @@ EVENTS = [
 
 def recording() -> Console:
     return Console(record=True, width=120, force_terminal=False, color_system=None, file=io.StringIO())
+
+
+def test_renderer_replays_background_jobs() -> None:
+    console = recording()
+    renderer = Renderer(console)
+    renderer.replay([
+        {"type": "assistant", "text": "", "tool_calls": [
+            {"id": "a", "name": "run_command", "arguments": json.dumps({"command": "npm test", "background": False})},
+            {"id": "b", "name": "run_command", "arguments": json.dumps({
+                "command": "npm run dev", "description": "启动开发服务器", "background": True})},
+            {"id": "c", "name": "job_output", "arguments": '{"id":"job-1"}'},
+            {"id": "d", "name": "job_stop", "arguments": '{"id":"job-1"}'},
+        ]},
+        *[{"type": "tool", "id": key, "name": name, "status": "ok", "content": "job-1"}
+          for key, name in (("a", "run_command"), ("b", "run_command"), ("c", "job_output"), ("d", "job_stop"))],
+        {"type": "turn_end", "reason": "done"},
+    ])
+    out = console.export_text()
+    assert "● npm test" in out and "● 后台：启动开发服务器" in out
+    assert "● 看后台任务 job-1 的输出" in out and "● 停掉后台任务 job-1" in out
 
 
 def test_trace_matches_the_window_version() -> None:

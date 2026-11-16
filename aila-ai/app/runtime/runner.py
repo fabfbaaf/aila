@@ -288,6 +288,7 @@ class Runtime:
                 await task
             except BaseException:
                 pass
+        await asyncio.gather(*(agent.tools.jobs.shutdown() for agent in self._agents.values()))
 
 
 def _unfinished(session: Session) -> bool:
