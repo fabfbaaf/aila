@@ -76,9 +76,13 @@ def test_search_by_latest_title_or_path_and_case_insensitive_project(tmp_path: P
 async def test_delete_removes_file_cache_and_idle_subscription(tmp_path: Path) -> None:
     rt = runtime(tmp_path)
     session = rt.create(str(tmp_path))
+    sublogs = session.path.with_suffix(".sub")
+    child = SessionStore(sublogs).create(session.cwd, "read_only", "测试助手", "")
+    child.append({"type": "user", "text": "查一下这个项目"})
     stream = rt.subscribe(session.id)
     await rt.delete(session.id)
     assert not session.path.exists() and rt.store.list() == []
+    assert not sublogs.exists()
     assert rt.store.get(session.id) is None
     assert session.id not in rt._agents and session.id not in rt._tasks and session.id not in rt._listeners
     assert [e["type"] async for e in stream] == ["start"]
@@ -131,11 +135,11 @@ async def test_delete_prevents_new_turn_or_second_delete_while_cleaning(tmp_path
     tools = rt.agent(session.id).tools
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def shutdown() -> None:
+    async def stop_all() -> None:
         entered.set()
         await release.wait()
 
-    monkeypatch.setattr(tools.jobs, "shutdown", shutdown)
+    monkeypatch.setattr(tools.jobs, "stop_all", stop_all)
     deleting = asyncio.create_task(rt.delete(session.id))
     try:
         await asyncio.wait_for(entered.wait(), 5)
@@ -191,6 +195,7 @@ async def test_failed_branch_cleanup_keeps_session(tmp_path: Path, monkeypatch: 
     repo = make_repo(tmp_path / "repo")
     rt = runtime(tmp_path)
     session = rt.create(str(repo), isolate=True)
+    tools = rt.agent(session.id).tools
 
     def failed(*_args: object) -> None:
         raise BranchError("目录被占用")
@@ -200,7 +205,13 @@ async def test_failed_branch_cleanup_keeps_session(tmp_path: Path, monkeypatch: 
         with pytest.raises(RuntimeError_, match="目录被占用"):
             await rt.delete(session.id)
     assert session.path.exists() and rt.store.get(session.id) is session
-    await rt.delete(session.id)
+    command = script(repo, "print('ready', flush=True)\n", name="job.py")
+    try:
+        job = await tools.tools["run_command"].run({"command": command, "background": True})
+        assert job.ok, job.content
+        await rt.delete(session.id)
+    finally:
+        await rt.shutdown()
 
 
 @pytest.mark.anyio

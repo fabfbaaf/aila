@@ -26,6 +26,7 @@ import json
 import posixpath
 import re
 import secrets
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -242,6 +243,11 @@ class SessionStore:
         session = self.get(sid)
         if session is None:
             return False
+        sublogs = session.path.with_suffix(".sub")
+        if sublogs.is_symlink():
+            sublogs.unlink()
+        elif sublogs.is_dir():
+            shutil.rmtree(sublogs)
         session.path.unlink(missing_ok=True)
         self._open.pop(sid, None)
         return True

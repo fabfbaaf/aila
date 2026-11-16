@@ -13,7 +13,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..code import CodeProjects
-from ..code.fix import FixError
+from ..code.fix import FixError, git
 from ..confirm import Confirmations
 from ..llm import CoderModel
 from .branch import BranchError, BranchInfo, open_branch
@@ -163,11 +163,15 @@ class Runtime:
         try:
             agent = self._agents.get(sid)
             if agent is not None:
-                await agent.tools.jobs.shutdown()
+                await agent.tools.jobs.stop_all()
             if info := session.branch:
                 await asyncio.to_thread(discard_branch, BranchInfo.of(info))
                 if Path(info["worktree"]).exists():
                     raise RuntimeError_("分支的临时目录还在，没删会话。关闭占用它的程序后再试。")
+                ref = f"refs/heads/{info['branch']}"
+                refs = await asyncio.to_thread(git, Path(info["repo"]), "for-each-ref", "--format=%(refname)", ref)
+                if ref in refs.splitlines():
+                    raise RuntimeError_("任务的 Git 分支还在，没删会话。确认它没有在别的工作区使用后再试。")
                 self._publish(sid, session.append({"type": "branch_closed", "branch": info["branch"]}))
             self.store.delete(sid)
             self._agents.pop(sid, None)

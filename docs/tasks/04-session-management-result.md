@@ -6,7 +6,7 @@
 
 - 改名追加 `title` 事件；最新的标题在重新加载后仍保留，用户原来的消息和发给模型的上下文保持原样。标题限 1–100 字，拒绝空白标题。
 - 删除拒绝正在运行的轮次，提示先打断；合并、放弃分支或压缩期间也不能删除。删除期间不能启动新轮次、改名或重复删除。
-- 删除会话时先停止该会话的后台命令，再放弃它的临时分支，移除日志、缓存和订阅。分支清理出错时保留会话，避免把未清理的分支藏起来。
+- 删除会话时先停止该会话的后台命令，再放弃临时分支。确认 worktree 和 Git 分支都清理后，移除主会话日志、查资料助手日志、缓存和订阅。清理失败时保留会话，仍可启动后台任务，也可以重试删除。
 - 搜索匹配当前标题或项目路径，忽略大小写；项目筛选忽略大小写、斜杠方向和末尾斜杠。先筛选再限制数量，可以找到最近 50 条之外的会话。
 - 新接口：`PATCH /agent/sessions/{id}`、`DELETE /agent/sessions/{id}`；列表支持 `q`、`cwd`。正在做的会话删除返回 409，不存在的会话返回 404，无效标题返回 422。
 - 终端两种后端都支持 `/rename 新标题`、`/delete` 的 y/n 确认和同目录新会话、`/resume 关键词`。筛选只列出候选，之后的编号对应筛选结果；原有会话 id 和编号用法保留。
@@ -16,13 +16,14 @@
 
 | 文件 | 改动 |
 |---|---|
-| `aila-ai/app/runtime/session.py` | 最新标题事件、删除日志/缓存、搜索与项目路径比较 |
+| `aila-ai/app/runtime/session.py` | 最新标题事件、删除主会话和查资料助手的日志、清缓存、搜索与项目路径比较 |
 | `aila-ai/app/runtime/runner.py` | 改名、删除、后台进程/分支/订阅清理，删除与运行中操作互斥 |
+| `aila-ai/app/runtime/shell.py` | 提供停止当前后台任务的方法，保留未删会话的后续启动能力 |
 | `aila-ai/app/routes/agent.py` | 列表筛选参数，末尾追加改名、删除接口 |
 | `aila-ai/app/cli/backend.py` | 协议和两个后端新增 rename/delete/search_sessions 方法，不改原有方法 |
 | `aila-ai/app/cli/commands.py` | 新命令及帮助文字 |
 | `aila-ai/app/cli/app.py` | 新命令处理、删除确认、关键词搜索、稳定的候选编号 |
-| `aila-ai/tests/test_session_management.py`（新增） | 21 项验收和回归测试，覆盖日志持久化、消息不变、真实 git 分支、真实后台进程、接口、双后端终端和跨页搜索 |
+| `aila-ai/tests/test_session_management.py`（新增） | 21 项验收和回归测试，覆盖日志持久化、模型消息、助手日志清理、真实 Git 分支、删除失败后启动后台任务、接口、双后端终端和跨页搜索 |
 | `aila-desktop/src/main/agent.ts` | rename/delete 转发，删除后的本地会话状态清理 |
 | `aila-desktop/src/main/index.ts` | agent:rename/agent:delete，只认 fromAgent 对应的主窗口，并检查参数 |
 | `aila-desktop/src/preload/index.ts` | agentRename/agentDelete 固定 IPC 方法与类型 |
@@ -38,8 +39,9 @@
 
 | 验证 | 命令 | 结果 |
 |---|---|---|
-| 完整 AI 服务测试 | `.venv\Scripts\python -X utf8 -m pytest -q -p no:cacheprovider` | 355 passed，10 skipped，90.72 秒，退出码 0 |
+| 完整 AI 服务测试 | `.venv\Scripts\python -X utf8 -m pytest -q -p no:cacheprovider` | 355 passed，10 skipped，86.79 秒，退出码 0 |
 | 会话管理及终端/分支定向 | 同上，追加 `tests/test_session_management.py tests/test_cli.py tests/test_agent_branch.py` | 38 passed，26.96 秒 |
+| 会话管理及后台任务回归 | 同上，追加 `tests/test_session_management.py tests/test_runtime_jobs.py` | 46 passed，25.75 秒 |
 | 桌面类型检查 | `npm.cmd run typecheck` | 通过，退出码 0 |
 | 完整桌面测试 | `npx.cmd vitest run` | 142 passed，1 skipped，2.50 秒，退出码 0 |
 | 完整服务端测试 | `.\mvnw.cmd test` | 26 项，0 失败、0 错误、0 跳过，BUILD SUCCESS，47.313 秒 |
