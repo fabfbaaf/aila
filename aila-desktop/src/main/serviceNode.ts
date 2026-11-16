@@ -97,10 +97,11 @@ export function createServiceKeeper(options: { packaged: boolean; appPath: strin
       })
       // 只记录路径和参数，永远不枚举环境变量；stdout/stderr 的 UTF-8 汉字可能跨数据块。
       queueMicrotask(() => output(`启动 ${command.executable} ${command.args.join(' ')}\n`))
-      for (const stream of [child.stdout, child.stderr]) {
+      for (const source of ['stdout', 'stderr'] as const) {
+        const stream = child[source]
         const decoder = new StringDecoder('utf8')
-        stream?.on('data', (chunk: Buffer) => output(decoder.write(chunk)))
-        stream?.on('end', () => output(decoder.end()))
+        stream?.on('data', (chunk: Buffer) => output(decoder.write(chunk), source))
+        stream?.on('end', () => output(decoder.end(), source))
       }
       child.once('error', () => exit('AI 服务没能启动。检查 Python 路径和目录是否可访问。'))
       child.once('close', (code, signal) => exit(`AI 服务退出了（${code === null ? `信号 ${signal ?? '未知'}` : `退出码 ${code}`}）。`))

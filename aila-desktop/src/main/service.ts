@@ -15,10 +15,12 @@ export interface ServiceProcess {
   pid: number
 }
 
+export type ServiceOutput = (text: string, source?: 'stdout' | 'stderr') => void
+
 export interface ServiceDependencies {
   command: () => ServiceCommand | null
   health: (signal: AbortSignal) => Promise<Health>
-  spawn: (command: ServiceCommand, output: (text: string) => void, exit: (reason: string) => void) => ServiceProcess
+  spawn: (command: ServiceCommand, output: ServiceOutput, exit: (reason: string) => void) => ServiceProcess
   stop: (process: ServiceProcess) => Promise<void>
   now: () => number
   later: (callback: () => void, milliseconds: number) => () => void
@@ -48,7 +50,7 @@ export class ServiceKeeper {
   private request: AbortController | null = null
   private retries: number[] = []
   private lines: ServiceLog[] = []
-  private partial = ''
+  private partial = { stdout: '', stderr: '' }
   private startupAt = 0
   private missed = 0
   private restarting: Promise<ServiceResult> | null = null
@@ -145,8 +147,8 @@ export class ServiceKeeper {
     this.set('starting')
     let process: ServiceProcess | null = null
     try {
-      process = this.deps.spawn(command, (text) => {
-        if (process && this.current(generation) && this.process === process) this.output(text)
+      process = this.deps.spawn(command, (text, source) => {
+        if (process && this.current(generation) && this.process === process) this.output(text, source)
       }, (reason) => {
         if (process && this.current(generation) && this.process === process) void this.crash(generation, reason)
       })
@@ -226,15 +228,17 @@ export class ServiceKeeper {
     } finally { cancel() }
   }
 
-  private output(text: string): void {
-    const parts = (this.partial + text).split(/\r\n|\n|\r(?!$)/)
-    this.partial = parts.pop() ?? ''
+  private output(text: string, source: 'stdout' | 'stderr' = 'stdout'): void {
+    // 两路输出的数据块会交错，只在各自的流里拼接未完成的行。
+    const parts = (this.partial[source] + text).split(/\r\n|\n|\r(?!$)/)
+    let partial = parts.pop() ?? ''
     for (const line of parts) this.line(line)
     // 没有换行的异常输出也不能无限占内存；截成有上限的日志行。
-    while (this.partial.length > 4000) {
-      this.line(this.partial.slice(0, 4000))
-      this.partial = this.partial.slice(4000)
+    while (partial.length > 4000) {
+      this.line(partial.slice(0, 4000))
+      partial = partial.slice(4000)
     }
+    this.partial[source] = partial
   }
 
   private line(text: string): void {
@@ -243,7 +247,9 @@ export class ServiceKeeper {
   }
 
   private flush(): void {
-    if (this.partial) this.line(this.partial.replace(/\r$/, ''))
-    this.partial = ''
+    for (const source of ['stdout', 'stderr'] as const) {
+      if (this.partial[source]) this.line(this.partial[source].replace(/\r$/, ''))
+      this.partial[source] = ''
+    }
   }
 }

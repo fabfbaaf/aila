@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer as httpServer } from 'node:http'
 import { createServer as tcpServer, type Server } from 'node:net'
 import { join, resolve } from 'node:path'
-import { ServiceKeeper, type Health, type ServiceCommand, type ServiceDependencies, type ServiceProcess } from './service'
+import { ServiceKeeper, type Health, type ServiceCommand, type ServiceDependencies, type ServiceOutput, type ServiceProcess } from './service'
 import { checkServiceHealth, locateService, packagedCommand } from './serviceNode'
 import { registerServiceIpc } from './serviceIpc'
 
@@ -12,7 +12,7 @@ const COMMAND = { executable: 'python', args: ['-m', 'app'], cwd: '/aila-ai' }
 function fixture() {
   let health: Health = 'offline'
   let command: ServiceCommand | null = COMMAND
-  const children: Array<{ process: ServiceProcess; output: (text: string) => void; exit: (reason: string) => void }> = []
+  const children: Array<{ process: ServiceProcess; output: ServiceOutput; exit: (reason: string) => void }> = []
   const deps: ServiceDependencies = {
     command: () => command,
     health: vi.fn(async () => health),
@@ -187,6 +187,17 @@ describe('AI 服务托管状态机', () => {
     expect(f.deps.stop).toHaveBeenCalledWith(old.process)
     expect(f.children).toHaveLength(1)
     expect(f.keeper.logs()).toEqual([])
+  })
+
+  it('stdout 和 stderr 交错时各自拼行，脱敏仍按完整行处理', async () => {
+    const f = fixture()
+    await f.keeper.start()
+    const { output } = f.children[0]
+    output('API_', 'stdout')
+    output('出错信息\n', 'stderr')
+    output('KEY=hidden-value\n', 'stdout')
+    expect(f.keeper.logs().map(({ text }) => text)).toEqual(['出错信息', 'API_KEY=[已隐藏]'])
+    await f.keeper.shutdown()
   })
 
   it('停止最多等三秒，退出中未完成的手动重启不能再启动服务', async () => {
