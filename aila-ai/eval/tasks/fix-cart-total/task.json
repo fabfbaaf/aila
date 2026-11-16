@@ -1,0 +1,11 @@
+{
+  "id": "fix-cart-total",
+  "title": "修好购物车漏算运费",
+  "fixture": "repo",
+  "prompt": "购物车总价漏算运费，test_total_with_shipping 没过。读代码修好它，跑测试确认通过。",
+  "check": {"command": "python -m pytest -q", "expect_exit": 0},
+  "answer_contains": [],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": ["bugfix", "python"]
+}

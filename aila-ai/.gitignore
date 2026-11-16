@@ -8,3 +8,4 @@ models/
 # 本机数据（知识库）和个人配置
 data/
 mcp.json
+eval/results/
