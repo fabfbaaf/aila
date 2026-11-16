@@ -1,0 +1,291 @@
+"""Agent 循环。
+
+一轮（turn）= 用户说一句话以后，她一直做到不再调用工具为止；
+一步（step）= 一次模型请求，加上它要求的工具调用。流程：
+
+  turn_start → [pre_step → 请求模型（流式：文字、思考、工具调用、用量）→ post_step
+               → 每个工具：权限判断 →（要问就问用户）→ pre_tool → 执行 → post_tool] × N → turn_end
+
+钩子（Hooks）挂在这些点上：以后桌面上的她做动作、星图标出改过的文件、技能包扩展，都挂在这里，不改循环本身。
+
+每一步发给模型的消息都由会话日志推出来（只追加），开头和上一步一样，前缀缓存能命中。
+上下文快满时先压缩：请求和平时一模一样（同样的工具列表），只在最后加一句「请总结」，所以压缩这一次请求也几乎全部命中缓存。
+
+用户拒绝（或者一直没回答）一个操作时，这一轮立刻结束，等用户说怎么办——不让她换个办法绕过去。
+被打断时补齐日志：没执行的工具调用记成「被打断」，说了一半的话也记下来，下次请求的消息仍然是完整、合法的。
+"""
+
+import asyncio
+import inspect
+import json
+import logging
+from collections.abc import AsyncIterator, Callable
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+from ..confirm import Confirmations
+from ..llm import CoderModel, Reasoning, ToolCall, Usage, classify_error
+from .permissions import Policy
+from .prompt import SYSTEM_PROMPT
+from .session import Event, Session
+from .tools import CodingTools, Outcome
+from .workspace import WorkspaceError
+
+log = logging.getLogger("aila.runtime")
+
+COMPACT_PROMPT = (
+    "上下文快满了。请把到目前为止的工作写成一份交接说明，之后会用它代替前面的全部对话继续工作。包括：\n"
+    "1. 用户要做的任务（原话的要点）\n2. 已经做了什么：改了哪些文件、为什么\n"
+    "3. 现在的状态：测试或构建的结果\n4. 还没做的事\n5. 重要的发现：文件路径、函数名、命令、踩过的坑\n"
+    "只写交接说明，不要调用工具。"
+)
+NOT_DONE = {
+    "rejected": "用户没有同意，这个操作没有执行。先停下来，等用户说接下来怎么做。",
+    "timeout": "用户一直没有回答，这个操作没有执行。先停下来，等用户回来。",
+}
+SKIPPED = "前面的操作没有被同意，这个也没有执行。"
+INTERRUPTED = "被用户打断了，没有执行。"
+
+
+@dataclass
+class AgentConfig:
+    max_steps: int = 60
+    max_tokens: int = 8192
+    context_window: int = 128_000
+    compact_at: float = 0.8
+
+
+@dataclass
+class Hooks:
+    handlers: dict[str, list[Callable[..., Any]]] = field(default_factory=dict)
+
+    def on(self, name: str, fn: Callable[..., Any]) -> None:
+        self.handlers.setdefault(name, []).append(fn)
+
+    async def emit(self, name: str, **payload: Any) -> None:
+        for fn in self.handlers.get(name, []):
+            try:
+                result = fn(**payload)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:  # 钩子出错不能拖垮任务
+                log.exception("钩子 %s 出错", name)
+
+
+class Agent:
+    def __init__(
+        self,
+        session: Session,
+        model: CoderModel,
+        tools: CodingTools,
+        policy: Policy,
+        confirms: Confirmations | None,
+        config: AgentConfig | None = None,
+        hooks: Hooks | None = None,
+        system: str = SYSTEM_PROMPT,
+    ) -> None:
+        self.session = session
+        self.model = model
+        self.tools = tools
+        self.policy = policy
+        self.confirms = confirms
+        self.config = config or AgentConfig()
+        self.hooks = hooks or Hooks()
+        self.system = system
+        # 这一步说到一半的话（被打断时记下来）
+        self._partial = ""
+
+    # ---------- 一轮 ----------
+
+    async def turn(self, text: str) -> AsyncIterator[Event]:
+        yield self.session.append({"type": "user", "text": text})
+        await self.hooks.emit("turn_start", session=self.session, text=text)
+        reason, error = "done", ""
+        try:
+            for step in range(1, self.config.max_steps + 1):
+                if self._should_compact():
+                    async for e in self.compact():
+                        yield e
+                calls: list[ToolCall] = []
+                async for e in self._step(step, calls):
+                    yield e
+                if not calls:
+                    break
+                stop = ""
+                for call in calls:
+                    if stop:
+                        yield self._tool_event(call, Outcome(SKIPPED, ok=False), status="skipped")
+                        continue
+                    async for e in self._run_tool(call):
+                        yield e
+                        if e.get("type") == "confirm_end" and e["result"] != "approved":
+                            stop = e["result"]
+                if stop:
+                    reason = stop
+                    break
+            else:
+                reason = "max_steps"
+        except asyncio.CancelledError:
+            self._close("interrupted")
+            raise
+        except Exception as err:
+            code, message = classify_error(err)
+            log.exception("编程 Agent 出错")
+            reason, error = "error", message if code != "unknown" else f"{message}（{type(err).__name__}）"
+            for e in self._close("error", error):
+                yield e
+            return
+        end = self.session.append({"type": "turn_end", "reason": reason})
+        await self.hooks.emit("turn_end", session=self.session, reason=reason)
+        yield end
+
+    async def _step(self, step: int, calls: list[ToolCall]) -> AsyncIterator[Event]:
+        await self.hooks.emit("pre_step", session=self.session, step=step)
+        messages = self.session.messages(self.system)
+        text, thought = "", ""
+        usage: Usage | None = None
+        self._partial = ""
+        async for item in self.model.step(messages, self.tools.specs, self.config.max_tokens):
+            if isinstance(item, ToolCall):
+                calls.append(item)
+            elif isinstance(item, Usage):
+                usage = item
+            elif isinstance(item, Reasoning):
+                thought += item.text
+                yield {"type": "reasoning_delta", "text": item.text}
+            else:
+                text += item
+                self._partial = text
+                yield {"type": "text_delta", "text": item}
+        self._partial = ""
+        yield self.session.append({
+            "type": "assistant",
+            "text": text,
+            **({"reasoning": thought} if thought else {}),
+            "tool_calls": [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls],
+        })
+        if usage:
+            yield self.session.append({"type": "usage", "model": self.model.name, "step": step, **asdict(usage)})
+        await self.hooks.emit("post_step", session=self.session, step=step, usage=usage)
+
+    # ---------- 工具 ----------
+
+    async def _run_tool(self, call: ToolCall) -> AsyncIterator[Event]:
+        tool = self.tools.tools.get(call.name)
+        args = _parse(call.arguments)
+        if tool is None:
+            yield self._tool_event(call, Outcome(f"没有叫 {call.name} 的工具。", ok=False))
+            return
+        if args is None:
+            yield self._tool_event(call, Outcome("工具参数不是合法的 JSON，请重新调用。", ok=False))
+            return
+        kind = tool.kind(args)
+        command = str(args.get("command", "")) if kind == "command" else ""
+        decision = self.policy.decide(kind, command)
+
+        if decision.verdict == "deny":
+            yield self._tool_event(call, Outcome(decision.reason, ok=False), status="denied")
+            return
+        if decision.verdict == "ask":
+            if self.confirms is None:
+                yield self._tool_event(call, Outcome("这个操作需要用户确认，但现在没法问用户，没有执行。", ok=False), status="denied")
+                return
+            pending = self.confirms.open()
+            try:
+                yield self.session.append({
+                    "type": "confirm",
+                    "id": pending.id,
+                    "call_id": call.id,
+                    "tool": call.name,
+                    "kind": kind,
+                    "action": tool.status(args),
+                    "detail": tool.preview(args) if tool.preview else json.dumps(args, ensure_ascii=False)[:2000],
+                    "reason": decision.reason,
+                    "can_remember": decision.can_remember,
+                })
+                result = await self.confirms.wait(pending)
+            finally:
+                self.confirms.close(pending)
+            remember = pending.remember and decision.can_remember
+            yield self.session.append({"type": "confirm_end", "id": pending.id, "result": result, "remember": remember})
+            if result != "approved":
+                yield self._tool_event(call, Outcome(NOT_DONE[result], ok=False), status=result)
+                return
+            if remember:
+                self.policy.remember(kind, command)
+
+        await self.hooks.emit("pre_tool", session=self.session, call=call, args=args)
+        yield {"type": "tool_start", "id": call.id, "name": call.name, "status": tool.status(args)}
+        try:
+            outcome = await tool.run(args)
+        except asyncio.CancelledError:
+            raise
+        except WorkspaceError as err:
+            outcome = Outcome(str(err), ok=False)
+        except Exception as err:  # 工具自己的 bug 不能拖垮任务
+            log.exception("工具 %s 出错", call.name)
+            outcome = Outcome(f"工具出错了（{type(err).__name__}：{err}）", ok=False)
+        event = self._tool_event(call, outcome)
+        await self.hooks.emit("post_tool", session=self.session, call=call, args=args, outcome=outcome)
+        yield event
+
+    def _tool_event(self, call: ToolCall, outcome: Outcome, status: str | None = None) -> Event:
+        return self.session.append({
+            "type": "tool",
+            "id": call.id,
+            "name": call.name,
+            "status": status or ("ok" if outcome.ok else "error"),
+            "content": outcome.content,
+            **outcome.extra,
+        })
+
+    # ---------- 压缩 ----------
+
+    def _should_compact(self) -> bool:
+        return self.session.last_prompt_tokens > self.config.context_window * self.config.compact_at
+
+    async def compact(self) -> AsyncIterator[Event]:
+        """用模型把前面的工作总结成交接说明，之后用它代替前面的全部消息"""
+        messages = self.session.messages(self.system) + [{"role": "user", "content": COMPACT_PROMPT}]
+        summary = ""
+        usage: Usage | None = None
+        async for item in self.model.step(messages, self.tools.specs, 4096):
+            if isinstance(item, str):
+                summary += item
+            elif isinstance(item, Usage):
+                usage = item
+        if not summary.strip():
+            return
+        yield self.session.append({"type": "compaction", "summary": summary.strip(), "upto": len(self.session.events)})
+        if usage:
+            yield self.session.append({"type": "usage", "model": self.model.name, "step": 0, "purpose": "compaction", **asdict(usage)})
+
+    # ---------- 收尾 ----------
+
+    def repair(self) -> list[Event]:
+        """上次没做完就断了的一轮：补完整，记成被打断"""
+        return self._close("interrupted")
+
+    def _close(self, reason: str, error: str = "") -> list[Event]:
+        """出错或被打断：把日志补完整，下次请求的消息仍然合法（每个工具调用都有结果，用户的话后面有回复）"""
+        first = len(self.session.events)
+        if self._partial:
+            self.session.append({"type": "assistant", "text": self._partial + "……（被打断）", "tool_calls": []})
+            self._partial = ""
+        for c in self.session.unanswered_calls():
+            content = INTERRUPTED if reason == "interrupted" else f"出错了，没有执行：{error}"
+            self.session.append({"type": "tool", "id": c["id"], "name": c["name"], "status": reason, "content": content})
+        if self.session.last_message_role() == "user":
+            note = "（这一轮被打断了，没有回复）" if reason == "interrupted" else f"（出错了，没有回复：{error}）"
+            self.session.append({"type": "assistant", "text": note, "tool_calls": []})
+        self.session.append({"type": "turn_end", "reason": reason, **({"error": error} if error else {})})
+        return self.session.events[first:]
+
+
+def _parse(raw: str) -> dict[str, Any] | None:
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+

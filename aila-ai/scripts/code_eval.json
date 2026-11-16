@@ -1,0 +1,38 @@
+{
+  "note": "代码检索评测集：对艾拉自己的仓库提问，expect 里任意一个出现在结果里就算找到（按完整名字或函数名对）",
+  "queries": [
+    {"q": "run_agent", "expect": ["run_agent"]},
+    {"q": "putMemory", "expect": ["SyncService.putMemory"]},
+    {"q": "TagParser", "expect": ["TagParser"]},
+    {"q": "哪里检查请求是不是来自本机", "expect": ["LocalOnly", "is_local", "LocalOnly.__call__"]},
+    {"q": "刷新令牌怎么轮换，旧的被复用了怎么办", "expect": ["TokenService.rotate"]},
+    {"q": "how are refresh tokens rotated", "expect": ["TokenService.rotate"]},
+    {"q": "截图之后怎么判断画面有没有变化", "expect": ["thumbnail", "changed_cells", "changed_rows", "ScreenWatcher.tick"]},
+    {"q": "气泡里的确认按钮", "expect": ["SpeechBubble", "BubbleAsk"]},
+    {"q": "记忆整理的提示词", "expect": ["extract"]},
+    {"q": "同步的时候序号是怎么分配的", "expect": ["SyncService.lockUser", "SyncService.advance"]},
+    {"q": "用户说好或者不要怎么识别", "expect": ["confirmIntent"]},
+    {"q": "网页上点按钮之前要不要确认的规则", "expect": ["click_plan", "click_needs_confirm"]},
+    {"q": "一次回复最多调用几轮工具", "expect": ["agent", "run_agent"]},
+    {"q": "读网页时怎么防止访问内网地址", "expect": ["check_public_url", "BrowserSession._check"]},
+    {"q": "唤醒以后多久没说话就回去等唤醒词", "expect": ["VoiceController.await", "VoiceController"]},
+    {"q": "回复按句子切开去合成语音", "expect": ["sentenceCut", "Conversation.pushChar", "Conversation.closeSentence"]},
+    {"q": "OCR 识别出来的文本框怎么拼成一行行", "expect": ["group_lines"]},
+    {"q": "报错发给大模型之前把密钥打码", "expect": ["redact"]},
+    {"q": "知识库检索怎么把关键词和向量的结果合并", "expect": ["KnowledgeBase.search"]},
+    {"q": "登录失败太多次就锁定", "expect": ["LoginThrottle", "LoginThrottle.check", "LoginThrottle.failed"]},
+    {"q": "WebSocket 断线以后怎么重连", "expect": ["SyncEngine.scheduleReconnect", "ScreenWatch.retry"]},
+    {"q": "提交搜索框的时候怎么拼出网址", "expect": ["BrowserSession._submit_get", "session"]},
+    {"q": "删掉的记忆不能被另一台电脑复活", "expect": ["SyncService.putMemory", "MemoryStore.applyRemote", "MemoryStore.apply"]},
+    {"q": "where is the system prompt for the persona", "expect": ["persona"]},
+    {"q": "从报错文字里解析调用栈", "expect": ["parse_frames"]},
+    {"q": "VRM 模型怎么加载", "expect": ["loadVrmAvatar"]}
+  ],
+  "traces": [
+    {"text": "Traceback (most recent call last):\n  File \"C:\\\\other\\\\checkout\\\\aila-ai\\\\app\\\\agent.py\", line 72, in run_agent\n  File \"C:\\\\other\\\\checkout\\\\aila-ai\\\\app\\\\agent.py\", line 41, in add_result\nTypeError: 'NoneType' object is not iterable", "expect": "run_agent.add_result"},
+    {"text": "java.lang.IllegalStateException: boom\n\tat com.aila.server.sync.SyncService.lockUser(SyncService.java:230)\n\tat com.aila.server.sync.SyncService.writeSetting(SyncService.java:212)", "expect": "SyncService.lockUser"},
+    {"text": "src/renderer/src/screen/ScreenWatch.ts(140,7): error TS2322: Type 'string' is not assignable to type 'number'.", "expect": "ScreenWatch.onMessage"},
+    {"text": "TypeError: Cannot read properties of undefined (reading 'id')\n    at Conversation.answer (http://localhost:5173/src/chat/Conversation.ts?t=1794:150:20)\n    at onAnswer (http://localhost:5173/src/App.vue:220:5)", "expect": "Conversation.answer"},
+    {"text": "FAILED tests/test_screen.py::test_funnel_skips_cheaply_and_asks_once\ntests/test_screen.py:166: in test_funnel_skips_cheaply_and_asks_once\n    assert w.stats.unsettled == 2", "expect": "test_funnel_skips_cheaply_and_asks_once"}
+  ]
+}

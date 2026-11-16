@@ -24,6 +24,8 @@ CONFIRM_TIMEOUT = 120.0
 class Pending:
     id: str
     future: asyncio.Future[bool] = field(repr=False)
+    # 用户选了「以后都允许」（只有编程 Agent 的确认有这个选项）
+    remember: bool = False
 
 
 class Confirmations:
@@ -51,11 +53,12 @@ class Confirmations:
         if not pending.future.done():
             pending.future.cancel()
 
-    def answer(self, confirm_id: str, approved: bool) -> bool:
+    def answer(self, confirm_id: str, approved: bool, remember: bool = False) -> bool:
         """用户的回答。返回 False 表示这个确认已经结束（超时、回复被取消）或者根本不存在"""
         pending = self._pending.get(confirm_id)
         if pending is None or pending.future.done():
             return False
+        pending.remember = approved and remember
         pending.future.set_result(approved)
         return True
 

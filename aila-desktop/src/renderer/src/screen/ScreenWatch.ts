@@ -50,6 +50,7 @@ export class ScreenWatch {
   private socket: SocketLike | null = null
   private started = false
   private failed = false
+  private disposed = false
   private retries = 0
   private timer: ReturnType<typeof setTimeout> | undefined
 
@@ -94,14 +95,16 @@ export class ScreenWatch {
     this.send({ type: 'declined' })
   }
 
+  /** 不再用这个实例了（组件卸载）：断开，并且以后也不会再被打开 */
   dispose(): void {
     clearTimeout(this.timer)
+    this.disposed = true
     this.shutdown()
   }
 
   private open(): void {
     clearTimeout(this.timer)
-    if (this.socket) return
+    if (this.socket || this.disposed) return
     let socket: SocketLike
     try {
       socket = this.connect(this.url)

@@ -1,0 +1,234 @@
+// 工作窗口（编程 Agent）：主进程转发 AI 服务的 /agent 接口。
+// 事件流由主进程收、再发给工作窗口，渲染层不用放开 CSP；同时：
+// - 把进展（开始、要确认、做完）告诉桌面上的她
+// - 把她在哪个文件上干活告诉星图（读的星球闪一下，改过的变绿）
+// - 等你确认的改文件操作交给星图显示（双手合十也能确认）
+// 工作窗口关了，正在做的任务照样做完（AI 服务那边在做），做完她会说一声。
+import { SseParser } from '../shared/chat'
+import type { AgentActivity, AgentEvent, AgentMode, AgentProgress, AgentSession, AgentSessionSummary } from '../shared/agent'
+import type { AiResult } from '../shared/settings'
+
+export interface RelayHooks {
+  /** 一个事件 → 工作窗口 */
+  emit: (sid: string, event: AgentEvent) => void
+  /** 事件流结束（出错时带原因） */
+  ended: (sid: string, error?: string) => void
+  /** 进展 → 桌面上的她 */
+  progress: (p: AgentProgress) => void
+  /** 她在哪个文件上干活 → 星图 */
+  activity: (a: AgentActivity) => void
+  /** 等你确认的改文件操作（null：不等了）→ 星图 */
+  confirm: (c: { sid: string; id: string; detail: string } | null) => void
+}
+
+const READ_TOOLS = new Set(['read_file'])
+const EDIT_TOOLS = new Set(['edit_file', 'write_file'])
+
+export class AgentRelay {
+  private streams = new Map<string, AbortController>()
+  private turnFiles = new Map<string, Set<string>>()
+  /** 会话 → 项目目录（列表、打开、新建时记下） */
+  private cwds = new Map<string, string>()
+  /** 工具调用 → 它碰的文件 */
+  private callFiles = new Map<string, string>()
+  private pendingConfirm: { sid: string; id: string } | null = null
+
+  constructor(
+    private aiUrl: string,
+    private hooks: RelayHooks
+  ) {}
+
+  async list(): Promise<AiResult<AgentSessionSummary[]>> {
+    const r = await this.call<AgentSessionSummary[]>('GET', '/agent/sessions')
+    for (const s of r.data ?? []) this.cwds.set(s.id, s.cwd)
+    return r
+  }
+
+  async get(sid: string): Promise<AiResult<AgentSession>> {
+    return this.remember(await this.call<AgentSession>('GET', `/agent/sessions/${encodeURIComponent(sid)}`))
+  }
+
+  async create(cwd: string, mode: AgentMode, isolate = false): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate }))
+  }
+
+  /** 在新分支上做时：跑测试、合并回你的代码（测试可能要跑几分钟） */
+  merge(sid: string, runTests: boolean): Promise<AiResult<AgentEvent>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/merge`, { run_tests: runTests }, 660000)
+  }
+
+  /** 放弃分支（你的代码保持原样） */
+  discard(sid: string): Promise<AiResult<AgentEvent>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/discard`, undefined, 60000)
+  }
+
+  /** 开一个会话并马上开始做（屏幕上的报错、星图交过来的任务） */
+  async task(task: { text: string; project?: string; cwd?: string }): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/tasks', task))
+  }
+
+  interrupt(sid: string): Promise<AiResult<unknown>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/interrupt`)
+  }
+
+  setMode(sid: string, mode: AgentMode): Promise<AiResult<unknown>> {
+    return this.call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/mode`, { mode })
+  }
+
+  compact(sid: string): Promise<AiResult<unknown>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/compact`, undefined, 180000)
+  }
+
+  async confirm(id: string, approved: boolean, remember: boolean): Promise<boolean> {
+    return (await this.call('POST', '/agent/confirm', { id, approved, remember })).ok
+  }
+
+  /** 星图里双手合十：确认正等着的那个改文件操作（id 要对得上） */
+  async approvePending(id: string): Promise<boolean> {
+    if (this.pendingConfirm?.id !== id) return false
+    return this.confirm(id, true, false)
+  }
+
+  /** 说一句话，开始一轮；事件陆续发给工作窗口 */
+  send(sid: string, text: string): void {
+    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/messages`, { method: 'POST', body: JSON.stringify({ text }) })
+  }
+
+  /** 接上一个会话：补发 after 之后的事件，正在做的话接着推（之后的进展她也会汇报） */
+  watch(sid: string, after: number): void {
+    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/events?after=${after}`, { method: 'GET' })
+  }
+
+  stopAll(): void {
+    for (const c of this.streams.values()) c.abort()
+    this.streams.clear()
+  }
+
+  private remember<T extends { id: string; cwd: string }>(r: AiResult<T>): AiResult<T> {
+    if (r.ok && r.data) this.cwds.set(r.data.id, r.data.cwd)
+    return r
+  }
+
+  private async stream(sid: string, path: string, init: RequestInit): Promise<void> {
+    this.streams.get(sid)?.abort()
+    const controller = new AbortController()
+    this.streams.set(sid, controller)
+    let error: string | undefined
+    try {
+      const res = await fetch(`${this.aiUrl}${path}`, {
+        ...init,
+        headers: { 'content-type': 'application/json' },
+        signal: controller.signal
+      })
+      if (!res.ok || !res.body) {
+        error = await detail(res)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      const parser = new SseParser((data) => {
+        let event: AgentEvent
+        try {
+          event = JSON.parse(data) as AgentEvent
+        } catch {
+          return
+        }
+        this.hooks.emit(sid, event)
+        this.track(sid, event)
+      })
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        parser.feed(decoder.decode(value, { stream: true }))
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) error = `连不上 AI 服务：${err instanceof Error ? err.message : String(err)}`
+    } finally {
+      if (this.streams.get(sid) === controller) this.streams.delete(sid)
+      if (!controller.signal.aborted) this.hooks.ended(sid, error)
+    }
+  }
+
+  /** 这一轮的进展 → 桌面上的她；在哪个文件上干活 → 星图 */
+  private track(sid: string, e: AgentEvent): void {
+    const cwd = this.cwds.get(sid) ?? ''
+    switch (e.type) {
+      case 'user':
+        this.turnFiles.set(sid, new Set())
+        this.hooks.progress({ kind: 'start', title: String(e.text ?? '').slice(0, 40) })
+        break
+      case 'assistant':
+        for (const c of (e.tool_calls as { id: string; name: string; arguments: string }[]) ?? []) {
+          if (!READ_TOOLS.has(c.name) && !EDIT_TOOLS.has(c.name)) continue
+          try {
+            const path = String((JSON.parse(c.arguments) as { path?: unknown }).path ?? '')
+            if (path) this.callFiles.set(`${sid}:${c.id}`, path.replace(/\\/g, '/'))
+          } catch {
+            // 参数不是 JSON：不管
+          }
+        }
+        break
+      case 'tool_start': {
+        const file = this.callFiles.get(`${sid}:${String(e.id)}`)
+        if (file && READ_TOOLS.has(String(e.name))) this.hooks.activity({ sid, cwd, file, kind: 'read' })
+        break
+      }
+      case 'confirm':
+        this.hooks.progress({ kind: 'confirm', action: String(e.action ?? '') })
+        if (e.kind === 'edit') {
+          this.pendingConfirm = { sid, id: String(e.id) }
+          this.hooks.confirm({ sid, id: String(e.id), detail: String(e.detail ?? '') })
+        }
+        break
+      case 'confirm_end':
+        if (this.pendingConfirm?.id === e.id) this.clearPending()
+        break
+      case 'tool':
+        this.callFiles.delete(`${sid}:${String(e.id)}`)
+        if (e.status === 'ok' && typeof e.file === 'string') {
+          this.turnFiles.get(sid)?.add(e.file)
+          this.hooks.activity({ sid, cwd, file: e.file, kind: 'edit' })
+        }
+        break
+      case 'turn_end': {
+        if (this.pendingConfirm?.sid === sid) this.clearPending()
+        const files = this.turnFiles.get(sid)?.size ?? 0
+        this.turnFiles.delete(sid)
+        if (e.reason === 'done') this.hooks.progress({ kind: 'done', files })
+        else if (e.reason === 'error') this.hooks.progress({ kind: 'error', message: String(e.error ?? '') })
+        else this.hooks.progress({ kind: 'stopped', reason: String(e.reason ?? '') })
+        break
+      }
+    }
+  }
+
+  private clearPending(): void {
+    this.pendingConfirm = null
+    this.hooks.confirm(null)
+  }
+
+  private async call<T>(method: string, path: string, body?: unknown, timeout = 15000): Promise<AiResult<T>> {
+    try {
+      const res = await fetch(`${this.aiUrl}${path}`, {
+        method,
+        headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeout)
+      })
+      if (!res.ok) return { ok: false, error: await detail(res) }
+      return { ok: true, data: (await res.json()) as T }
+    } catch (err) {
+      return { ok: false, error: `连不上 AI 服务：${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+}
+
+async function detail(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { detail?: unknown }
+    if (typeof body.detail === 'string') return body.detail
+  } catch {
+    // 不是 JSON
+  }
+  return `AI 服务返回 ${res.status}`
+}

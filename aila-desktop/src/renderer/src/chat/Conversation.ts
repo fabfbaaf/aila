@@ -127,6 +127,11 @@ export class Conversation {
     return this.replying
   }
 
+  /** 正在和用户对话（不算她自己念的固定台词）：这时候别的事不插嘴 */
+  get chatting(): boolean {
+    return this.replying && !this.announcing
+  }
+
   /** 正在出声 */
   get audible(): boolean {
     return this.voice?.playing ?? false

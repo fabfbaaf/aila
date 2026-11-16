@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import secrets
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -20,6 +21,46 @@ class ToolCall:
     id: str
     name: str
     arguments: str  # JSON 字符串，原样来自大模型，可能不合法
+
+
+@dataclass
+class Reasoning:
+    """思考模型的思考过程（一小段）"""
+
+    text: str
+
+
+@dataclass
+class Usage:
+    """一次请求的用量。cache_hit：开头和之前请求相同、命中服务端缓存的输入（比没命中的便宜得多）"""
+
+    prompt: int = 0
+    completion: int = 0
+    cache_hit: int = 0
+    cache_miss: int = 0
+    estimated: bool = False  # 假模型按前缀估算的，不是服务端返回的
+
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(
+            self.prompt + other.prompt,
+            self.completion + other.completion,
+            self.cache_hit + other.cache_hit,
+            self.cache_miss + other.cache_miss,
+            self.estimated or other.estimated,
+        )
+
+
+StepItem = str | Reasoning | ToolCall | Usage
+
+
+class CoderModel(Protocol):
+    """编程 Agent 用的模型：一步 = 一次请求，流式给出文字、思考、工具调用，最后给出用量"""
+
+    name: str
+
+    def step(
+        self, messages: list[Message], tools: list[dict[str, Any]] | None, max_tokens: int = 8192
+    ) -> AsyncIterator[StepItem]: ...
 
 
 class ChatModel(Protocol):
@@ -72,7 +113,49 @@ class OpenAICompatibleModel:
                     slot["arguments"] += tc.function.arguments
         for index in sorted(pending):
             s = pending[index]
-            yield ToolCall(id=s["id"] or f"call_{index}", name=s["name"], arguments=s["arguments"] or "{}")
+            yield ToolCall(id=s["id"] or f"call_{index}_{secrets.token_hex(4)}", name=s["name"], arguments=s["arguments"] or "{}")
+
+    async def step(
+        self, messages: list[Message], tools: list[dict[str, Any]] | None, max_tokens: int = 8192
+    ) -> AsyncIterator[StepItem]:
+        """编程 Agent 的一步：温度 0（写代码要稳定），输出放宽，流结束时带上用量（含缓存命中）"""
+        kwargs: dict[str, Any] = {"tools": tools} if tools else {}
+        response = await self._client.chat.completions.create(
+            model=self.name,
+            messages=messages,  # type: ignore[arg-type]
+            stream=True,
+            temperature=0.0,
+            max_tokens=max_tokens,
+            stream_options={"include_usage": True},
+            timeout=180.0,
+            **kwargs,
+        )
+        pending: dict[int, dict[str, str]] = {}
+        usage: Usage | None = None
+        async for chunk in response:
+            if chunk.usage:
+                usage = usage_of(chunk.usage)
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            thought = getattr(delta, "reasoning_content", None)
+            if thought:
+                yield Reasoning(thought)
+            if delta.content:
+                yield delta.content
+            for tc in delta.tool_calls or []:
+                slot = pending.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function and tc.function.name and not slot["name"]:
+                    slot["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    slot["arguments"] += tc.function.arguments
+        for index in sorted(pending):
+            s = pending[index]
+            yield ToolCall(id=s["id"] or f"call_{index}_{secrets.token_hex(4)}", name=s["name"], arguments=s["arguments"] or "{}")
+        if usage:
+            yield usage
 
     async def ping(self) -> None:
         """设置界面的「测试连接」：发一个最短的请求，看密钥、地址、模型名对不对"""
@@ -110,7 +193,16 @@ class MockModel:
         else:
             text = str(last["content"])
             url = re.search(r"https?://[^\s，。]+", text)
-            if url and ("网页上" in text or "你的浏览器" in text) and "browser_open" in names:
+            if ("工作窗口" in text or text.startswith("编程任务")) and "coding_task" in names:  # 交给编程 Agent
+                reply = "[nod]好，我去工作窗口里做。"
+                task = re.sub(r"^编程任务[：:]?\s*", "", text)
+                where = re.search(r"在\s*([A-Za-z0-9_.\-]+)\s*(?:项目)?里", task)  # 「在 demo 里……」
+                args = {"task": task, **({"project": where.group(1)} if where else {})}
+                call = ToolCall("mock-coding", "coding_task", json.dumps(args, ensure_ascii=False))
+            elif text.startswith("我这边报错了") and "code_locate" in names:  # 看屏幕看到的报错：先找出错的代码
+                reply = "[think]我看一下是哪里的代码……"
+                call = ToolCall("mock-locate", "code_locate", json.dumps({"error": text}, ensure_ascii=False))
+            elif url and ("网页上" in text or "你的浏览器" in text) and "browser_open" in names:
                 reply = "[nod]好，我去看看。"
                 call = ToolCall("mock-browse", "browser_open", json.dumps({"url": url.group(0)}))
             elif url and "打开" in text and "open_url" in names:
@@ -149,6 +241,16 @@ def _mock_summary(tool_result: str) -> str:
             return f"[sad]……没读成。{line}"
         if line.startswith("在用户的资料里没有找到"):
             return "[shake]……资料里没有找到相关的内容。"
+        if line.startswith("第 1 处："):
+            return f"[nod]找到了，出错的地方{line[5:]}。[relaxed]……不过我现在是假模型，分析不了原因。"
+        if line.startswith("调用栈里的位置都不在登记的项目里") or line.startswith("这段报错里没认出调用栈"):
+            return "[tilt]……这个报错不在你登记的项目里，我找不到对应的代码。"
+        if line.startswith("已经在工作窗口里开始做了"):
+            return "[nod]在工作窗口里做着了……[relaxed]做完告诉你。"
+        if line.startswith("有好几个项目"):
+            return "[tilt]……是哪个项目呢？"
+        if line.startswith("还不知道用户的项目在哪"):
+            return "[tilt]……我还不知道你的项目在哪。在工作窗口里点「新任务」选一个文件夹吧。"
         if line.startswith("已经在用户的浏览器里打开了"):
             return "[nod]打开了，你看一下。"
         if line.startswith("用户没有同意"):
@@ -168,6 +270,22 @@ def _mock_reply(text: str) -> str:
     if any(w in text for w in ("报错", "bug", "错误", "Error")):
         return "[surprised]诶……出错了吗？[think]把报错贴给我，或者打开「留意屏幕上的报错」，[nod]我帮你看看。"
     return "[think]……现在还没有接上大模型。[tilt]在 aila-ai/.env 里填好密钥，[nod]我就能好好回答你了。"
+
+
+def usage_of(raw: Any) -> Usage:
+    """服务端返回的用量 → Usage。DeepSeek 用 prompt_cache_hit_tokens / prompt_cache_miss_tokens，
+    OpenAI 风格的服务用 prompt_tokens_details.cached_tokens"""
+    prompt = int(getattr(raw, "prompt_tokens", 0) or 0)
+    completion = int(getattr(raw, "completion_tokens", 0) or 0)
+    extra = getattr(raw, "model_extra", None) or {}
+    hit = getattr(raw, "prompt_cache_hit_tokens", None) or extra.get("prompt_cache_hit_tokens")
+    miss = getattr(raw, "prompt_cache_miss_tokens", None) or extra.get("prompt_cache_miss_tokens")
+    if hit is None:
+        details = getattr(raw, "prompt_tokens_details", None)
+        hit = getattr(details, "cached_tokens", 0) if details else 0
+    hit = int(hit or 0)
+    miss = int(miss) if miss is not None else max(0, prompt - hit)
+    return Usage(prompt, completion, hit, miss)
 
 
 def classify_error(err: Exception) -> tuple[str, str]:

@@ -47,7 +47,22 @@ export const lines = {
   watchAsk: (app: string): string => `……${app}里好像出错了。要我帮你看看吗？`,
   watchDeclined: '……嗯，有需要再叫我。',
   watchMuted: '……好，一个小时内不提醒你。',
-  watchUnavailable: (why: string): string => `……我看不了屏幕。${why}`
+  watchUnavailable: (why: string): string => `……我看不了屏幕。${why}`,
+
+  // 工作窗口里的编程任务
+  agentStart: ['好，我来做。', '……嗯，交给我。', '我去看看代码。'],
+  agentConfirm: (action: string): string => `要${action}……可以吗？在工作窗口里点一下就好。`,
+  agentDone: (files: number): string => (files ? `做完了。改了 ${files} 个文件……请过目。` : '做完了……请过目。'),
+  agentStopped: {
+    rejected: '……好，我先停下。你说怎么做，我再接着来。',
+    timeout: '……你好像在忙，我先停下了。',
+    max_steps: '步骤有点多……我先停在这里。说「继续」我就接着做。'
+  } as Record<string, string>,
+  agentError: '……出错了，没做完。原因写在工作窗口里。',
+  agentTaskStarted: ['好，我去工作窗口里修。', '……交给我。改之前会先问你。'],
+  agentTaskFailed: (why: string): string => `……没开成。${why}`,
+  /** 交给编程 Agent 的修报错任务（报错原文附在后面） */
+  fixTask: (snippet: string): string => `修好这个报错。先定位到出错的代码、弄清原因，改完跑相关的测试验证：\n${snippet}`
 }
 
 export function greeting(hour: number): string {

@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Vector3 } from 'three'
 import SpeechBubble from './components/SpeechBubble.vue'
 import ChatInput from './components/ChatInput.vue'
 import type { BubbleAsk } from './components/bubble'
 import type { CharacterEvent } from '../../shared/settings'
 import type { ConfirmAsk } from '../../shared/chat'
+import type { AgentProgress } from '../../shared/agent'
+import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
 import { ScreenWatch, helpRequest, type ScreenFinding } from './screen/ScreenWatch'
 import { Behavior } from './behavior/Behavior'
@@ -33,6 +35,8 @@ const chatOpen = ref(false)
 const convAsk = ref<ConfirmAsk | null>(null)
 /** 屏幕上看到的报错，在问用户要不要帮忙 */
 const screenAsk = ref<ScreenFinding | null>(null)
+/** 那个报错落在登记的哪个项目里（落在了才给「在星图里看」） */
+const screenLocated = ref<LocatedError | null>(null)
 /** 正在看屏幕（脚边显示一个标识） */
 const watching = ref(false)
 
@@ -56,6 +60,12 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
       note: `点「好」才把这 ${f.snippet.split('\n').length} 行报错发给大模型（已打码）`,
       buttons: [
         { label: '好', value: 'yes', primary: true },
+        ...(screenLocated.value
+          ? [
+              { label: '交给她修', value: 'task' },
+              { label: '在星图里看', value: 'map' }
+            ]
+          : []),
         { label: '不用', value: 'no' },
         { label: '一小时内别提醒', value: 'mute' }
       ]
@@ -103,6 +113,8 @@ behavior.onSay = showBubble
 conversation.onBubble = showBubble
 voiceControl.onBubble = showBubble
 conversation.onAsk = (a) => (convAsk.value = a)
+// 等用户点头的是代码修改：告诉星图（星图里会显示这份修改，双手合十可以确认）
+watch(convAsk, (a) => bridge?.reportPendingFix?.(pendingFixOf(a)), { immediate: true })
 
 function onVoiceMenu(action: VoiceMenuAction): void {
   if (action === 'toggle-wake') void voiceControl.toggleWake()
@@ -151,6 +163,12 @@ screenWatch.onFinding = (f) => {
 function askAboutFinding(f: ScreenFinding): void {
   pendingFinding = null
   screenAsk.value = f
+  screenLocated.value = null
+  // 后台查一下报错落在不在登记的项目里：在的话多一个「在星图里看」
+  void bridge?.codeLocateAll(f.snippet).then((r) => {
+    // 按 id 比：放进 ref 的对象会被包成响应式代理，和原来的对象不相等
+    if (screenAsk.value?.id === f.id && r.ok && r.data) screenLocated.value = r.data
+  })
   behavior.gesture('tilt')
   conversation.announce(lines.watchAsk(f.app))
   clearTimeout(screenAskTimer)
@@ -163,14 +181,24 @@ function askAboutFinding(f: ScreenFinding): void {
 function clearScreenAsk(): void {
   clearTimeout(screenAskTimer)
   screenAsk.value = null
+  screenLocated.value = null
 }
 
 function answerScreen(value: string): void {
   const f = screenAsk.value
   if (!f) return
+  if (value === 'map') {
+    // 打开星图标出那颗红色星球；她的问题还留着，看完可以再点「好」
+    bridge?.openWorkbench({ project: screenLocated.value?.project, error: f.snippet })
+    return
+  }
+  const located = screenLocated.value
   clearScreenAsk()
   if (value === 'yes') {
     conversation.send(helpRequest(f))
+  } else if (value === 'task' && located) {
+    // 交给工作窗口里的编程 Agent：在报错所在的项目里开个任务（改文件之前她还会问你）
+    void startFix(located.project, f.snippet)
   } else if (value === 'mute') {
     screenWatch.pause(3600)
     conversation.announce(lines.watchMuted)
@@ -178,6 +206,14 @@ function answerScreen(value: string): void {
     screenWatch.declined()
     conversation.announce(lines.watchDeclined)
   }
+}
+
+async function startFix(project: string, snippet: string): Promise<void> {
+  if (!bridge) return
+  behavior.gesture('nod')
+  const r = await bridge.agentTask({ project, text: lines.fixTask(snippet) })
+  if (r.ok) behavior.say(pick(lines.agentTaskStarted), 3000)
+  else conversation.announce(lines.agentTaskFailed(r.error ?? ''))
 }
 
 function onAnswer(value: string): void {
@@ -242,6 +278,36 @@ function onCharacterEvent(ev: CharacterEvent): void {
     case 'settings-saved':
       behavior.gesture('nod')
       break
+    case 'agent':
+      onAgentProgress(ev.progress)
+      break
+  }
+}
+
+/** 工作窗口里的编程任务有进展：做个动作，说一句。她正在和你说话或者等你回答时不插嘴（工作窗口里都看得到） */
+function onAgentProgress(p: AgentProgress): void {
+  // 只在真的和你对话、等你回答时不插嘴；她自己念的上一句台词（「要改……可以吗」）可以被新的进展盖掉
+  const quiet = conversation.chatting || !!convAsk.value || !!screenAsk.value
+  switch (p.kind) {
+    case 'start':
+      behavior.gesture('nod')
+      if (!quiet) behavior.say(pick(lines.agentStart), 2200)
+      break
+    case 'confirm':
+      behavior.gesture('tilt')
+      if (!quiet) conversation.announce(lines.agentConfirm(p.action))
+      break
+    case 'done':
+      behavior.react('happy')
+      if (!quiet) conversation.announce(lines.agentDone(p.files))
+      break
+    case 'stopped':
+      if (!quiet && lines.agentStopped[p.reason]) behavior.say(lines.agentStopped[p.reason], 3500)
+      break
+    case 'error':
+      behavior.react('sad')
+      if (!quiet) behavior.say(lines.agentError, 3500)
+      break
   }
 }
 
@@ -251,16 +317,21 @@ async function connectHistory(): Promise<void> {
   const api = bridge
   conversation.restore(await api.historyLoad())
   conversation.onCommit = (m) => api.historyAppend(m)
-  api.onHistoryRemote((changes) => {
-    conversation.applyRemote(changes)
-    for (const s of changes.settings) voiceControl.applySetting(s.key, s.value, s.deleted)
-  })
+  subscriptions.push(
+    api.onHistoryRemote((changes) => {
+      conversation.applyRemote(changes)
+      for (const s of changes.settings) voiceControl.applySetting(s.key, s.value, s.deleted)
+    })
+  )
   voiceControl.onSettingChanged = (key, value) => api.settingPut(key, value)
   // 语音和看屏幕的开关存在这里，设置窗口通过主进程读写
   voiceControl.onPrefsChanged = reportSwitches
   reportSwitches()
-  api.onCharacterEvent(onCharacterEvent)
+  subscriptions.push(api.onCharacterEvent(onCharacterEvent))
 }
+
+/** 订阅了主进程的哪些消息：组件卸载时（开发时热更新）全部退订，旧组件不再响应 */
+const subscriptions: (() => void)[] = []
 
 // ---------- 模型 ----------
 
@@ -398,10 +469,23 @@ onMounted(async () => {
   }
 
   document.addEventListener('mousemove', onMouseMove)
-  bridge?.onCursor((p) => lookAt(p.x, p.y))
-  bridge?.onModelLoaded((data) => void useModel(data))
-  bridge?.onChatOpen(() => void openChat())
-  bridge?.onVoiceMenu(onVoiceMenu)
+  if (bridge) {
+    subscriptions.push(
+      bridge.onCursor((p) => lookAt(p.x, p.y)),
+      bridge.onModelLoaded((data) => void useModel(data)),
+      bridge.onChatOpen(() => void openChat()),
+      bridge.onVoiceMenu(onVoiceMenu),
+      // 星图里点了「问她」「让她修」：当成用户说的一句话
+      bridge.onChatSay((text) => {
+        clearScreenAsk()
+        conversation.send(text)
+      }),
+      // 星图里双手合十：确认的必须正是她现在问的这一份修改
+      bridge.onGestureApprove((id) => {
+        if (convAsk.value?.id === id) conversation.answer(true)
+      })
+    )
+  }
   void voiceControl.init()
   screenWatch.init()
   await connectHistory()
@@ -417,6 +501,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onMouseMove)
+  // 开发时改了 preload 没重启，旧的订阅函数不返回退订函数：跳过，别让卸载出错
+  for (const off of subscriptions.splice(0)) if (typeof off === 'function') off()
   conversation.interrupt()
   voiceControl.dispose()
   screenWatch.dispose()

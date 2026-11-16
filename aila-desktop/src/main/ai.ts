@@ -2,7 +2,71 @@
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AiResult, AiSettings, AiSettingsUpdate, ScreenStatus } from '../shared/settings'
+import type { AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, ScreenStatus } from '../shared/settings'
+import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
+
+// ---------- 代码星图 ----------
+
+function codeGet<T>(aiUrl: string, path: string, params: Record<string, string | number> = {}): Promise<AiResult<T>> {
+  const query = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
+  return attempt(async () =>
+    json<T>(await fetch(`${aiUrl}${path}${query ? `?${query}` : ''}`, { signal: AbortSignal.timeout(15000) }))
+  )
+}
+
+export const codeGraph = (aiUrl: string, id: string): Promise<AiResult<CodeGraph>> =>
+  codeGet<CodeGraph>(aiUrl, `/code/projects/${encodeURIComponent(id)}/graph`)
+
+export const codeOutline = (aiUrl: string, id: string, file: string): Promise<AiResult<OutlineItem[]>> =>
+  codeGet<OutlineItem[]>(aiUrl, `/code/projects/${encodeURIComponent(id)}/outline`, { file })
+
+export const codeChunk = (aiUrl: string, id: string, file: string, line: number): Promise<AiResult<ChunkSource>> =>
+  codeGet<ChunkSource>(aiUrl, `/code/projects/${encodeURIComponent(id)}/chunk`, { file, line })
+
+/** 报错落在哪个登记的项目里；不在任何项目里时 data 是 null */
+export function codeLocateAll(aiUrl: string, text: string): Promise<AiResult<LocatedError | null>> {
+  return attempt(async () =>
+    json<LocatedError | null>(
+      await fetch(`${aiUrl}/code/locate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(15000)
+      })
+    )
+  )
+}
+
+// ---------- 代码库 ----------
+
+export function listCodeProjects(aiUrl: string): Promise<AiResult<CodeProject[]>> {
+  return attempt(async () => json<CodeProject[]>(await fetch(`${aiUrl}/code/projects`, { signal: AbortSignal.timeout(5000) })))
+}
+
+/** 修过几次代码、测试通过几次、改进用户代码几次 */
+export function getFixStats(aiUrl: string): Promise<AiResult<FixStats>> {
+  return attempt(async () => json<FixStats>(await fetch(`${aiUrl}/code/fixes`, { signal: AbortSignal.timeout(3000) })))
+}
+
+export function addCodeProject(aiUrl: string, path: string): Promise<AiResult<CodeProject>> {
+  return attempt(async () =>
+    json<CodeProject>(
+      await fetch(`${aiUrl}/code/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path }),
+        signal: AbortSignal.timeout(10000)
+      })
+    )
+  )
+}
+
+export function codeProjectAction(aiUrl: string, id: string, action: 'refresh' | 'delete'): Promise<AiResult<unknown>> {
+  const url = action === 'refresh' ? `${aiUrl}/code/projects/${encodeURIComponent(id)}/refresh` : `${aiUrl}/code/projects/${encodeURIComponent(id)}`
+  return attempt(async () =>
+    json<unknown>(await fetch(url, { method: action === 'refresh' ? 'POST' : 'DELETE', signal: AbortSignal.timeout(5000) }))
+  )
+}
 
 /** 看屏幕的状态和上次的统计（设置窗口显示） */
 export function getScreenStatus(aiUrl: string): Promise<AiResult<ScreenStatus>> {

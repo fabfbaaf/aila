@@ -10,10 +10,13 @@
     "preview": "electron-vite preview",
     "dev:web": "vite --config vite.web.config.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "setup:gestures": "node scripts/setup-gestures.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.2.0",
     "@pixiv/three-vrm": "^3.1.0",
+    "d3-force-3d": "^3.0.6",
     "three": "^0.169.0",
     "vue": "^3.5.12",
     "ws": "^8.22.2"

@@ -12,6 +12,8 @@ export default defineConfig({
   server: {
     port: 5180,
     strictPort: true,
+    // 只听 IPv4：新版 Node 把 localhost 解析成 ::1，有的浏览器和工具连不上只听 IPv6 的服务
+    host: '127.0.0.1',
     // 对话请求转给本地 AI 服务（桌面版由主进程转发，不走这里）
     proxy: {
       '/ai': {

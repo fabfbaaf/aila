@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage } from '../shared/chat'
 import type {
   AccountStatus,
@@ -16,11 +16,28 @@ import type {
   AiSettings,
   AiSettingsUpdate,
   CharacterEvent,
+  CodeProject,
+  FixStats,
   ScreenStatus,
   SettingsSection,
   VoicePrefs
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
+import type { AgentActivity, AgentEvent, AgentMode, AgentSession, AgentSessionSummary } from '../shared/agent'
+import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
+
+/** 取消订阅 */
+export type Unsubscribe = () => void
+
+/**
+ * 订阅主进程推过来的消息，返回取消订阅的函数。
+ * 开发时热更新会换掉页面组件：旧组件要退订，否则它还在响应菜单（比如偷偷把「看屏幕」又打开）。
+ */
+function listen<A extends unknown[]>(channel: string, cb: (...args: A) => void): Unsubscribe {
+  const handler = (_e: IpcRendererEvent, ...args: unknown[]): void => cb(...(args as A))
+  ipcRenderer.on(channel, handler)
+  return () => void ipcRenderer.removeListener(channel, handler)
+}
 
 // 渲染层能用的全部能力都在这里，渲染层不直接接触 Node 和 Electron
 const api = {
@@ -32,12 +49,8 @@ const api = {
   dragEnd: (): void => ipcRenderer.send('win:drag-end'),
   showMenu: (voice: VoiceMenuState): void => ipcRenderer.send('menu:show', voice),
   getLastModel: (): Promise<ArrayBuffer | null> => ipcRenderer.invoke('model:get-last'),
-  onCursor: (cb: (p: { x: number; y: number }) => void): void => {
-    ipcRenderer.on('cursor', (_e, p) => cb(p))
-  },
-  onModelLoaded: (cb: (data: ArrayBuffer) => void): void => {
-    ipcRenderer.on('model:loaded', (_e, data) => cb(data))
-  },
+  onCursor: (cb: (p: { x: number; y: number }) => void): Unsubscribe => listen('cursor', cb),
+  onModelLoaded: (cb: (data: ArrayBuffer) => void): Unsubscribe => listen('model:loaded', cb),
 
   // 对话
   chatStart: (id: number, messages: ChatMessage[]): void => ipcRenderer.send('chat:start', id, messages),
@@ -45,28 +58,20 @@ const api = {
   /** 回答她的确认（「好 / 不要」）；false 表示这个确认已经结束了 */
   chatConfirm: (confirmId: string, approved: boolean): Promise<boolean> =>
     ipcRenderer.invoke('chat:confirm', confirmId, approved),
-  onChatEvent: (cb: (id: number, ev: ChatEvent) => void): void => {
-    ipcRenderer.on('chat:event', (_e, id, ev) => cb(id, ev))
-  },
+  onChatEvent: (cb: (id: number, ev: ChatEvent) => void): Unsubscribe => listen('chat:event', cb),
   /** 右键菜单或全局快捷键要求打开对话框 */
-  onChatOpen: (cb: () => void): void => {
-    ipcRenderer.on('chat:open', () => cb())
-  },
+  onChatOpen: (cb: () => void): Unsubscribe => listen('chat:open', cb),
 
   // 语音
   /** 本地 AI 服务地址（语音 WebSocket 由渲染层直接连） */
   aiUrl: process.env['AILA_AI_URL'] ?? AI_SERVICE_URL,
   synthesize: (text: string): Promise<ArrayBuffer | null> => ipcRenderer.invoke('tts:synthesize', text),
-  onVoiceMenu: (cb: (action: VoiceMenuAction) => void): void => {
-    ipcRenderer.on('voice:menu', (_e, action) => cb(action))
-  },
+  onVoiceMenu: (cb: (action: VoiceMenuAction) => void): Unsubscribe => listen('voice:menu', cb),
 
   // 对话记录（本地保存，登录后同步到云端）
   historyLoad: (): Promise<StoredMessage[]> => ipcRenderer.invoke('history:load'),
   historyAppend: (m: StoredMessage): void => ipcRenderer.send('history:append', m),
-  onHistoryRemote: (cb: (changes: RemoteChanges) => void): void => {
-    ipcRenderer.on('history:remote', (_e, changes) => cb(changes))
-  },
+  onHistoryRemote: (cb: (changes: RemoteChanges) => void): Unsubscribe => listen('history:remote', cb),
   settingPut: (key: string, value: unknown): void => ipcRenderer.send('settings:put', key, value),
 
   // 账号
@@ -74,17 +79,13 @@ const api = {
   accountDetails: (): Promise<AccountStatus> => ipcRenderer.invoke('account:details'),
   accountAuth: (form: AuthForm): Promise<AuthResult> => ipcRenderer.invoke('account:auth', form),
   accountLogout: (): Promise<void> => ipcRenderer.invoke('account:logout'),
-  onAccountStatus: (cb: (status: AccountStatus) => void): void => {
-    ipcRenderer.on('account:status', (_e, status) => cb(status))
-  },
+  onAccountStatus: (cb: (status: AccountStatus) => void): Unsubscribe => listen('account:status', cb),
 
   // 记忆
   memoryList: (): Promise<StoredMemory[]> => ipcRenderer.invoke('memory:list'),
   memoryDelete: (id: string): void => ipcRenderer.send('memory:delete', id),
   memoryForgetAll: (): Promise<number> => ipcRenderer.invoke('memory:forget-all'),
-  onMemoryChanged: (cb: (list: StoredMemory[]) => void): void => {
-    ipcRenderer.on('memory:changed', (_e, list) => cb(list))
-  },
+  onMemoryChanged: (cb: (list: StoredMemory[]) => void): Unsubscribe => listen('memory:changed', cb),
 
   // 资料库（文件只存在本机的 AI 服务里）
   knowledgeList: (): Promise<KnowledgeDoc[]> => ipcRenderer.invoke('knowledge:list'),
@@ -92,15 +93,72 @@ const api = {
   knowledgeAdd: (): Promise<KnowledgeAddResult | null> => ipcRenderer.invoke('knowledge:add'),
   knowledgeDelete: (id: string): Promise<void> => ipcRenderer.invoke('knowledge:delete', id),
   /** 选好文件、开始上传了（大文件要等一会儿） */
-  onKnowledgeBusy: (cb: (count: number) => void): void => {
-    ipcRenderer.on('knowledge:busy', (_e, count) => cb(count))
-  },
+  // 代码星图
+  codeGraph: (id: string): Promise<AiResult<CodeGraph>> => ipcRenderer.invoke('code:graph', id),
+  codeOutline: (id: string, file: string): Promise<AiResult<OutlineItem[]>> => ipcRenderer.invoke('code:outline', id, file),
+  codeChunk: (id: string, file: string, line: number): Promise<AiResult<ChunkSource>> =>
+    ipcRenderer.invoke('code:chunk', id, file, line),
+  /** 报错落在哪个登记的项目里（data 为 null：不在任何项目里） */
+  codeLocateAll: (text: string): Promise<AiResult<LocatedError | null>> => ipcRenderer.invoke('code:locate-all', text),
+  openWorkbench: (focus?: WorkbenchFocus): void => ipcRenderer.send('workbench:open', focus),
+  /** 星图页面加载好后取一次：打开它时要定位的报错 */
+  workbenchTakeFocus: (): Promise<WorkbenchFocus | null> => ipcRenderer.invoke('workbench:take-focus'),
+  onWorkbenchFocus: (cb: (focus: WorkbenchFocus) => void): Unsubscribe => listen('workbench:focus', cb),
+  /** 星图里点「问她」：让桌面上的她说（主进程只认星图窗口发来的） */
+  sayToAila: (text: string): void => ipcRenderer.send('chat:say', text),
+  onChatSay: (cb: (text: string) => void): Unsubscribe => listen('chat:say', cb),
+  /** 角色窗口：报告现在有没有等用户点头的代码修改 */
+  reportPendingFix: (fix: PendingFix | null): void => ipcRenderer.send('fix:pending', fix),
+  /** 星图窗口：等用户点头的代码修改（打开时取一次，之后听变化） */
+  pendingFix: (): Promise<PendingFix | null> => ipcRenderer.invoke('workbench:pending-fix'),
+  onPendingFix: (cb: (fix: PendingFix | null) => void): Unsubscribe => listen('workbench:pending-fix', cb),
+  /** 星图窗口：双手合十，确认正显示着的这份修改；false 表示它已经不在等了 */
+  gestureSeal: (id: string): Promise<boolean> => ipcRenderer.invoke('gesture:seal', id),
+  /** 角色窗口：星图里结印确认了这份修改 */
+  onGestureApprove: (cb: (id: string) => void): Unsubscribe => listen('gesture:approve', cb),
+
+  // 工作窗口（编程 Agent）：主进程只认工作窗口发来的
+  agentList: (): Promise<AiResult<AgentSessionSummary[]>> => ipcRenderer.invoke('agent:list'),
+  agentGet: (sid: string): Promise<AiResult<AgentSession>> => ipcRenderer.invoke('agent:get', sid),
+  agentCreate: (cwd: string, mode: AgentMode, isolate = false): Promise<AiResult<AgentSessionSummary>> =>
+    ipcRenderer.invoke('agent:create', cwd, mode, isolate),
+  /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
+  agentMerge: (sid: string, runTests: boolean): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:merge', sid, runTests),
+  agentDiscard: (sid: string): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:discard', sid),
+  /** 说一句话开始一轮；事件从 onAgentEvent 来 */
+  agentSend: (sid: string, text: string): void => ipcRenderer.send('agent:send', sid, text),
+  /** 接上一个会话：补发 after 之后的事件，正在做的话接着推 */
+  agentWatch: (sid: string, after: number): void => ipcRenderer.send('agent:watch', sid, after),
+  agentInterrupt: (sid: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:interrupt', sid),
+  agentSetMode: (sid: string, mode: AgentMode): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:mode', sid, mode),
+  agentCompact: (sid: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:compact', sid),
+  agentConfirm: (id: string, approved: boolean, remember: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('agent:confirm', id, approved, remember),
+  agentPickFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:pick-folder'),
+  agentTakeFocus: (): Promise<string | null> => ipcRenderer.invoke('agent:take-focus'),
+  onAgentEvent: (cb: (sid: string, event: AgentEvent) => void): Unsubscribe => listen('agent:event', cb),
+  onAgentStreamEnd: (cb: (sid: string, error?: string) => void): Unsubscribe => listen('agent:stream-end', cb),
+  onAgentFocus: (cb: (sid: string) => void): Unsubscribe => listen('agent:focus', cb),
+  /** 星图：她在哪个文件上干活（读的星球闪一下，改过的变绿） */
+  onWorkbenchActivity: (cb: (a: AgentActivity) => void): Unsubscribe => listen('workbench:activity', cb),
+  /** 角色窗口、星图：把任务交给工作窗口（开会话、开始做、打开窗口） */
+  agentTask: (task: { text: string; project?: string; cwd?: string }): Promise<AiResult<AgentSessionSummary>> =>
+    ipcRenderer.invoke('agent:task', task),
+  /** 从任何窗口打开工作窗口（可以指定会话） */
+  openAgent: (sid?: string): void => ipcRenderer.send('agent:open', sid),
+
+  // 代码库
+  codeList: (): Promise<AiResult<CodeProject[]>> => ipcRenderer.invoke('code:list'),
+  codeFixes: (): Promise<AiResult<FixStats>> => ipcRenderer.invoke('code:fixes'),
+  /** 弹出选文件夹的对话框；取消了返回 null */
+  codeAdd: (): Promise<AiResult<CodeProject> | null> => ipcRenderer.invoke('code:add'),
+  codeRefresh: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:refresh', id),
+  codeRemove: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:remove', id),
+  onKnowledgeBusy: (cb: (count: number) => void): Unsubscribe => listen('knowledge:busy', cb),
 
   // 设置窗口
   openSettings: (section?: SettingsSection): void => ipcRenderer.send('settings:open', section),
-  onSettingsSection: (cb: (section: SettingsSection) => void): void => {
-    ipcRenderer.on('settings:section', (_e, section) => cb(section))
-  },
+  onSettingsSection: (cb: (section: SettingsSection) => void): Unsubscribe => listen('settings:section', cb),
   aiSettings: (): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings'),
   aiSettingsPut: (update: AiSettingsUpdate): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings:put', update),
   aiSettingsTest: (): Promise<AiResult<{ ok: boolean; message: string }>> => ipcRenderer.invoke('ai:settings:test'),
@@ -109,9 +167,7 @@ const api = {
   skillsSet: (id: string, on: boolean): void => ipcRenderer.send('skills:set', id, on),
   modelPath: (): Promise<string | null> => ipcRenderer.invoke('model:path'),
   modelChoose: (): void => ipcRenderer.send('model:choose'),
-  onModelPath: (cb: (path: string) => void): void => {
-    ipcRenderer.on('model:path', (_e, path) => cb(path))
-  },
+  onModelPath: (cb: (path: string) => void): Unsubscribe => listen('model:path', cb),
   resetPosition: (): void => ipcRenderer.send('win:reset-position'),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),
@@ -122,14 +178,10 @@ const api = {
   voiceSet: (key: keyof VoicePrefs, on: boolean): void => ipcRenderer.send('voice:set', key, on),
   /** 看屏幕的状态和上次的统计 */
   screenStatus: (): Promise<AiResult<ScreenStatus>> => ipcRenderer.invoke('screen:status'),
-  onVoiceState: (cb: (prefs: VoicePrefs) => void): void => {
-    ipcRenderer.on('voice:state', (_e, prefs) => cb(prefs))
-  },
+  onVoiceState: (cb: (prefs: VoicePrefs) => void): Unsubscribe => listen('voice:state', cb),
 
   /** 设置窗口里做了某件事，桌面上的她做出反应 */
-  onCharacterEvent: (cb: (ev: CharacterEvent) => void): void => {
-    ipcRenderer.on('character:event', (_e, ev) => cb(ev))
-  }
+  onCharacterEvent: (cb: (ev: CharacterEvent) => void): Unsubscribe => listen('character:event', cb)
 }
 
 export type AilaApi = typeof api

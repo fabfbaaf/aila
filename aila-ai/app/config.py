@@ -32,6 +32,10 @@ class Settings:
     asr_language: str
     data_dir: Path
     mcp_config: Path
+    # 编程 Agent：用的模型（默认和对话一样）、上下文窗口（快满时压缩）、一轮最多几步
+    coder_model: str = ""
+    coder_context: int = 128_000
+    coder_max_steps: int = 60
 
     @property
     def mock(self) -> bool:
@@ -61,4 +65,7 @@ def load_settings() -> Settings:
         data_dir=Path(os.getenv("AILA_DATA_DIR", str(ROOT / "data"))),
         # 外部 MCP 服务的配置，参考 mcp.example.json
         mcp_config=Path(os.getenv("AILA_MCP_CONFIG", str(ROOT / "mcp.json"))),
+        coder_model=os.getenv("AILA_CODER_MODEL", "").strip(),
+        coder_context=int(os.getenv("AILA_CODER_CONTEXT", "128000")),
+        coder_max_steps=int(os.getenv("AILA_CODER_MAX_STEPS", "60")),
     )

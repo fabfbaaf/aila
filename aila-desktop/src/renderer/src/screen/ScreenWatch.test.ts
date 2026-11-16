@@ -141,6 +141,18 @@ describe('ScreenWatch', () => {
     expect(sockets).toHaveLength(1)
   })
 
+  it('组件卸载后（热更新换掉了它），再收到开关也不会打开', () => {
+    const { watch, sockets } = setup()
+    watch.setEnabled(true)
+    sockets[0].open()
+    watch.dispose()
+    expect(sockets[0].closed).toBe(true)
+    watch.setEnabled(false)
+    watch.setEnabled(true)
+    vi.advanceTimersByTime(60_000)
+    expect(sockets).toHaveLength(1)
+  })
+
   it('上次开着，重启后继续看', () => {
     localStorage.setItem('aila.screen', JSON.stringify({ watch: true }))
     const { watch, sockets } = setup()

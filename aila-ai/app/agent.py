@@ -13,7 +13,7 @@ from typing import Any
 from .confirm import Confirmations, Result
 from .llm import ChatModel, Message, ToolCall
 from .tags import Event, TagParser
-from .tools import Toolbox
+from .tools import EMIT, Toolbox
 
 # 最多调用几轮工具；最后一轮不再提供工具，逼它根据已有信息直接回答。
 # 网页操作一步一轮（打开 → 搜索 → 点结果 → 看内容），所以给得比较宽
@@ -80,7 +80,15 @@ async def run_agent(
                     continue
                 approved = True
             yield {"type": "status", "text": toolbox.status(call)}
-            add_result(call, await toolbox.run(call, approved))
+            side: list[dict[str, Any]] = []
+            token = EMIT.set(side.append)
+            try:
+                result = await toolbox.run(call, approved)
+            finally:
+                EMIT.reset(token)
+            add_result(call, result)
+            for event in side:  # 工具想告诉桌面端的事（比如打开工作窗口）
+                yield event  # type: ignore[misc]
 
 
 def _assistant_tool_message(text: str, calls: list[ToolCall]) -> dict[str, Any]:

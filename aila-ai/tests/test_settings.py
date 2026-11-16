@@ -53,7 +53,7 @@ def test_api_key_is_write_only(env: Path) -> None:
 
     body = client.get("/settings").text
     assert "sk-test-123" not in body  # 读的时候只告诉设没设
-    assert client.get("/settings").json()["llm"] == {"baseUrl": "https://api.deepseek.com", "model": "deepseek-reasoner", "apiKeySet": True}
+    assert client.get("/settings").json()["llm"] == {"baseUrl": "https://api.deepseek.com", "model": "deepseek-reasoner", "apiKeySet": True, "coderModel": ""}
 
     text = env.read_text(encoding="utf-8")
     assert "LLM_API_KEY=sk-test-123" in text
@@ -61,6 +61,15 @@ def test_api_key_is_write_only(env: Path) -> None:
 
     model = deps.get_model()
     assert isinstance(model, OpenAICompatibleModel) and model.name == "deepseek-reasoner"  # 当场生效
+
+
+def test_coder_model_can_differ_from_chat(env: Path) -> None:
+    client = TestClient(app)
+    client.put("/settings", json={"llmApiKey": "sk-test-123", "coderModel": "deepseek-reasoner"})
+    assert client.get("/settings").json()["llm"]["coderModel"] == "deepseek-reasoner"
+    assert deps.get_coder_model().name == "deepseek-reasoner" and deps.get_model().name == "deepseek-chat"
+    client.put("/settings", json={"coderModel": ""})  # 清空：和对话用同一个
+    assert deps.get_coder_model().name == "deepseek-chat"
 
 
 def test_clearing_the_key_goes_back_to_the_mock_model(env: Path) -> None:

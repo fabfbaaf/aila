@@ -10,6 +10,7 @@ const offline = ref('')
 // 表单：密钥框留空表示不改
 const baseUrl = ref('')
 const model = ref('')
+const coderModel = ref('')
 const apiKey = ref('')
 const provider = ref<'bocha' | 'tavily' | 'none'>('bocha')
 const searchKey = ref('')
@@ -34,6 +35,7 @@ function fill(s: AiSettings): void {
   settings.value = s
   baseUrl.value = s.llm.baseUrl
   model.value = s.llm.model
+  coderModel.value = s.llm.coderModel ?? ''
   provider.value = s.search.provider
   apiKey.value = ''
   searchKey.value = ''
@@ -53,7 +55,11 @@ async function save(update: AiSettingsUpdate, msg: typeof llmMsg): Promise<boole
 }
 
 async function saveLlm(): Promise<void> {
-  const update: AiSettingsUpdate = { llmBaseUrl: baseUrl.value.trim(), llmModel: model.value.trim() }
+  const update: AiSettingsUpdate = {
+    llmBaseUrl: baseUrl.value.trim(),
+    llmModel: model.value.trim(),
+    coderModel: coderModel.value.trim()
+  }
   if (apiKey.value.trim()) update.llmApiKey = apiKey.value.trim()
   if (await save(update, llmMsg)) await test()
 }
@@ -106,6 +112,13 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
           <datalist id="aila-models">
             <option v-for="m in MODELS" :key="m" :value="m" />
           </datalist>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">编程用的模型</span>
+        <div>
+          <input v-model="coderModel" type="text" list="aila-models" spellcheck="false" placeholder="留空 = 和上面一样" />
+          <span class="hint">工作窗口和终端里的 aila 用它。写代码可以换一个更强的模型，聊天还用便宜的</span>
         </div>
       </div>
       <div class="row">

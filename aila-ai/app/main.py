@@ -5,6 +5,7 @@
 - GET /skills：技能包列表
 - /knowledge：资料库
 - POST /tts、WS /voice：语音
+- /agent：编程 Agent（会话、一轮任务的事件流、打断、权限模式、确认）
 """
 
 import asyncio
@@ -16,7 +17,7 @@ from fastapi import FastAPI
 
 from . import deps
 from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
-from .routes import chat, knowledge, screen, settings, voice
+from .routes import agent, chat, code, knowledge, screen, settings, voice
 from .routes.chat import ChatMessage, ChatRequest, build_messages
 from .security import LocalOnly
 
@@ -39,6 +40,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     if mcp:
         await mcp.stop()
+    if deps.get_runtime.cache_info().currsize:  # 正在做的编程任务：打断（日志会补完整，下次可以接着做）
+        await deps.get_runtime().shutdown()
     if deps.get_browser.cache_info().currsize:  # 打开过浏览器的话关掉
         await deps.get_browser().shutdown()
     await preload
@@ -52,3 +55,5 @@ app.include_router(voice.router)
 app.include_router(knowledge.router)
 app.include_router(settings.router)
 app.include_router(screen.router)
+app.include_router(code.router)
+app.include_router(agent.router)

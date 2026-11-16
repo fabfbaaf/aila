@@ -32,6 +32,8 @@ export type ChatEvent =
   /** 会改东西的操作（打开网页、发消息……）：回复暂停，等用户回答（POST /chat/confirm） */
   | ({ type: 'confirm' } & ConfirmAsk)
   | { type: 'confirm_end'; id: string; result: ConfirmResult }
+  /** 她把编程任务交给了工作窗口（对话里的「编程任务」工具）：桌面端打开工作窗口接上这个会话 */
+  | { type: 'agent_task'; session: string; project: string }
   | { type: 'done' }
   | { type: 'error'; code: ChatErrorCode; message: string }
 

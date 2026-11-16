@@ -1,6 +1,40 @@
 // 设置窗口：主进程、预加载和渲染层共用的类型
+import type { AgentProgress } from './agent'
 
-export type SettingsSection = 'model' | 'voice' | 'skills' | 'knowledge' | 'memory' | 'account' | 'appearance' | 'status'
+export type SettingsSection =
+  | 'model'
+  | 'voice'
+  | 'skills'
+  | 'knowledge'
+  | 'code'
+  | 'memory'
+  | 'account'
+  | 'appearance'
+  | 'status'
+
+/** 她修代码的记录：修过几次、跑了测试的几次、测试通过几次、改进用户代码几次（GET /code/fixes） */
+export interface FixStats {
+  attempts: number
+  tested: number
+  passed: number
+  merged: number
+}
+
+/** 登记的代码项目（AI 服务 GET /code/projects） */
+export interface CodeProject {
+  id: string
+  name: string
+  root: string
+  addedAt: string
+  files?: number
+  chunks?: number
+  languages?: Record<string, number>
+  refreshedAt?: number | null
+  /** new：还没建索引；indexing：正在建；ready：好了；error：出错了 */
+  state: 'new' | 'indexing' | 'ready' | 'error'
+  error?: string
+  last?: { parsed: number; removed: number; embedded: number; seconds: number }
+}
 
 /** 角色窗口里的开关：语音唤醒、出声说话、留意屏幕上的报错（存在角色窗口那边，设置窗口通过主进程读写） */
 export interface VoicePrefs {
@@ -34,10 +68,13 @@ export type CharacterEvent =
   | { kind: 'forget-all' }
   | { kind: 'knowledge-added'; names: string[] }
   | { kind: 'settings-saved' }
+  /** 工作窗口里的编程任务有进展：她说一句、做个动作 */
+  | { kind: 'agent'; progress: AgentProgress }
 
 /** AI 服务的设置（GET /settings）。密钥只告诉设没设 */
 export interface AiSettings {
-  llm: { baseUrl: string; model: string; apiKeySet: boolean }
+  /** coderModel：编程 Agent 用的模型，空 = 和对话一样 */
+  llm: { baseUrl: string; model: string; apiKeySet: boolean; coderModel?: string }
   search: { provider: 'bocha' | 'tavily' | 'none'; apiKeySet: boolean }
   voice: {
     enabled: boolean
@@ -59,6 +96,7 @@ export interface AiSettingsUpdate {
   llmBaseUrl?: string
   llmModel?: string
   llmApiKey?: string
+  coderModel?: string
   searchProvider?: 'bocha' | 'tavily' | 'none'
   searchApiKey?: string
   ttsEngine?: string

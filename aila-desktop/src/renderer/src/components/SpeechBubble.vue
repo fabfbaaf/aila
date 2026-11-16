@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
-import type { BubbleAsk } from './bubble'
+import { computed, nextTick, ref, watch } from 'vue'
+import { diffLines, type BubbleAsk } from './bubble'
 
 const props = defineProps<{ text: string; visible: boolean; ask?: BubbleAsk | null }>()
 const emit = defineEmits<{ answer: [value: string] }>()
 const body = ref<HTMLDivElement>()
+
+/** 具体内容按行显示；是代码改动（diff）时，加的行标绿、删的行标红 */
+const detailLines = computed(() => diffLines(props.ask?.detail ?? ''))
+const isDiff = computed(() => detailLines.value.some((l) => l.kind === 'hunk'))
 
 // 回复比气泡长时，始终显示最新的那几行
 watch(
@@ -22,9 +26,12 @@ watch(
       <div ref="body" class="body">{{ text }}</div>
       <!-- 等用户回答：要确认的操作（具体内容由 AI 服务从参数生成，照原样显示）、屏幕上看到的报错 -->
       <div v-if="ask" class="ask" data-interactive>
-        <div class="detail">
+        <div class="detail" :class="{ diff: isDiff }">
           <span v-if="ask.tag" class="skill">{{ ask.tag }}</span>
-          {{ ask.detail }}
+          <template v-if="isDiff">
+            <div v-for="(l, i) in detailLines" :key="i" :class="['line', l.kind]">{{ l.text }}</div>
+          </template>
+          <template v-else>{{ ask.detail }}</template>
         </div>
         <div v-if="ask.note" class="note">{{ ask.note }}</div>
         <div class="buttons">
@@ -84,6 +91,28 @@ watch(
   line-height: 1.5;
   word-break: break-all;
   user-select: text;
+}
+
+/* 代码改动：框高一点，按行着色 */
+.detail.diff {
+  max-height: calc(12px * 1.5 * 12);
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.line.add {
+  background: #e3f4e6;
+  color: #1d6b32;
+}
+
+.line.del {
+  background: #fbe5e5;
+  color: #9b2c2c;
+}
+
+.line.hunk,
+.line.file {
+  color: #7a8099;
 }
 
 .skill {

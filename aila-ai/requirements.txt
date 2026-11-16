@@ -21,3 +21,12 @@ playwright>=1.50
 # 看屏幕找报错：截图、本地文字识别（模型随安装包自带）
 mss>=9.0
 rapidocr_onnxruntime>=1.4
+# 代码库：按函数解析代码（各语言的语法随安装包自带）
+tree-sitter>=0.25
+tree-sitter-python>=0.25
+tree-sitter-javascript>=0.25
+tree-sitter-typescript>=0.23
+tree-sitter-java>=0.23
+# 终端版 aila：画界面、输入框
+rich>=13.7
+prompt_toolkit>=3.0.43

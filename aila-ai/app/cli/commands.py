@@ -1,0 +1,81 @@
+"""斜杠命令，以及从会话日志里整理信息（纯函数，可以单测）"""
+
+from typing import Any
+
+from ..runtime.permissions import MODE_LABELS, MODES
+
+COMMANDS: dict[str, str] = {
+    "/help": "看所有命令和快捷键",
+    "/mode": "换权限模式：/mode read_only | ask | auto；不带参数就换到下一个（Shift+Tab 也行）",
+    "/compact": "压缩上下文：用一份交接说明代替前面的对话（快满时会自动做）",
+    "/new": "在这个目录开一个新会话",
+    "/resume": "接着以前的会话做：/resume 列出这个目录最近的会话，/resume 编号 或 会话id 打开它",
+    "/usage": "这个会话的用量和缓存命中率",
+    "/todo": "看她的待办清单",
+    "/changes": "这个会话里她改过的文件",
+    "/init": "让她读一遍项目，写一份 AGENTS.md（以后每个会话开头都会带上）",
+    "/merge": "在新分支上做时：跑测试、合并回你的代码；/merge 直接 = 不跑测试直接合并",
+    "/discard": "在新分支上做时：放弃分支，你的代码保持原样",
+    "/exit": "退出（Ctrl+D 也行）",
+}
+ALIASES = {"/quit": "/exit", "/sessions": "/resume", "/cost": "/usage", "/clear": "/new", "/?": "/help"}
+
+KEYS = [
+    ("Enter", "发送"),
+    ("Ctrl+J / Alt+Enter", "换行"),
+    ("Shift+Tab", "换权限模式"),
+    ("Esc 或 Ctrl+C", "她做事的时候：打断"),
+    ("Ctrl+C 两次", "在输入框里：退出"),
+    ("↑ ↓", "以前说过的话"),
+]
+
+INIT_PROMPT = (
+    "请读一遍这个项目（目录结构、主要模块、构建和测试命令、代码风格），在项目根目录写一份 AGENTS.md，"
+    "给以后在这个项目里工作的编程助手看：项目是做什么的、怎么安装依赖、怎么构建和跑测试、目录结构、代码约定、要注意的地方。"
+    "已经有 AGENTS.md 的话先读，在它的基础上改进。写具体的命令和路径，不写空话，控制在 100 行以内。"
+)
+
+MODE_CYCLE = {"ask": "auto", "auto": "read_only", "read_only": "ask"}
+
+
+def parse(text: str) -> tuple[str, str]:
+    """「/mode auto」→（"/mode", "auto"）；别名换成正式名字"""
+    name, _, arg = text.strip().partition(" ")
+    name = name.lower()
+    return ALIASES.get(name, name), arg.strip()
+
+
+def next_mode(mode: str, arg: str = "") -> str | None:
+    """/mode 的参数 → 要换成的模式；不带参数就换到下一个；参数不对返回 None"""
+    if not arg:
+        return MODE_CYCLE.get(mode, "ask")
+    arg = {"只读": "read_only", "先问再改": "ask", "自动": "auto", "readonly": "read_only"}.get(arg, arg)
+    return arg if arg in MODES else None
+
+
+def changed_files(events: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    """她在这个会话里改过（或新建）的文件，以及改了几次"""
+    counts: dict[str, int] = {}
+    for e in events:
+        if e.get("type") == "tool" and e.get("status") == "ok" and e.get("file"):
+            counts[e["file"]] = counts.get(e["file"], 0) + 1
+    return list(counts.items())
+
+
+def latest_todos(events: list[dict[str, Any]]) -> list[dict[str, str]]:
+    for e in reversed(events):
+        if e.get("type") == "tool" and "todos" in e:
+            return list(e["todos"])
+    return []
+
+
+def usage_lines(summary: dict[str, Any]) -> list[str]:
+    u = summary.get("usage", {})
+    prompt, hit, completion = int(u.get("prompt", 0)), int(u.get("cache_hit", 0)), int(u.get("completion", 0))
+    if not prompt:
+        return ["还没有用量。"]
+    return [
+        f"输入 {prompt:,} token，其中命中缓存 {hit:,}（{hit / prompt:.0%}），没命中 {prompt - hit:,}",
+        f"输出 {completion:,} token",
+        f"模型 {summary.get('model', '')} · 模式 {MODE_LABELS.get(summary.get('mode', ''), '')}",
+    ]

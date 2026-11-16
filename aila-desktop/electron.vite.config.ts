@@ -13,6 +13,8 @@ export default defineConfig({
     resolve: {
       alias: { '@': resolve('src/renderer/src') }
     },
-    plugins: [vue()]
+    plugins: [vue()],
+    // 只听 IPv4：新版 Node 把 localhost 解析成 ::1，Electron 去连 127.0.0.1 会连不上
+    server: { host: '127.0.0.1' }
   }
 })

@@ -144,3 +144,15 @@ describe('Conversation 的操作确认', () => {
     expect(conv.answerText('好')).toBe(false)
   })
 })
+
+describe('Conversation 是不是正在和你对话', () => {
+  it('她自己念的固定台词不算（工作窗口的新进展可以盖掉它）；真的在回复你才算', () => {
+    const { conv, transport } = setup()
+    conv.announce('要改 README.md……可以吗？')
+    expect(conv.busy).toBe(true)
+    expect(conv.chatting).toBe(false)
+    conv.send('你好')
+    transport.push({ type: 'text', text: '你好。' })
+    expect(conv.chatting).toBe(true)
+  })
+})

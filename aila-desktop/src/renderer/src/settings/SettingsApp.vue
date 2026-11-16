@@ -8,6 +8,7 @@ import ModelSection from './sections/ModelSection.vue'
 import VoiceSection from './sections/VoiceSection.vue'
 import SkillsSection from './sections/SkillsSection.vue'
 import KnowledgeSection from './sections/KnowledgeSection.vue'
+import CodeSection from './sections/CodeSection.vue'
 import MemorySection from './sections/MemorySection.vue'
 import AccountSection from './sections/AccountSection.vue'
 import AppearanceSection from './sections/AppearanceSection.vue'
@@ -18,6 +19,7 @@ const SECTIONS: { id: SettingsSection; name: string; component: Component }[] = 
   { id: 'voice', name: '语音', component: VoiceSection },
   { id: 'skills', name: '技能包', component: SkillsSection },
   { id: 'knowledge', name: '资料库', component: KnowledgeSection },
+  { id: 'code', name: '代码库', component: CodeSection },
   { id: 'memory', name: '她记得的事', component: MemorySection },
   { id: 'account', name: '账号与同步', component: AccountSection },
   { id: 'appearance', name: '形象', component: AppearanceSection },

@@ -9,6 +9,7 @@ import logging
 import os
 import threading
 import time
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any
 
@@ -19,10 +20,16 @@ from .config import ENV_FILE as CONFIG_ENV_FILE
 from .config import load_settings
 from .confirm import Confirmations
 from .knowledge import KnowledgeBase, knowledge_skill
-from .llm import ChatModel, MockModel, OpenAICompatibleModel
+from .llm import ChatModel, CoderModel, MockModel, OpenAICompatibleModel
 from .browser import BrowserSession
+from .runtime.loop import AgentConfig
+from .runtime.mock import MockCoderModel
+from .runtime.runner import Runtime
+from .code import CodeProjects
 from .tools import Skill, SkillRegistry
 from .tools.browser import browse_skill, browser_skill
+from .tools.code import code_skill
+from .tools.coding import coding_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, MockSearch, SearchProvider, TavilySearch
@@ -53,6 +60,23 @@ def get_model() -> ChatModel:
         return MockModel()
     log.info("大模型：%s（%s）", settings.llm_model, settings.llm_base_url)
     return OpenAICompatibleModel(settings)
+
+
+# ---------- 编程 Agent ----------
+
+
+def get_coder_model() -> CoderModel:
+    if settings.mock:
+        return MockCoderModel()
+    name = settings.coder_model or settings.llm_model
+    return OpenAICompatibleModel(replace(settings, llm_model=name))
+
+
+@lru_cache
+def get_runtime() -> Runtime:
+    config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
+    # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
+    return Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects())
 
 
 def _load(kind: str, build: Any) -> Any:
@@ -148,6 +172,12 @@ _mcp_skills: list[Skill] = []
 
 
 @lru_cache
+def get_code_projects() -> CodeProjects:
+    """用户登记的代码项目，索引在 data/code（代码只在本机建索引）"""
+    return CodeProjects(settings.data_dir, lambda: get_embedder())  # 用到时再查（测试里可以换掉）
+
+
+@lru_cache
 def get_browser() -> BrowserSession:
     """她自己的浏览器窗口（第一次用到才真正打开），配置目录在 data/browser，和用户的浏览器分开"""
     return BrowserSession(settings.data_dir / "browser", make_resolver(http_client))
@@ -158,7 +188,8 @@ def get_registry() -> SkillRegistry:
     search = _search_provider()
     log.info("联网搜索：%s", search.name if search else "未配置（只能读用户给的链接）")
     registry = SkillRegistry([
-        web_skill(http_client, search), knowledge_skill(get_knowledge()), browser_skill(), browse_skill(get_browser()),
+        web_skill(http_client, search), knowledge_skill(get_knowledge()), code_skill(get_code_projects()),
+        browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()),
     ])
     for skill in _mcp_skills:
         registry.add(skill)

@@ -15,9 +15,11 @@ def anyio_backend() -> str:
 
 
 @pytest.fixture(autouse=True)
-def no_real_embedder() -> Iterator[None]:
-    """接口测试默认不加载真实的向量模型（慢，还要下载）；需要的测试自己换成假的"""
+def no_real_embedder(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """测试默认不加载真实的向量模型（慢，还要下载）；需要的测试自己换成假的。
+    接口经依赖注入拿，代码库在用到时直接调 deps.get_embedder，两处都换掉"""
     app.dependency_overrides[get_embedder] = lambda: None
+    monkeypatch.setattr(deps, "get_embedder", lambda: None)
     yield
     app.dependency_overrides.pop(get_embedder, None)
 
@@ -27,9 +29,9 @@ def isolated_data(tmp_path: Path) -> Iterator[None]:
     """所有测试的本机数据（资料库）都放临时目录，不碰 aila-ai/data"""
     saved = deps.settings
     deps.settings = replace(saved, data_dir=tmp_path / "data")
-    deps.get_knowledge.cache_clear()
-    deps.get_registry.cache_clear()
+    for cache in (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime):
+        cache.cache_clear()
     yield
     deps.settings = saved
-    deps.get_knowledge.cache_clear()
-    deps.get_registry.cache_clear()
+    for cache in (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime):
+        cache.cache_clear()

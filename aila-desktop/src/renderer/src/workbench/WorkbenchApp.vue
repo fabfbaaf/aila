@@ -1,0 +1,808 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { CodeProject } from '../../../shared/settings'
+import type { ChunkSource, CodeGraph, GraphNode, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../../../shared/workbench'
+import { diffLines } from '../components/bubble'
+import { lines } from '../persona/lines'
+import GestureLayer from '../gestures/GestureLayer.vue'
+import type { GestureEvent } from '../gestures/GestureEngine'
+import { CHAIN_COLOR, ERROR_COLOR, TOUCH_COLOR, groupColors, highlightFrom, searchNodes, starOf } from './layout'
+import type { AgentActivity } from '../../../shared/agent'
+import { createSource } from './source'
+import { StarMap } from './StarMap'
+
+document.title = '艾拉 · 代码星图'
+
+const source = createSource()
+const canvas = ref<HTMLDivElement>()
+let map: StarMap | null = null
+
+const projects = ref<CodeProject[]>([])
+const projectId = ref('')
+const graph = shallowRef<CodeGraph | null>(null)
+const status = ref('正在读取项目……')
+const node = ref<GraphNode | null>(null)
+const outline = ref<OutlineItem[]>([])
+const code = ref<ChunkSource | null>(null)
+const query = ref('')
+const tip = ref<{ name: string; lines: number; x: number; y: number } | null>(null)
+const located = ref<LocatedError | null>(null)
+const errorText = ref('')
+const notice = ref('')
+/** 手势开着（摄像头开着）。不记住：每次打开星图都要自己点，免得一打开窗口摄像头就亮了 */
+const gestures = ref(false)
+/** 捏住的星球：往面前拉就展开它的代码 */
+const grabbed = ref<GraphNode | null>(null)
+const fix = ref<PendingFix | null>(null)
+const toast = ref('')
+/** 工作窗口里她正在碰的文件（底部一行） */
+const activity = ref('')
+let activityTimer = 0
+
+/** 她在哪个文件上干活：是这个项目里的文件就在星图上标出来 */
+function onActivity(a: AgentActivity): void {
+  const root = projects.value.find((p) => p.id === projectId.value)?.root
+  const id = root ? starOf(root, a.cwd, a.file) : null
+  if (!id || !map?.touch(id, a.kind)) return
+  activity.value = `她正在${a.kind === 'read' ? '读' : '改'} ${id}`
+  clearTimeout(activityTimer)
+  activityTimer = window.setTimeout(() => (activity.value = ''), 6000)
+}
+let toastTimer = 0
+
+const results = computed(() => (graph.value ? searchNodes(graph.value.nodes, query.value) : []))
+const legend = computed(() => (graph.value ? [...groupColors(graph.value.nodes).entries()] : []))
+const primary = computed(() => (located.value ? highlightFrom(located.value, graph.value ?? { nodes: [], links: [] }).primary : null))
+const kinds: Record<string, string> = { function: '函数', method: '方法', class: '类', template: '界面模板' }
+/** 修改的说明（项目、改了什么、怎么测）和 diff 分开显示 */
+const fixLines = computed(() => {
+  const lines = diffLines(fix.value?.detail ?? '')
+  const start = lines.findIndex((l) => l.kind === 'file')
+  return start < 0 ? { info: lines, diff: [] } : { info: lines.slice(0, start), diff: lines.slice(start) }
+})
+
+// ---------- 读数据 ----------
+
+async function loadProjects(): Promise<void> {
+  try {
+    projects.value = await source.projects()
+  } catch (err) {
+    status.value = `连不上 AI 服务：${(err as Error).message}`
+    return
+  }
+  if (!projects.value.length) {
+    status.value = ''
+    return
+  }
+  if (!projectId.value) projectId.value = projects.value[0].id
+}
+
+async function loadGraph(): Promise<void> {
+  if (!projectId.value || !map) return
+  status.value = '正在画星图……'
+  node.value = null
+  code.value = null
+  try {
+    graph.value = await source.graph(projectId.value)
+  } catch (err) {
+    status.value = `读不了这个项目：${(err as Error).message}`
+    return
+  }
+  map.setGraph(graph.value)
+  status.value = ''
+  if (located.value?.project === projectId.value) showError(located.value)
+}
+
+watch(projectId, () => void loadGraph())
+
+// ---------- 选星球、看代码 ----------
+
+async function selectNode(n: GraphNode | null, line?: number): Promise<void> {
+  node.value = n
+  code.value = null
+  outline.value = []
+  if (!n) return
+  outline.value = await source.outline(projectId.value, n.id).catch(() => [])
+  const at = line ?? (primary.value?.file === n.id ? primary.value.line : outline.value[0]?.start)
+  if (at) code.value = await source.chunk(projectId.value, n.id, at)
+}
+
+async function openItem(item: OutlineItem): Promise<void> {
+  if (node.value) code.value = await source.chunk(projectId.value, node.value.id, item.start)
+}
+
+function pick(n: GraphNode): void {
+  query.value = ''
+  map?.select(n.id)
+  void selectNode(n)
+}
+
+const marked = computed(() =>
+  code.value && primary.value && primary.value.file === code.value.file ? primary.value.line : null
+)
+
+// ---------- 报错 ----------
+
+async function applyFocus(f: WorkbenchFocus): Promise<void> {
+  if (f.project && f.project !== projectId.value) projectId.value = f.project
+  if (!f.error) return
+  errorText.value = f.error
+  notice.value = '正在找报错落在哪……'
+  const loc = await source.locate(f.error).catch(() => null)
+  if (!loc) {
+    located.value = null
+    notice.value = '这个报错不在登记的项目里（可能是第三方库的代码）。'
+    return
+  }
+  notice.value = ''
+  located.value = loc
+  if (loc.project !== projectId.value) projectId.value = loc.project // 换项目后 loadGraph 会接着标出来
+  else showError(loc)
+}
+
+function showError(loc: LocatedError): void {
+  if (!map || !graph.value) return
+  const h = highlightFrom(loc, graph.value)
+  map.setHighlight(h)
+  const target = h.primary && graph.value.nodes.find((n) => n.id === h.primary!.file)
+  if (target) {
+    map.select(target.id)
+    void selectNode(target, h.primary!.line)
+  }
+}
+
+function clearError(): void {
+  located.value = null
+  errorText.value = ''
+  map?.setHighlight(null)
+}
+
+// ---------- 问她 ----------
+
+function askFile(): void {
+  if (node.value) source.say(`帮我看看 ${node.value.id} 是做什么的，主要有哪些函数。`)
+}
+
+function askCode(): void {
+  if (code.value) source.say(`帮我讲讲 ${code.value.file} 里的 ${code.value.qname} 是做什么的。`)
+}
+
+/** 让她修：交给工作窗口里的编程 Agent（在报错所在的项目里开任务；改文件之前她会在工作窗口里问你） */
+function askFix(): void {
+  const project = located.value?.project ?? projectId.value
+  if (!errorText.value || !project) return
+  void source.task(project, lines.fixTask(errorText.value)).then((err) => say(err ? `没开成：${err}` : '交给她了：在工作窗口里修'))
+}
+
+// ---------- 手势 ----------
+
+function say(text: string): void {
+  toast.value = text
+  clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => (toast.value = ''), 2800)
+}
+
+function closePanel(): void {
+  map?.select(null, false)
+  node.value = null
+}
+
+async function onGesture(ev: GestureEvent): Promise<void> {
+  if (!map) return
+  switch (ev.type) {
+    case 'summon':
+      map.frameAll()
+      map.summonEffect()
+      break
+    case 'dismiss':
+      // 一层一层收：先收面板，没有面板再关掉星图
+      if (node.value) closePanel()
+      else window.close()
+      break
+    case 'grab': {
+      const n = map.pickAt(ev.x, ev.y)
+      grabbed.value = n
+      if (n) map.select(n.id)
+      break
+    }
+    case 'pull':
+      if (grabbed.value) await selectNode(grabbed.value)
+      break
+    case 'release':
+      grabbed.value = null
+      break
+    case 'rotate':
+      map.orbit(ev.dx, ev.dy)
+      break
+    case 'zoom':
+      map.dolly(ev.factor)
+      break
+    case 'seal':
+      map.sealEffect()
+      await onSeal()
+      break
+  }
+}
+
+/** 双手合十：有等确认的修改就确认它；没有的话，有报错就让她修 */
+async function onSeal(): Promise<void> {
+  if (fix.value) {
+    const ok = await source.seal(fix.value.id)
+    say(ok ? '结印确认：她开始修了（先在新分支上跑测试，全过才改到你的代码里）' : '这份修改已经不在等确认了')
+  } else if (located.value) {
+    askFix()
+    say('结印：让她修这个报错')
+  } else {
+    say('现在没有等你确认的修改')
+  }
+}
+
+function gestureFailed(message: string): void {
+  say(message)
+}
+
+onMounted(async () => {
+  map = new StarMap(canvas.value!)
+  map.onSelect = (n) => void selectNode(n)
+  map.onHover = (n, x, y) => (tip.value = n ? { name: n.id, lines: n.lines, x, y } : null)
+  if (import.meta.env.DEV) {
+    // 开发调试入口：控制台里可以直接定位报错、选星球
+    ;(window as unknown as Record<string, unknown>).__wb = {
+      map,
+      applyFocus,
+      selectNode,
+      graph,
+      gesture: onGesture,
+      setFix: (f: PendingFix | null) => (fix.value = f),
+      activity: onActivity
+    }
+  }
+  await loadProjects()
+  await nextTick()
+  const focus = await source.takeFocus()
+  if (focus) await applyFocus(focus)
+  source.onFocus((f) => void applyFocus(f))
+  fix.value = await source.pendingFix().catch(() => null)
+  source.onPendingFix((f) => (fix.value = f))
+  source.onActivity(onActivity)
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(toastTimer)
+  map?.dispose()
+})
+</script>
+
+<template>
+  <div class="wb">
+    <div ref="canvas" class="canvas"></div>
+
+    <header class="top">
+      <div class="title">代码星图</div>
+      <select v-if="projects.length > 1" v-model="projectId">
+        <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+      </select>
+      <span v-else-if="projects.length" class="project">{{ projects[0].name }}</span>
+      <div v-if="graph" class="search">
+        <input v-model="query" placeholder="找文件……" spellcheck="false" @keydown.enter="results[0] && pick(results[0])" />
+        <ul v-if="results.length">
+          <li v-for="r in results" :key="r.id" @click="pick(r)">{{ r.id }}</li>
+        </ul>
+      </div>
+      <button v-if="graph" class="ghost" @click="map?.frameAll()">看全部</button>
+      <button
+        v-if="graph"
+        class="ghost"
+        :class="{ on: gestures }"
+        :title="gestures ? '关掉手势（摄像头随之关闭）' : '用手势操作星图（会打开摄像头，只在本机识别）'"
+        @click="gestures = !gestures"
+      >
+        ✋ 手势{{ gestures ? '开着' : '' }}
+      </button>
+    </header>
+
+    <div v-if="graph" class="legend">
+      <div v-for="[g, c] in legend" :key="g"><i :style="{ background: c }"></i>{{ g }}</div>
+      <div><i class="bright"></i>亮一点：还没提交的改动</div>
+      <div><i :style="{ background: ERROR_COLOR }"></i>报错的文件</div>
+      <div><i :style="{ background: CHAIN_COLOR }"></i>调用链上的文件</div>
+      <div><i :style="{ background: TOUCH_COLOR }"></i>她这次改过的文件</div>
+    </div>
+
+    <div v-if="tip" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 10}px` }">
+      {{ tip.name }} · {{ tip.lines }} 行
+    </div>
+
+    <div v-if="located || notice" class="error-bar">
+      <template v-if="located && primary">
+        <b>报错在</b> {{ primary.file }} 的 {{ primary.qname }}（第 {{ primary.line }} 行）
+        <span v-if="located.chain.length" class="muted">· 调用链上 {{ located.chain.length }} 个函数所在的文件已标橙</span>
+        <button class="fix" @click="askFix">让她修</button>
+        <button class="ghost" @click="clearError">收起</button>
+      </template>
+      <template v-else>{{ notice }}</template>
+    </div>
+
+    <div v-if="fix" class="fix-card">
+      <div class="fix-title">她准备好了一份修改，等你确认</div>
+      <div v-for="(l, i) in fixLines.info" :key="'i' + i" class="fix-info">{{ l.text }}</div>
+      <pre v-if="fixLines.diff.length" class="fix-diff"><span
+        v-for="(l, i) in fixLines.diff"
+        :key="i"
+        :class="l.kind"
+      >{{ l.text }}
+</span></pre>
+      <div class="fix-hint">
+        {{ gestures ? '双手合十保持一秒确认' : '打开「✋ 手势」后可以双手合十确认' }}，也可以{{
+          fix.source === 'agent' ? '在工作窗口里按「可以」' : '在她的气泡里点「好」或「不要」'
+        }}
+      </div>
+    </div>
+
+    <div v-if="toast" class="toast">{{ toast }}</div>
+
+    <GestureLayer
+      v-if="gestures"
+      :shifted="!!node"
+      @gesture="onGesture"
+      @cursor="(p) => map?.hoverAt(p)"
+      @failed="gestureFailed"
+    />
+
+    <aside v-if="node" class="panel">
+      <div class="head">
+        <div class="path">{{ node.id }}</div>
+        <button class="x" title="关掉" @click="closePanel">×</button>
+      </div>
+      <div class="meta">
+        {{ node.lang }} · {{ node.lines }} 行 · {{ node.functions }} 个函数{{ node.modified ? ' · 有没提交的改动' : '' }}
+      </div>
+      <div class="actions">
+        <button @click="askFile">问她这个文件</button>
+        <button v-if="code" @click="askCode">问她这段代码</button>
+      </div>
+      <ul class="outline">
+        <li
+          v-for="item in outline"
+          :key="item.qname + item.start"
+          :class="{ on: code?.qname === item.qname }"
+          :title="item.doc || item.signature"
+          @click="openItem(item)"
+        >
+          <span class="kind">{{ kinds[item.kind] ?? item.kind }}</span>{{ item.qname }}
+        </li>
+      </ul>
+      <div v-if="code" class="code">
+        <div class="code-title">{{ code.qname }} · 第 {{ code.start }}–{{ code.end }} 行</div>
+        <pre><code><span
+          v-for="(line, i) in code.lines"
+          :key="i"
+          :class="{ hit: marked === code.start + i }"
+        ><em>{{ code.start + i }}</em>{{ line }}
+</span></code></pre>
+        <div v-if="code.truncated" class="muted">……（太长，只显示前 200 行）</div>
+      </div>
+    </aside>
+
+    <div v-if="!projects.length && !status" class="empty">
+      <p>还没有登记项目。登记以后，项目里的每个文件都会变成一颗星球。</p>
+      <button @click="source.openSettings()">去「设置 → 代码库」添加项目</button>
+    </div>
+
+    <footer class="status">
+      <template v-if="status">{{ status }}</template>
+      <template v-else-if="graph">
+        {{ graph.nodes.length }} 个文件 · {{ graph.links.length }} 条调用光线 ·
+        {{ gestures ? '张开手掌旋转、捏住星球往面前拉看代码' : '拖动旋转、滚轮缩放、点星球看代码' }}
+        <span v-if="activity" class="activity"> · {{ activity }}</span>
+      </template>
+    </footer>
+  </div>
+</template>
+
+<style>
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #04060d;
+  color: #d8e6ff;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 13px;
+}
+
+/* 星球名字（StarMap 里生成的 HTML 元素） */
+.star-label.error {
+  color: #ffc2c7 !important;
+  border: 1px solid rgba(255, 59, 74, 0.7);
+}
+</style>
+
+<style scoped>
+.wb {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* z-index 让星球名字（各自带 z-index）关在这一层里，不会盖住面板 */
+.canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.top {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #9fe6ff;
+  text-shadow: 0 0 12px rgba(90, 209, 255, 0.6);
+}
+
+.project {
+  color: #8fa4c8;
+}
+
+select,
+input,
+button {
+  font: inherit;
+  color: #d8e6ff;
+  background: rgba(10, 20, 40, 0.75);
+  border: 1px solid rgba(90, 209, 255, 0.35);
+  border-radius: 6px;
+  padding: 4px 10px;
+  outline: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: rgba(90, 209, 255, 0.8);
+  box-shadow: 0 0 10px rgba(90, 209, 255, 0.35);
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.on {
+  border-color: rgba(125, 255, 239, 0.9);
+  color: #7dffef;
+  box-shadow: 0 0 10px rgba(125, 255, 239, 0.4);
+}
+
+.search {
+  position: relative;
+}
+
+.search input {
+  width: 220px;
+}
+
+.search ul {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  min-width: 320px;
+  list-style: none;
+  background: rgba(8, 16, 32, 0.95);
+  border: 1px solid rgba(90, 209, 255, 0.35);
+  border-radius: 6px;
+}
+
+.search li {
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search li:hover {
+  background: rgba(90, 209, 255, 0.15);
+}
+
+.legend {
+  position: absolute;
+  top: 56px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #8fa4c8;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.legend i.bright {
+  background: #fff;
+}
+
+.tip {
+  position: absolute;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(8, 16, 32, 0.9);
+  border: 1px solid rgba(90, 209, 255, 0.3);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.error-bar {
+  position: absolute;
+  bottom: 38px;
+  left: 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: calc(100% - 500px);
+  min-width: 300px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: rgba(60, 8, 16, 0.82);
+  border: 1px solid rgba(255, 59, 74, 0.6);
+  box-shadow: 0 0 18px rgba(255, 59, 74, 0.35);
+}
+
+.error-bar button.fix {
+  border-color: rgba(255, 120, 120, 0.8);
+  background: rgba(255, 59, 74, 0.25);
+}
+
+.muted {
+  color: #8fa4c8;
+}
+
+/* 等确认的修改 */
+.fix-card {
+  position: absolute;
+  left: 16px;
+  bottom: 84px;
+  width: 520px;
+  max-width: calc(100% - 520px);
+  max-height: 48%;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(30, 22, 6, 0.82);
+  border: 1px solid rgba(255, 210, 122, 0.55);
+  box-shadow: 0 0 22px rgba(255, 210, 122, 0.22);
+}
+
+.fix-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: #ffe2a8;
+}
+
+.fix-info {
+  color: #e9dcc0;
+}
+
+.fix-diff {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 6px 0;
+  padding: 6px 8px;
+}
+
+.fix-diff span {
+  padding: 0;
+}
+
+.fix-diff .add {
+  color: #8dffb0;
+  background: rgba(60, 200, 110, 0.12);
+}
+
+.fix-diff .del {
+  color: #ff9aa2;
+  background: rgba(255, 59, 74, 0.12);
+}
+
+.fix-diff .hunk {
+  color: #7dc8ff;
+}
+
+.fix-diff .file {
+  color: #c9b98f;
+}
+
+.fix-hint {
+  color: #c9b98f;
+  font-size: 12px;
+}
+
+.toast {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  padding: 6px 16px;
+  border-radius: 8px;
+  background: rgba(8, 16, 32, 0.9);
+  border: 1px solid rgba(125, 255, 239, 0.5);
+  color: #dffcff;
+  box-shadow: 0 0 16px rgba(125, 255, 239, 0.25);
+  pointer-events: none;
+}
+
+/* 全息面板 */
+.panel {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  bottom: 40px;
+  width: 440px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(8, 16, 32, 0.72);
+  border: 1px solid rgba(90, 209, 255, 0.4);
+  box-shadow:
+    0 0 24px rgba(90, 209, 255, 0.18),
+    inset 0 0 30px rgba(90, 209, 255, 0.06);
+  backdrop-filter: blur(6px);
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.path {
+  font-weight: 600;
+  color: #e8f3ff;
+  word-break: break-all;
+}
+
+.x {
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.meta {
+  margin: 4px 0 8px;
+  color: #8fa4c8;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.outline {
+  flex: 0 1 auto;
+  max-height: 32%;
+  overflow-y: auto;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid rgba(90, 209, 255, 0.15);
+}
+
+.outline li {
+  padding: 3px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outline li:hover,
+.outline li.on {
+  background: rgba(90, 209, 255, 0.14);
+}
+
+.kind {
+  display: inline-block;
+  min-width: 34px;
+  margin-right: 6px;
+  color: #7dffef;
+  font-size: 11px;
+}
+
+.code {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-title {
+  margin-bottom: 4px;
+  color: #9fe6ff;
+}
+
+pre {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  padding: 6px 0;
+  border-radius: 6px;
+  background: rgba(2, 6, 14, 0.7);
+  font-family: Consolas, 'Microsoft YaHei', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+pre span {
+  display: block;
+  padding-right: 8px;
+  white-space: pre;
+}
+
+pre em {
+  display: inline-block;
+  width: 42px;
+  margin-right: 10px;
+  padding-right: 6px;
+  text-align: right;
+  font-style: normal;
+  color: #4d5d80;
+  border-right: 1px solid rgba(90, 209, 255, 0.12);
+}
+
+pre span.hit {
+  background: rgba(255, 59, 74, 0.28);
+}
+
+pre span.hit em {
+  color: #ff8a92;
+}
+
+.empty {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #8fa4c8;
+}
+
+.status .activity {
+  color: #86efac;
+}
+
+.status {
+  position: absolute;
+  left: 16px;
+  bottom: 12px;
+  color: #6f7da8;
+  font-size: 12px;
+  pointer-events: none;
+}
+</style>
