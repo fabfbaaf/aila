@@ -16,12 +16,14 @@
   - `DELETE /agent/rules`，请求体 `{ "project": "...", "command": "..." }` → 删掉这一条；没有这条返回 404
 - 删掉以后马上生效（`Policy` 每次判断都现读规则，不用重启）
 
-### 桌面端：设置窗口里加一页「编程」
+### 桌面端：设置页里加一个分区「编程」
+
+（2026-11-16 起设置窗口合进了主窗口「艾拉」，设置是主窗口里的一页，分区列表在 `src/shared/shell.ts` 的 `SETTINGS_TABS`。）
 
 - 新文件 `aila-desktop/src/renderer/src/settings/sections/AgentSection.vue`：
   - 上面一段说明三种权限模式（文字可以照 `aila-desktop/src/shared/agent.ts` 的 `MODE_LABELS`、`MODE_HINTS`），以及「危险命令不管哪种模式都要问，也不能以后都允许」
   - 下面按项目列出记住的命令，每条一个「删掉」按钮；没有时显示一句空状态说明
-- 接上：`src/shared/settings.ts` 的 `SettingsSection` 加 `'agent'`；`SettingsApp.vue` 的导航加一项「编程」；`src/main/ai.ts` 加两个请求函数；`src/main/index.ts` 加两个 IPC（`agent:rules`、`agent:rules:forget`，只接受设置窗口发来的，照 `agent:*` 那几个的写法检查发送方和参数）；`src/preload/index.ts` 加两个方法
+- 接上：`src/shared/settings.ts` 的 `SettingsSection` 加 `'agent'`；`src/shared/shell.ts` 的 `SETTINGS_TABS` 加一项 `{ id: 'agent', name: '编程' }`，`src/renderer/src/shell/SettingsPage.vue` 的 `VIEWS` 加上新分区组件（分区的样式都在 `.settings-scope` 里，照别的分区写，自动是深色）；`src/main/ai.ts` 加两个请求函数；`src/main/index.ts` 加两个 IPC（`agent:rules`、`agent:rules:forget`，只接受主窗口发来的，照 `agent:*` 那几个用的 `fromAgent` 检查发送方和参数）；`src/preload/index.ts` 加两个方法
 - 样式照其他设置页（比如 `CodeSection.vue`）
 
 ### 终端版
@@ -34,7 +36,7 @@
 ## 不要改
 
 - 权限判断的逻辑（`Policy.decide`）
-- 工作窗口（`src/renderer/src/agent/`）
+- 任务页（原来的工作窗口，`src/renderer/src/agent/`）
 
 ## 验收
 

@@ -30,9 +30,9 @@
 ### 桌面端（只接到预加载，界面之后另做）
 
 - `aila-desktop/src/main/agent.ts` 的 `AgentRelay` 加 `rename()`、`delete()`
-- `aila-desktop/src/main/index.ts` 加 `agent:rename`、`agent:delete` 两个 IPC（只认工作窗口，照已有的 `agent:*` 检查）
+- `aila-desktop/src/main/index.ts` 加 `agent:rename`、`agent:delete` 两个 IPC（只认主窗口，照已有的 `agent:*` 用的 `fromAgent` 检查）
 - `aila-desktop/src/preload/index.ts` 加 `agentRename()`、`agentDelete()`
-- 工作窗口的界面（`src/renderer/src/agent/`）**不要改**，另一个任务正在改这些文件
+- 任务页的界面（原来的工作窗口，`src/renderer/src/agent/`）**不要改**，按钮之后另做
 
 ## 验收
 
