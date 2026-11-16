@@ -36,7 +36,8 @@ export const SETTINGS_TABS: { id: SettingsSection; name: string }[] = [
   { id: 'skills', name: '技能包' },
   { id: 'account', name: '账号与同步' },
   { id: 'appearance', name: '形象' },
-  { id: 'status', name: '运行状态' }
+  { id: 'status', name: '运行状态' },
+  { id: 'agent', name: '编程' }
 ]
 
 const PAGE_IDS = new Set<string>(PAGES.map((p) => p.id))

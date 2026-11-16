@@ -2,7 +2,7 @@
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, ScreenStatus } from '../shared/settings'
+import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, ScreenStatus } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 
 // ---------- 代码星图 ----------
@@ -161,4 +161,18 @@ export async function listSkills(aiUrl: string, overrides: SkillOverrides): Prom
   } catch {
     return null
   }
+}
+
+/** 设置页：只查看、撤销记住的命令，不提供添加允许规则的入口。 */
+export function getAgentRules(aiUrl: string): Promise<AiResult<AgentRuleGroup[]>> {
+  return attempt(async () => json<AgentRuleGroup[]>(await fetch(`${aiUrl}/agent/rules`, { signal: AbortSignal.timeout(5000) })))
+}
+
+export function forgetAgentRule(aiUrl: string, project: string, command: string): Promise<AiResult<unknown>> {
+  return attempt(async () => json(await fetch(`${aiUrl}/agent/rules`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ project, command }),
+    signal: AbortSignal.timeout(5000)
+  })))
 }

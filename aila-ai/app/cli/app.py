@@ -290,6 +290,27 @@ class Terminal:
                 event = await self.backend.discard(self.sid)
                 self.renderer.event(event)
                 self.info["branch"] = None
+            elif name == "/rules":
+                groups = await self.backend.rules()
+                mine = next((group for group in groups if _same_dir(group["project"], self.info["cwd"])), None)
+                commands = mine["commands"] if mine else []
+                if not arg:
+                    if not commands:
+                        self.console.print(Text("这个项目还没有记住的命令。确认命令时选「以后都允许」才会记在这里。", style="dim"))
+                    for i, command in enumerate(commands, 1):
+                        self.console.print(Text(f"{i:>2}. {command}"))
+                    if commands:
+                        self.console.print(Text("/rules forget 编号 删掉一条", style="dim"))
+                else:
+                    parts = arg.split()
+                    if len(parts) != 2 or parts[0] != "forget" or not parts[1].isdigit():
+                        self.console.print(Text("用 /rules 查看编号，再用 /rules forget 编号 删掉一条。", style="dim"))
+                    elif not 0 < int(parts[1]) <= len(commands):
+                        self.console.print(Text("没有这个编号，用 /rules 看当前记住的命令。", style="dim"))
+                    else:
+                        command = commands[int(parts[1]) - 1]
+                        await self.backend.forget_rule(mine["project"], command)
+                        self.console.print(Text(f"删掉了记住的命令：{command}；下次执行时重新按权限模式确认。", style="dim"))
             else:
                 self.console.print(Text(f"没有 {name} 这个命令，/help 看所有命令", style="dim"))
         except BackendError as err:

@@ -105,6 +105,12 @@ class Rules:
     def commands(self, project: Path) -> list[str]:
         return list(self._load().get(str(project), []))
 
+    def all(self) -> dict[str, list[str]]:
+        """返回独立的规则副本，查看或修改返回值不会改动记住的命令。"""
+        with self._lock:
+            return {project: [command for command in commands if isinstance(command, str)]
+                    for project, commands in self._load().items() if isinstance(commands, list)}
+
     def allow(self, project: Path, command: str) -> None:
         with self._lock:
             data = self._load()

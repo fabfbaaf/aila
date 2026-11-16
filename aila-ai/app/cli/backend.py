@@ -4,6 +4,7 @@
 import json
 import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -32,6 +33,8 @@ class Backend(Protocol):
     async def compact(self, sid: str) -> None: ...
     async def answer(self, confirm_id: str, approved: bool, remember: bool = False) -> bool: ...
     async def close(self) -> None: ...
+    async def rules(self) -> list[dict[str, Any]]: ...
+    async def forget_rule(self, project: str, command: str) -> None: ...
 
 
 class EmbeddedBackend:
@@ -102,6 +105,14 @@ class EmbeddedBackend:
 
     async def close(self) -> None:
         await self.rt.shutdown()
+
+    async def rules(self) -> list[dict[str, Any]]:
+        return [{"project": project, "commands": commands} for project, commands in sorted(self.rt.rules.all().items())]
+
+    async def forget_rule(self, project: str, command: str) -> None:
+        if command not in self.rt.rules.commands(Path(project)):
+            raise BackendError("没有这条记住的命令，可能已经删掉了。")
+        self.rt.rules.forget(Path(project), command)
 
 
 class HttpBackend:
@@ -174,6 +185,12 @@ class HttpBackend:
 
     async def close(self) -> None:
         await self.client.aclose()
+
+    async def rules(self) -> list[dict[str, Any]]:
+        return await self._call("GET", "/agent/rules")
+
+    async def forget_rule(self, project: str, command: str) -> None:
+        await self._call("DELETE", "/agent/rules", json={"project": project, "command": command})
 
 
 def _detail(res: httpx.Response) -> str:
