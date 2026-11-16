@@ -74,7 +74,7 @@ async def test_coding_tool_finds_the_project(tmp_path: Path) -> None:
     assert text.startswith("有好几个项目") and "shop" in text and "blog" in text and not side
 
     text, side = await run_tool(rt, {"task": "给购物车加打折", "project": "Shop"})
-    assert text.startswith("已经在工作窗口里开始做了") and side[0]["type"] == "agent_task"
+    assert text.startswith("已经在任务页里开始做了") and side[0]["type"] == "agent_task"
     sid = side[0]["session"]
     for _ in range(100):  # 等后台那一轮做完
         if not rt.running(sid):
@@ -94,4 +94,4 @@ async def test_chat_passes_the_event_to_the_desktop(tmp_path: Path) -> None:
     task = next(e for e in events if e.get("type") == "agent_task")
     assert task["project"] == "shop"
     texts = "".join(str(e.get("text", "")) for e in events if e.get("type") == "text")
-    assert "工作窗口" in texts
+    assert "任务页" in texts

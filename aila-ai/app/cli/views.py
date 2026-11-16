@@ -26,6 +26,7 @@ ACTIONS = {
     "code_search": lambda a: f"按意思搜「{str(a.get('query', ''))[:24]}」",
     "code_locate": lambda a: "按报错定位代码",
     "code_symbol": lambda a: f"看 {str(a.get('name', ''))[:30]} 的调用关系",
+    "explore": lambda a: f"派助手去查「{str(a.get('task', '')).strip()[:24]}」",
 }
 
 
@@ -101,7 +102,7 @@ def build_trace(events: list[Event]) -> list[Turn]:
             turn.steps += 1
             cursor = t
         elif kind == "usage" and e.get("purpose") != "compaction":
-            if last_model:
+            if last_model and not e.get("purpose"):  # 子 Agent 的用量只算进这一轮的总数
                 last_model.prompt, last_model.hit = int(e.get("prompt", 0)), int(e.get("cache_hit", 0))
             turn.prompt += int(e.get("prompt", 0))
             turn.hit += int(e.get("cache_hit", 0))

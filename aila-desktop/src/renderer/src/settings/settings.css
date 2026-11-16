@@ -1,56 +1,61 @@
-/* 设置窗口的样式（不是透明的角色窗口） */
-:root {
-  --accent: #5b6ee1;
-  --accent-soft: #eef0fd;
-  --text: #2f3447;
-  --muted: #8a90a6;
-  --line: #e7e9f1;
-  --bg: #f6f7fb;
-  --danger: #c03a4c;
-  --ok: #2f8a55;
-}
-
-html,
-body,
-#app {
-  margin: 0;
-  height: 100%;
-  background: var(--bg);
+/* 设置类页面（主窗口里的项目、资料、记忆、设置）的样式。
+   都套在 .settings-scope 里：主窗口里还有任务页，全局的 .card、.row、.btn 会把那边的卡片也改掉。
+   配色和任务页（工作窗口）一样是深色 */
+.settings-scope {
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.16);
+  --text: #d7dce5;
+  --muted: #8a92a3;
+  --label: #aab2c2;
+  --line: #262b37;
+  --field-line: #343a4c;
+  --focus: #8b7cf0;
+  --bg: #0f1117;
+  --surface: #161a23;
+  --hover: #1c212c;
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.12);
+  --danger-line: rgba(248, 113, 113, 0.4);
+  --ok: #4ade80;
+  --good-bg: rgba(74, 222, 128, 0.12);
+  --warn: #facc15;
+  --warn-bg: rgba(250, 204, 21, 0.12);
+  --tag-bg: #222838;
+  --x: #5b6275;
   color: var(--text);
-  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
   font-size: 13px;
 }
 
-* {
+.settings-scope * {
   box-sizing: border-box;
 }
 
-h2 {
+.settings-scope h2 {
   margin: 0 0 4px;
   font-size: 18px;
   font-weight: 600;
 }
 
-.lead {
+.settings-scope .lead {
   margin: 0 0 18px;
   color: var(--muted);
 }
 
-.card {
+.settings-scope .card {
   margin-bottom: 14px;
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
 }
 
-.card h3 {
+.settings-scope .card h3 {
   margin: 0 0 10px;
   font-size: 14px;
   font-weight: 600;
 }
 
-.row {
+.settings-scope .row {
   display: grid;
   grid-template-columns: 120px 1fr;
   align-items: center;
@@ -58,16 +63,16 @@ h2 {
   padding: 7px 0;
 }
 
-.row + .row {
+.settings-scope .row + .row {
   border-top: 1px dashed var(--line);
 }
 
-.row > .label {
-  color: #555b70;
+.settings-scope .row > .label {
+  color: var(--label);
 }
 
-.row .hint,
-.hint {
+.settings-scope .row .hint,
+.settings-scope .hint {
   display: block;
   margin-top: 3px;
   color: var(--muted);
@@ -75,34 +80,34 @@ h2 {
   line-height: 1.5;
 }
 
-input[type='text'],
-input[type='password'],
-input[type='email'],
-input[type='number'],
-select {
+.settings-scope input[type='text'],
+.settings-scope input[type='password'],
+.settings-scope input[type='email'],
+.settings-scope input[type='number'],
+.settings-scope select {
   width: 100%;
   max-width: 380px;
   padding: 6px 9px;
-  border: 1px solid #d9dce8;
+  border: 1px solid var(--field-line);
   border-radius: 8px;
   outline: none;
-  background: #fff;
+  background: var(--bg);
   color: inherit;
   font: inherit;
 }
 
-input:focus,
-select:focus {
-  border-color: #8c99ec;
+.settings-scope input:focus,
+.settings-scope select:focus {
+  border-color: var(--focus);
 }
 
-input[type='range'] {
+.settings-scope input[type='range'] {
   width: 240px;
   vertical-align: middle;
   accent-color: var(--accent);
 }
 
-.actions {
+.settings-scope .actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -110,38 +115,38 @@ input[type='range'] {
   margin-top: 12px;
 }
 
-.btn {
+.settings-scope .btn {
   padding: 6px 14px;
-  border: 1px solid #d9dce8;
+  border: 1px solid var(--field-line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
-.btn:hover {
-  border-color: #b9bfd6;
+.settings-scope .btn:hover {
+  border-color: var(--focus);
 }
 
-.btn.primary {
+.settings-scope .btn.primary {
   border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
-.btn.danger {
-  border-color: #f0c5cc;
-  background: #fbe9ec;
+.settings-scope .btn.danger {
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
   color: var(--danger);
 }
 
-.btn:disabled {
+.settings-scope .btn:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
-.link {
+.settings-scope .link {
   border: none;
   background: none;
   padding: 0;
@@ -152,75 +157,75 @@ input[type='range'] {
   cursor: pointer;
 }
 
-.msg {
+.settings-scope .msg {
   font-size: 12px;
 }
 
-.msg.ok {
+.settings-scope .msg.ok {
   color: var(--ok);
 }
 
-.msg.error {
+.settings-scope .msg.error {
   color: var(--danger);
 }
 
-.tag {
+.settings-scope .tag {
   display: inline-block;
   margin: 2px 4px 2px 0;
   padding: 0 7px;
   border-radius: 6px;
-  background: #eef0f6;
-  color: #6b7188;
+  background: var(--tag-bg);
+  color: var(--label);
   font-size: 11px;
   line-height: 20px;
 }
 
-.tag.warn {
-  background: #fdf0e3;
-  color: #b06a1f;
+.settings-scope .tag.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
-.tag.good {
-  background: #e5f6ec;
+.settings-scope .tag.good {
+  background: var(--good-bg);
   color: var(--ok);
 }
 
-.empty {
+.settings-scope .empty {
   padding: 18px 0;
   color: var(--muted);
   text-align: center;
 }
 
-.offline {
+.settings-scope .offline {
   padding: 14px 16px;
   border-radius: 12px;
-  background: #fdf0e3;
-  color: #8a5317;
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
-table.list {
+.settings-scope table.list {
   width: 100%;
   border-collapse: collapse;
 }
 
-table.list td {
+.settings-scope table.list td {
   padding: 8px 6px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 
-table.list tr:last-child td {
+.settings-scope table.list tr:last-child td {
   border-bottom: none;
 }
 
-.x {
+.settings-scope .x {
   border: none;
   background: none;
-  color: #b6bacb;
+  color: var(--x);
   font-size: 16px;
   cursor: pointer;
 }
 
-.x:hover {
+.settings-scope .x:hover {
   color: var(--danger);
 }

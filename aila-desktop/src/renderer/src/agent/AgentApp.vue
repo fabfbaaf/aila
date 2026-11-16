@@ -3,7 +3,7 @@
  * 工作窗口：在这里给她编程任务。
  * 左边是会话（终端里用 aila 开的也在这里），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef } from 'vue'
 import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
 import { Transcript, endStats, endText, type ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
@@ -12,8 +12,6 @@ import { buildTrace } from './trace'
 import LedgerPanel from './LedgerPanel.vue'
 import ToolCard from './ToolCard.vue'
 import TraceView from './TraceView.vue'
-
-document.title = '艾拉 · 编程'
 
 const source = createAgentSource()
 const sessions = ref<AgentSessionSummary[]>([])
@@ -223,7 +221,10 @@ source.onStreamEnd((sid, err) => {
   streaming.delete(sid)
   if (err && sid === current.value?.id) error.value = err
 })
-source.onFocus((sid) => void open(sid))
+source.onFocus((sid) => {
+  void source.takeFocus() // 已经开着：直接切过去，主进程那边记着的这个也清掉，免得下次打开又跳回来
+  void open(sid)
+})
 
 function onComposerKey(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -290,6 +291,11 @@ onMounted(async () => {
   else if (sessions.value.length) await open(sessions.value[0].id)
   else picking.value = true
 })
+
+// 在主窗口里切到别的页面时，任务页还留着（KeepAlive）：这时不能再听 1 / 2 / Esc，
+// 不然在设置里打个「1」就替你同意了
+onActivated(() => window.addEventListener('keydown', onKey))
+onDeactivated(() => window.removeEventListener('keydown', onKey))
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
@@ -461,20 +467,6 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
-<style>
-html,
-body,
-#app {
-  margin: 0;
-  height: 100%;
-  overflow: hidden;
-  background: #0f1117;
-  color: #d7dce5;
-  font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
-  font-size: 14px;
-}
-</style>
 
 <style scoped>
 .app {

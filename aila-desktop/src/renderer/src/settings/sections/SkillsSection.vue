@@ -132,7 +132,7 @@ onActivated(load)
 code {
   padding: 0 4px;
   border-radius: 4px;
-  background: #f1f2f7;
+  background: var(--tag-bg);
   font-size: 11.5px;
 }
 </style>

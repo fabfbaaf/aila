@@ -11,9 +11,11 @@ import type { AgentActivity } from '../../../shared/agent'
 import { createSource } from './source'
 import { StarMap } from './StarMap'
 
-document.title = '艾拉 · 代码星图'
+const emit = defineEmits<{ close: [] }>()
 
 const source = createSource()
+/** 主进程推过来的消息：离开地图时退订（地图只在看它的时候才挂着，免得在后台一直画） */
+const unsubscribe: (() => void)[] = []
 const canvas = ref<HTMLDivElement>()
 let map: StarMap | null = null
 
@@ -171,7 +173,7 @@ function askCode(): void {
 function askFix(): void {
   const project = located.value?.project ?? projectId.value
   if (!errorText.value || !project) return
-  void source.task(project, lines.fixTask(errorText.value)).then((err) => say(err ? `没开成：${err}` : '交给她了：在工作窗口里修'))
+  void source.task(project, lines.fixTask(errorText.value)).then((err) => say(err ? `没开成：${err}` : '交给她了：在任务页里修'))
 }
 
 // ---------- 手势 ----------
@@ -197,7 +199,7 @@ async function onGesture(ev: GestureEvent): Promise<void> {
     case 'dismiss':
       // 一层一层收：先收面板，没有面板再关掉星图
       if (node.value) closePanel()
-      else window.close()
+      else emit('close')
       break
     case 'grab': {
       const n = map.pickAt(ev.x, ev.y)
@@ -261,14 +263,21 @@ onMounted(async () => {
   await nextTick()
   const focus = await source.takeFocus()
   if (focus) await applyFocus(focus)
-  source.onFocus((f) => void applyFocus(f))
+  unsubscribe.push(
+    source.onFocus((f) => {
+      void source.takeFocus() // 地图开着时直接收到：主进程记着的那份清掉，下次打开地图不再定位旧报错
+      void applyFocus(f)
+    })
+  )
   fix.value = await source.pendingFix().catch(() => null)
-  source.onPendingFix((f) => (fix.value = f))
-  source.onActivity(onActivity)
+  unsubscribe.push(source.onPendingFix((f) => (fix.value = f)))
+  unsubscribe.push(source.onActivity(onActivity))
 })
 
 onBeforeUnmount(() => {
+  for (const off of unsubscribe.splice(0)) off()
   clearTimeout(toastTimer)
+  clearTimeout(activityTimer)
   map?.dispose()
 })
 </script>
@@ -334,7 +343,7 @@ onBeforeUnmount(() => {
 </span></pre>
       <div class="fix-hint">
         {{ gestures ? '双手合十保持一秒确认' : '打开「✋ 手势」后可以双手合十确认' }}，也可以{{
-          fix.source === 'agent' ? '在工作窗口里按「可以」' : '在她的气泡里点「好」或「不要」'
+          fix.source === 'agent' ? '在任务页里按「可以」' : '在她的气泡里点「好」或「不要」'
         }}
       </div>
     </div>
@@ -401,19 +410,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
-html,
-body,
-#app {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #04060d;
-  color: #d8e6ff;
-  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
-  font-size: 13px;
-}
-
 /* 星球名字（StarMap 里生成的 HTML 元素） */
 .star-label.error {
   color: #ffc2c7 !important;
@@ -426,6 +422,10 @@ body,
   position: relative;
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  background: #04060d;
+  color: #d8e6ff;
+  font-size: 13px;
 }
 
 /* z-index 让星球名字（各自带 z-index）关在这一层里，不会盖住面板 */

@@ -13,6 +13,7 @@ from app.llm import MockModel, ToolCall
 from app.main import app, get_embedder, get_model
 from app.memory import Memory, Turn, describe, extract, recall
 from app.memory.extract import heuristic
+from app.persona import SYSTEM_PROMPT
 
 NOW = datetime(2026, 11, 12, 10, 0, tzinfo=timezone(timedelta(hours=8)))
 
@@ -157,13 +158,15 @@ class RecordingModel:
 
     def __init__(self) -> None:
         self.system = ""
+        self.last = ""
 
     async def stream(self, messages: list[dict[str, Any]], tools: Any = None) -> AsyncIterator[str | ToolCall]:
         self.system = messages[0]["content"]
+        self.last = messages[-1]["content"]
         yield "好的"
 
 
-def test_chat_puts_relevant_memories_into_the_system_prompt() -> None:
+def test_chat_puts_relevant_memories_before_the_latest_message() -> None:
     model = RecordingModel()
     app.dependency_overrides[get_model] = lambda: model
     app.dependency_overrides[get_embedder] = FakeEmbedder
@@ -175,9 +178,11 @@ def test_chat_puts_relevant_memories_into_the_system_prompt() -> None:
     finally:
         app.dependency_overrides.clear()
     assert res.status_code == 200
-    assert "- 用户养了一只叫团子的橘猫" in model.system
-    assert "昨天有面试" not in model.system
-    assert "今天是" in model.system
+    assert model.system == SYSTEM_PROMPT  # 系统提示词一个字不变，前缀缓存才能命中
+    assert model.last.startswith("<背景>\n今天是")
+    assert "- 用户养了一只叫团子的橘猫" in model.last
+    assert "昨天有面试" not in model.last
+    assert model.last.endswith("</背景>\n\n团子今天好乖")
 
 
 def test_memory_extract_endpoint_with_mock_model() -> None:

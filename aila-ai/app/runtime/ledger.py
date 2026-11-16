@@ -33,6 +33,7 @@ TOOL_LABELS = {
     "code_search": "按意思搜",
     "code_locate": "按报错定位",
     "code_symbol": "调用关系",
+    "explore": "助手的报告",
 }
 TOP = 5
 
@@ -130,6 +131,6 @@ def _last_usage(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     for e in reversed(events):
         if e["type"] == "compaction":
             return None
-        if e["type"] == "usage" and e.get("purpose") != "compaction":
+        if e["type"] == "usage" and not e.get("purpose"):  # 压缩、子 Agent 的不算
             return e
     return None

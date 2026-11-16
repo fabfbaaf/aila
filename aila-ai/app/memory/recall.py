@@ -80,7 +80,7 @@ def related(memories: list[Memory], text: str, embedder: Embedder | None, k: int
 
 
 def describe(memories: list[Memory], now: datetime) -> str:
-    """放进系统提示词的一段话"""
+    """跟着用户最新一句话的背景（放在 <背景> 里，系统提示词保持不变）"""
     weekday = "一二三四五六日"[now.weekday()]
     lines = [f"今天是 {now.year} 年 {now.month} 月 {now.day} 日，星期{weekday}。"]
     if memories:

@@ -29,7 +29,7 @@ from ..llm import CoderModel, Reasoning, ToolCall, Usage, classify_error
 from .permissions import Policy
 from .prompt import SYSTEM_PROMPT
 from .session import Event, Session
-from .tools import CodingTools, Outcome
+from .tools import CodingTool, CodingTools, Outcome
 from .workspace import WorkspaceError
 
 log = logging.getLogger("aila.runtime")
@@ -46,6 +46,8 @@ NOT_DONE = {
 }
 SKIPPED = "前面的操作没有被同意，这个也没有执行。"
 INTERRUPTED = "被用户打断了，没有执行。"
+# 一步里连着的可以一起跑的调用（子 Agent），最多同时跑几个
+MAX_PARALLEL = 4
 
 
 @dataclass
@@ -113,14 +115,23 @@ class Agent:
                 if not calls:
                     break
                 stop = ""
-                for call in calls:
+                i = 0
+                while i < len(calls):
                     if stop:
-                        yield self._tool_event(call, Outcome(SKIPPED, ok=False), status="skipped")
+                        yield self._tool_event(calls[i], Outcome(SKIPPED, ok=False), status="skipped")
+                        i += 1
                         continue
-                    async for e in self._run_tool(call):
+                    batch = self._parallel_batch(calls, i)
+                    if len(batch) > 1:
+                        async for e in self._run_parallel(batch):
+                            yield e
+                        i += len(batch)
+                        continue
+                    async for e in self._run_tool(calls[i]):
                         yield e
                         if e.get("type") == "confirm_end" and e["result"] != "approved":
                             stop = e["result"]
+                    i += 1
                 if stop:
                     reason = stop
                     break
@@ -223,6 +234,41 @@ class Agent:
 
         await self.hooks.emit("pre_tool", session=self.session, call=call, args=args)
         yield {"type": "tool_start", "id": call.id, "name": call.name, "status": tool.status(args)}
+        outcome = await self._execute(call, tool, args)
+        for e in await self._finish_tool(call, args, outcome):
+            yield e
+
+    def _parallel_batch(self, calls: list[ToolCall], i: int) -> list[ToolCall]:
+        """从第 i 个开始，连着的、可以一起跑、而且不用问用户的调用（最多 MAX_PARALLEL 个）"""
+        batch: list[ToolCall] = []
+        for call in calls[i : i + MAX_PARALLEL]:
+            tool = self.tools.tools.get(call.name)
+            args = _parse(call.arguments)
+            if tool is None or not tool.parallel or args is None:
+                break
+            if self.policy.decide(tool.kind(args)).verdict != "allow":
+                break
+            batch.append(call)
+        return batch
+
+    async def _run_parallel(self, batch: list[ToolCall]) -> AsyncIterator[Event]:
+        """一起跑：先都开始，再按调用的顺序记结果（日志里的顺序和模型要求的一样，前缀稳定）"""
+        jobs = []
+        for call in batch:
+            tool, args = self.tools.tools[call.name], _parse(call.arguments) or {}
+            await self.hooks.emit("pre_tool", session=self.session, call=call, args=args)
+            yield {"type": "tool_start", "id": call.id, "name": call.name, "status": tool.status(args)}
+            jobs.append((call, args, asyncio.ensure_future(self._execute(call, tool, args))))
+        try:
+            for call, args, job in jobs:
+                outcome = await job
+                for e in await self._finish_tool(call, args, outcome):
+                    yield e
+        finally:
+            for _, _, job in jobs:
+                job.cancel()  # 被打断：还没跑完的一起停
+
+    async def _execute(self, call: ToolCall, tool: CodingTool, args: dict[str, Any]) -> Outcome:
         t0 = time.perf_counter()
         try:
             outcome = await tool.run(args)
@@ -234,9 +280,18 @@ class Agent:
             log.exception("工具 %s 出错", call.name)
             outcome = Outcome(f"工具出错了（{type(err).__name__}：{err}）", ok=False)
         outcome.extra["seconds"] = round(time.perf_counter() - t0, 3)  # 执行轨迹用
-        event = self._tool_event(call, outcome)
+        return outcome
+
+    async def _finish_tool(self, call: ToolCall, args: dict[str, Any], outcome: Outcome) -> list[Event]:
+        events = [self._tool_event(call, outcome)]
+        if outcome.usage:
+            # 工具里的子 Agent 用的量：purpose 标出来，算总账时算进去，但不算主 Agent 的一步
+            events.append(self.session.append({
+                "type": "usage", "model": str(outcome.extra.get("model", "")), "step": 0, "purpose": call.name,
+                **asdict(outcome.usage),
+            }))
         await self.hooks.emit("post_tool", session=self.session, call=call, args=args, outcome=outcome)
-        yield event
+        return events
 
     def _tool_event(self, call: ToolCall, outcome: Outcome, status: str | None = None) -> Event:
         return self.session.append({

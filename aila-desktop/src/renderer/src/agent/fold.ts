@@ -38,6 +38,8 @@ export interface ToolItem {
   todos?: TodoItem[]
   exitCode?: number | null
   confirm?: ConfirmState
+  /** explore：派出去的助手用的模型、查了几步（报告在 content 里） */
+  sub?: { model: string; steps: number }
 }
 
 export interface EndItem {
@@ -92,6 +94,14 @@ export function actionOf(name: string, args: Record<string, unknown>): string {
       return (s('description') || s('command')).slice(0, 80)
     case 'todo_write':
       return '更新待办清单'
+    case 'code_search':
+      return `按意思搜「${s('query').slice(0, 24)}」`
+    case 'code_locate':
+      return '按报错定位代码'
+    case 'code_symbol':
+      return `看 ${s('name').slice(0, 30)} 的调用关系`
+    case 'explore':
+      return `派助手去查「${s('task').trim().slice(0, 30)}」`
     default:
       return name
   }
@@ -201,7 +211,8 @@ export class Transcript {
         this.usage.hit += hit
         this.usage.completion += completion
         this.usage.estimated ||= est
-        if (e.purpose !== 'compaction') this.steps.push({ prompt, hit })
+        // 压缩、子 Agent（purpose = 工具名）的用量算进总数，但不是主 Agent 的一步
+        if (!e.purpose) this.steps.push({ prompt, hit })
         break
       }
       case 'confirm': {
@@ -248,6 +259,7 @@ export class Transcript {
           this.todos = tool.todos
         }
         if ('exit_code' in e) tool.exitCode = e.exit_code as number | null
+        if (typeof e.sub === 'string') tool.sub = { model: String(e.model ?? ''), steps: Number(e.steps ?? 0) }
         break
       }
       case 'compaction':

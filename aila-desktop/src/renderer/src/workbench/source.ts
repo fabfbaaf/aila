@@ -15,12 +15,13 @@ export interface StarSource {
   openSettings(): void
   /** 打开星图时要定位的报错 */
   takeFocus(): Promise<WorkbenchFocus | null>
-  onFocus(cb: (focus: WorkbenchFocus) => void): void
+  /** 下面几个 on…：返回退订的函数 */
+  onFocus(cb: (focus: WorkbenchFocus) => void): () => void
   /** 她准备好、正等用户点头的代码修改 */
   pendingFix(): Promise<PendingFix | null>
-  onPendingFix(cb: (fix: PendingFix | null) => void): void
+  onPendingFix(cb: (fix: PendingFix | null) => void): () => void
   /** 她在哪个文件上干活（工作窗口里的任务） */
-  onActivity(cb: (a: AgentActivity) => void): void
+  onActivity(cb: (a: AgentActivity) => void): () => void
   /** 双手合十确认这份修改；false：它已经不在等了 */
   seal(id: string): Promise<boolean>
   /** 把修报错交给工作窗口里的编程 Agent（开会话、开始做、打开工作窗口）；失败时返回原因 */
@@ -45,10 +46,10 @@ function desktop(api: NonNullable<typeof bridge>): StarSource {
     say: (t) => api.sayToAila(t),
     openSettings: () => api.openSettings('code'),
     takeFocus: () => api.workbenchTakeFocus(),
-    onFocus: (cb) => void api.onWorkbenchFocus(cb),
+    onFocus: (cb) => api.onWorkbenchFocus(cb),
     pendingFix: () => api.pendingFix(),
-    onPendingFix: (cb) => void api.onPendingFix(cb),
-    onActivity: (cb) => void api.onWorkbenchActivity(cb),
+    onPendingFix: (cb) => api.onPendingFix(cb),
+    onActivity: (cb) => api.onWorkbenchActivity(cb),
     seal: (id) => api.gestureSeal(id),
     task: async (project, text) => {
       const r = await api.agentTask({ project, text })
@@ -80,10 +81,10 @@ function web(): StarSource {
     say: (t) => console.info('[星图] 想让她说：', t),
     openSettings: () => console.info('[星图] 打开设置 → 代码库'),
     takeFocus: async () => null,
-    onFocus: () => {},
+    onFocus: () => () => {},
     pendingFix: async () => null,
-    onPendingFix: () => {},
-    onActivity: () => {},
+    onPendingFix: () => () => {},
+    onActivity: () => () => {},
     seal: async (id) => {
       console.info('[星图] 结印确认：', id)
       return true

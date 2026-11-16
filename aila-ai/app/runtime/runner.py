@@ -24,6 +24,7 @@ from .permissions import MODES, Mode, Policy, Rules
 from .prompt import build_context
 from .session import Event, Session, SessionStore
 from .shell import Shell, find_shell
+from .subagent import Explorer
 from .tools import CodingTools
 from .workspace import Workspace
 
@@ -51,6 +52,7 @@ class Runtime:
         shell: Shell | None = None,
         config: AgentConfig | None = None,
         code_projects: Callable[[], CodeProjects] | None = None,
+        fast_factory: Callable[[], CoderModel] | None = None,
     ) -> None:
         self.store = SessionStore(data_dir / "sessions")
         # 「在新分支上做」的临时目录（git worktree）
@@ -59,6 +61,8 @@ class Runtime:
         self.code_projects = code_projects
         self.rules = Rules(data_dir / "agent_rules.json")
         self.model_factory = model_factory
+        # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
+        self.fast_factory = fast_factory or model_factory
         self.confirms = confirms or Confirmations(timeout=CONFIRM_TIMEOUT)
         self.shell = shell or find_shell()
         self.config = config or AgentConfig()
@@ -97,10 +101,12 @@ class Runtime:
         workspace = Workspace(session.workdir if session.workdir.is_dir() else session.cwd)
         mode = session.mode if session.mode in MODES else "ask"
         extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
+        explorer = Explorer(session, workspace.root, self.shell, extra, self.rules, self.fast_factory,
+                            self.config.context_window)
         agent = Agent(
             session,
             self.model_factory(),
-            CodingTools(workspace, self.shell, extra),
+            CodingTools(workspace, self.shell, [*extra, explorer.tool()]),
             Policy(session.cwd, self.rules, mode),  # type: ignore[arg-type]
             self.confirms,
             self.config,

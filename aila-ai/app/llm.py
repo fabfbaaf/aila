@@ -191,10 +191,10 @@ class MockModel:
         if last["role"] == "tool":
             reply = _mock_summary(str(last["content"]))
         else:
-            text = str(last["content"])
+            text = re.sub(r"^<背景>.*?</背景>\s*", "", str(last["content"]), flags=re.S)  # 只看用户说的话
             url = re.search(r"https?://[^\s，。]+", text)
-            if ("工作窗口" in text or text.startswith("编程任务")) and "coding_task" in names:  # 交给编程 Agent
-                reply = "[nod]好，我去工作窗口里做。"
+            if ("工作窗口" in text or "任务页" in text or text.startswith("编程任务")) and "coding_task" in names:  # 交给编程 Agent
+                reply = "[nod]好，我去任务页里做。"
                 task = re.sub(r"^编程任务[：:]?\s*", "", text)
                 where = re.search(r"在\s*([A-Za-z0-9_.\-]+)\s*(?:项目)?里", task)  # 「在 demo 里……」
                 args = {"task": task, **({"project": where.group(1)} if where else {})}
@@ -245,12 +245,12 @@ def _mock_summary(tool_result: str) -> str:
             return f"[nod]找到了，出错的地方{line[5:]}。[relaxed]……不过我现在是假模型，分析不了原因。"
         if line.startswith("调用栈里的位置都不在登记的项目里") or line.startswith("这段报错里没认出调用栈"):
             return "[tilt]……这个报错不在你登记的项目里，我找不到对应的代码。"
-        if line.startswith("已经在工作窗口里开始做了"):
-            return "[nod]在工作窗口里做着了……[relaxed]做完告诉你。"
+        if line.startswith("已经在任务页里开始做了"):
+            return "[nod]在任务页里做着了……[relaxed]做完告诉你。"
         if line.startswith("有好几个项目"):
             return "[tilt]……是哪个项目呢？"
         if line.startswith("还不知道用户的项目在哪"):
-            return "[tilt]……我还不知道你的项目在哪。在工作窗口里点「新任务」选一个文件夹吧。"
+            return "[tilt]……我还不知道你的项目在哪。在主窗口的任务页点「新任务」选一个文件夹吧。"
         if line.startswith("已经在用户的浏览器里打开了"):
             return "[nod]打开了，你看一下。"
         if line.startswith("用户没有同意"):

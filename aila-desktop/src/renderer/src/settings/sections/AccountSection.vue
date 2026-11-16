@@ -161,14 +161,14 @@ onActivated(loadDetails)
   padding: 5px 18px;
   border: none;
   border-radius: 8px;
-  background: #eef0f6;
-  color: #6b7188;
+  background: var(--tag-bg);
+  color: var(--label);
   font: inherit;
   cursor: pointer;
 }
 
 .tabs button.on {
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 </style>

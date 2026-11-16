@@ -22,6 +22,8 @@ Event = dict[str, Any]
 
 DIFF_LINES = 40
 OUTPUT_TAIL = 8
+# 子 Agent 的报告在终端里显示几行（完整的在 /trace 和工作窗口里）
+EXPLORE_LINES = 8
 FENCE = re.compile(r"^\s*(```|~~~)", re.MULTILINE)
 REASONS = {
     "done": ("✓", "green", "做完了"),
@@ -221,6 +223,12 @@ class Renderer:
             for item in e.get("todos", []):
                 mark, style_ = {"completed": ("☑", "dim strike"), "in_progress": ("◐", "bold cyan")}.get(item["status"], ("☐", ""))
                 self.console.print(Text(f"  {mark} {item['content']}", style=style_))
+        elif name == "explore":
+            report = [line for line in content.splitlines() if line.strip()]
+            for line in report[:EXPLORE_LINES]:
+                self.console.print(Text("  ⎿ " + line[:120], style="dim"))
+            more = f"，报告还有 {len(report) - EXPLORE_LINES} 行" if len(report) > EXPLORE_LINES else ""
+            self.console.print(Text(f"    （助手用 {e.get('model', '')} 查了 {e.get('steps', 0)} 步{more}）", style="dim"))
         elif name == "read_file":
             lines = sum(1 for line in content.splitlines() if re.match(r"^\s*\d+\t", line))
             self.console.print(Text(f"  ⎿ 读了 {lines} 行" if lines else "  ⎿ " + _first(content), style="dim"))
@@ -287,4 +295,5 @@ def _action(name: str, args: dict[str, Any]) -> str:
         "write_file": f"写 {args.get('path', '')}",
         "run_command": str(args.get("description") or args.get("command", ""))[:60],
         "todo_write": "更新待办清单",
+        "explore": f"派助手去查「{str(args.get('task', '')).strip()[:30]}」",
     }.get(name, name)

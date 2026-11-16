@@ -56,8 +56,19 @@ def _aware(t: datetime | None) -> datetime | None:
 
 
 def build_messages(history: list[ChatMessage], max_history: int, context: str = "") -> list[Message]:
-    """系统提示词（加上日期和记忆）+ 最近几条对话。连续同一角色的消息合并，有些模型不接受连续两条用户消息。"""
-    recent = history[-max_history:]
+    """固定的系统提示词 + 最近的对话；日期和记忆放在最后一句话前面的 <背景> 里。
+
+    按 DeepSeek 的前缀缓存来排（和编程 Agent 一样）：
+    - 系统提示词一个字不变（以前日期和记忆拼在里面，每次都变，后面的历史全部不命中）
+    - 会变的背景只跟着最新一句：之前的对话原样不动，前缀能命中到上一句为止
+    - 历史太长时一次丢一批（不是每轮丢最早的一条）：开头隔好几轮才变一次
+    连续同一角色的消息合并，有些模型不接受连续两条用户消息。
+    """
+    chunk = max(2, max_history // 4)
+    start = 0
+    if len(history) > max_history:
+        start = -(-(len(history) - max_history) // chunk) * chunk
+    recent = history[start:]
     while recent and recent[0].role != "user":
         recent = recent[1:]  # 截断后要从用户消息开始
 
@@ -67,8 +78,9 @@ def build_messages(history: list[ChatMessage], max_history: int, context: str = 
             merged[-1]["content"] += "\n" + m.content
         else:
             merged.append({"role": m.role, "content": m.content})
-    system = SYSTEM_PROMPT + ("\n\n" + context if context else "")
-    return [{"role": "system", "content": system}, *merged]
+    if context and merged and merged[-1]["role"] == "user":
+        merged[-1] = {"role": "user", "content": f"<背景>\n{context}\n</背景>\n\n{merged[-1]['content']}"}
+    return [{"role": "system", "content": SYSTEM_PROMPT}, *merged]
 
 
 async def memory_context(req: ChatRequest, embedder: Any) -> str:

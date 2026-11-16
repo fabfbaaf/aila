@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..llm import Usage
 from .shell import DEFAULT_TIMEOUT, MAX_TIMEOUT, Shell, run
 from .workspace import Workspace, WorkspaceError, glob_match, read_text, write_text
 
@@ -35,6 +36,8 @@ class Outcome:
     content: str
     ok: bool = True
     extra: dict[str, Any] = field(default_factory=dict)  # 只给界面看（比如完整的 diff），不发给模型
+    # 工具自己调了模型（子 Agent）：用了多少，记进会话的用量
+    usage: Usage | None = None
 
 
 @dataclass
@@ -47,6 +50,8 @@ class CodingTool:
     status: Callable[[dict[str, Any]], str]
     # 问用户时给他看的内容（由代码算出来，比如 diff），不用大模型自己的描述
     preview: Callable[[dict[str, Any]], str] | None = None
+    # 同一步里连着调用几次时可以一起跑（只读、互不影响，比如派几个子 Agent 去查不同的事）
+    parallel: bool = False
 
     @property
     def spec(self) -> dict[str, Any]:

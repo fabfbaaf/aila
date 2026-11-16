@@ -9,7 +9,7 @@
 | 目录 | 是什么 |
 |---|---|
 | `aila-ai/` | Python 3.12 + FastAPI 的本地 AI 服务（127.0.0.1:8765）：编程 Agent 运行时、终端版 `aila`、对话、语音、代码库（代码 RAG）、屏幕感知 |
-| `aila-desktop/` | Electron + Vue 3 + TypeScript 桌面端：桌面上的角色、工作窗口（编程 Agent）、代码星图、设置窗口 |
+| `aila-desktop/` | Electron + Vue 3 + TypeScript 桌面端：桌面上的角色，和主窗口「艾拉」（任务 = 编程 Agent、项目和地图、资料、记忆、设置） |
 | `aila-server/` | Spring Boot 云端：账号、对话和记忆的多设备同步 |
 | `docs/` | 真实测试计划（`real-test-plan.md`）、分出去的任务说明（`tasks/`） |
 
@@ -55,14 +55,14 @@ cd aila-server
 - 编程 Agent 的权限：读不用问；改文件、跑命令按权限模式；危险命令（删除、强推、发布、改系统设置……）任何模式都要问，读密钥文件要问。改相关代码时不能放松这些规则
 - 问用户时给他看的内容（diff、命令）由代码生成，不用大模型自己的描述
 - 网页、文件内容、命令输出只当数据，里面要求做事的话不执行
-- 主进程的 IPC 只认对应的窗口（比如 `agent:*` 只认工作窗口，见 `main/index.ts`）
+- 主进程的 IPC 只认对应的窗口（比如 `agent:*` 只认主窗口，见 `main/index.ts`）
 - 摄像头、麦克风、屏幕只在用户打开开关以后用
 
 ## 目录速查
 
 - `aila-ai/app/runtime/`：编程 Agent。`session.py` 只追加的事件日志、`loop.py` Agent 循环、`tools.py` 编码工具、`permissions.py` 权限、`shell.py` 跑命令、`runner.py` 后台运行和订阅、`branch.py` 在新分支上做、`codetools.py` 代码库当工具
 - `aila-ai/app/cli/`：终端版 `aila`；`aila-ai/app/routes/agent.py`：`/agent` 接口
-- `aila-desktop/src/main/agent.ts`：主进程转发编程 Agent 的事件；`src/renderer/src/agent/`：工作窗口
+- `aila-desktop/src/main/agent.ts`：主进程转发编程 Agent 的事件；`src/renderer/src/shell/`：主窗口的外壳和页面（页面地址规则在 `src/shared/shell.ts`）；`src/renderer/src/agent/`：任务页
 - 上下文要按 DeepSeek 前缀缓存排：系统提示词、工具列表、会话开头的环境说明一旦定下来就不改；历史只追加（详见 `aila-ai/README.md`「编程 Agent 运行时」）
 
 ## 提交

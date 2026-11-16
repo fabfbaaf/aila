@@ -2,6 +2,7 @@
 /** 一个工具调用：一行「做什么」+ 结果。要确认的操作，确认按钮就在卡片里 */
 import { computed, ref } from 'vue'
 import type { ToolItem } from './fold'
+import { renderMarkdown } from './markdown'
 
 const props = defineProps<{ item: ToolItem }>()
 const emit = defineEmits<{ answer: [approved: boolean, remember: boolean] }>()
@@ -15,10 +16,13 @@ const done = computed(() => !['pending', 'asking', 'running'].includes(props.ite
 const failed = computed(() => ['error', 'denied', 'rejected', 'timeout', 'skipped', 'interrupted'].includes(props.item.status))
 const isEdit = computed(() => props.item.name === 'edit_file' || props.item.name === 'write_file')
 const isCommand = computed(() => props.item.name === 'run_command')
+const isExplore = computed(() => props.item.name === 'explore')
 const asking = computed(() => !!props.item.confirm && !props.item.confirm.result && props.item.status === 'asking')
 
-/** 默认展开：改文件（看 diff）、命令（看输出）、出错、待办；读文件、搜索这些只看一行 */
-const open = computed(() => manual.value ?? (isEdit.value || isCommand.value || failed.value || props.item.name === 'todo_write'))
+/** 默认展开：改文件（看 diff）、命令（看输出）、出错、待办、助手的报告；读文件、搜索这些只看一行 */
+const open = computed(
+  () => manual.value ?? (isEdit.value || isCommand.value || isExplore.value || failed.value || props.item.name === 'todo_write')
+)
 
 const summary = computed(() => {
   const c = props.item.content
@@ -29,6 +33,7 @@ const summary = computed(() => {
   }
   if (isEdit.value && props.item.status === 'ok') return c.match(/（\+\d+ −\d+）/)?.[0] ?? ''
   if (isCommand.value) return firstLine(c)
+  if (isExplore.value && props.item.sub && props.item.status === 'ok') return `${props.item.sub.model} · 查了 ${props.item.sub.steps} 步`
   return firstLine(c)
 })
 
@@ -107,6 +112,8 @@ function lineClass(line: string): string {
         <pre v-if="output.length" class="output">{{ output.join('\n') }}</pre>
         <button v-if="outputMore > 0 && !showAll" class="more" @click="showAll = true">前面还有 {{ outputMore }} 行，展开全部</button>
       </template>
+      <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
+      <div v-else-if="isExplore && item.status === 'ok'" class="report" v-html="renderMarkdown(item.content)"></div>
       <ul v-else-if="item.todos" class="todos">
         <li v-for="(t, i) in item.todos" :key="i" :class="t.status">
           <span class="box">{{ t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '◐' : '☐' }}</span>{{ t.content }}
@@ -257,6 +264,24 @@ pre span {
   background: transparent;
   color: var(--accent);
   cursor: pointer;
+}
+
+.report {
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.report :deep(p) {
+  margin: 4px 0;
+}
+
+.report :deep(ul) {
+  margin: 4px 0;
+  padding-left: 18px;
 }
 
 .todos {

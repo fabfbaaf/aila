@@ -11,6 +11,7 @@ const offline = ref('')
 const baseUrl = ref('')
 const model = ref('')
 const coderModel = ref('')
+const coderFastModel = ref('')
 const apiKey = ref('')
 const provider = ref<'bocha' | 'tavily' | 'none'>('bocha')
 const searchKey = ref('')
@@ -36,6 +37,7 @@ function fill(s: AiSettings): void {
   baseUrl.value = s.llm.baseUrl
   model.value = s.llm.model
   coderModel.value = s.llm.coderModel ?? ''
+  coderFastModel.value = s.llm.coderFastModel ?? ''
   provider.value = s.search.provider
   apiKey.value = ''
   searchKey.value = ''
@@ -58,7 +60,8 @@ async function saveLlm(): Promise<void> {
   const update: AiSettingsUpdate = {
     llmBaseUrl: baseUrl.value.trim(),
     llmModel: model.value.trim(),
-    coderModel: coderModel.value.trim()
+    coderModel: coderModel.value.trim(),
+    coderFastModel: coderFastModel.value.trim()
   }
   if (apiKey.value.trim()) update.llmApiKey = apiKey.value.trim()
   if (await save(update, llmMsg)) await test()
@@ -118,7 +121,14 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
         <span class="label">编程用的模型</span>
         <div>
           <input v-model="coderModel" type="text" list="aila-models" spellcheck="false" placeholder="留空 = 和上面一样" />
-          <span class="hint">工作窗口和终端里的 aila 用它。写代码可以换一个更强的模型，聊天还用便宜的</span>
+          <span class="hint">任务页和终端里的 aila 用它。写代码可以换一个更强的模型，聊天还用便宜的</span>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">查资料用的模型</span>
+        <div>
+          <input v-model="coderFastModel" type="text" list="aila-models" spellcheck="false" placeholder="留空 = 和编程用的一样" />
+          <span class="hint">她派助手去翻代码、查问题时用。只读不改，用便宜快的就够了</span>
         </div>
       </div>
       <div class="row">

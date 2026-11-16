@@ -73,8 +73,8 @@ export type CharacterEvent =
 
 /** AI 服务的设置（GET /settings）。密钥只告诉设没设 */
 export interface AiSettings {
-  /** coderModel：编程 Agent 用的模型，空 = 和对话一样 */
-  llm: { baseUrl: string; model: string; apiKeySet: boolean; coderModel?: string }
+  /** coderModel：编程 Agent 用的模型，空 = 和对话一样；coderFastModel：派出去查资料的子 Agent 用的，空 = 和 coderModel 一样 */
+  llm: { baseUrl: string; model: string; apiKeySet: boolean; coderModel?: string; coderFastModel?: string }
   search: { provider: 'bocha' | 'tavily' | 'none'; apiKeySet: boolean }
   voice: {
     enabled: boolean
@@ -97,6 +97,7 @@ export interface AiSettingsUpdate {
   llmModel?: string
   llmApiKey?: string
   coderModel?: string
+  coderFastModel?: string
   searchProvider?: 'bocha' | 'tavily' | 'none'
   searchApiKey?: string
   ttsEngine?: string

@@ -7,6 +7,7 @@
 """
 
 import fnmatch
+import hashlib
 import os
 import re
 import subprocess
@@ -33,6 +34,8 @@ class WorkspaceError(Exception):
 class FileState:
     mtime_ns: int
     size: int
+    # 内容的指纹：同样大小、又在同一个时间刻度里改的（修改时间没变），只看时间会漏掉
+    digest: str = ""
 
 
 @dataclass
@@ -71,7 +74,7 @@ class Workspace:
 
     def remember(self, path: Path) -> None:
         st = path.stat()
-        self.seen[path] = FileState(st.st_mtime_ns, st.st_size)
+        self.seen[path] = FileState(st.st_mtime_ns, st.st_size, _digest(path))
 
     def check_fresh(self, path: Path) -> None:
         """改已有的文件之前：这个会话里读过，并且之后没被改过"""
@@ -79,7 +82,7 @@ class Workspace:
         if state is None:
             raise WorkspaceError(f"还没读过 {self.rel(path)}，先用 read_file 读一下再改。")
         st = path.stat()
-        if st.st_mtime_ns != state.mtime_ns or st.st_size != state.size:
+        if st.st_mtime_ns != state.mtime_ns or st.st_size != state.size or _digest(path) != state.digest:
             raise WorkspaceError(f"{self.rel(path)} 在你读过之后被改过（可能是用户自己改的），先重新读一下再改。")
 
     # ---------- 列文件 ----------
@@ -152,3 +155,7 @@ def write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
         data = b"\xef\xbb\xbf" + text.encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
+
+
+def _digest(path: Path) -> str:
+    return hashlib.blake2b(path.read_bytes(), digest_size=16).hexdigest()

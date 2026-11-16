@@ -57,8 +57,15 @@ const LONG_STOPS = '。！？!?…'
 const SHORT_STOPS = '，、,；;：:'
 /** 出声时提前合成几句：播当前句时下一句已经在合成 */
 const PREFETCH = 2
-/** 本地只保留最近这么多条，服务端还会再截断 */
+/** 本地只保留最近这么多条（也是发给服务端的上限） */
 const MAX_HISTORY = 40
+/** 超过上限时一次丢掉这么多条：开头隔好几轮才变一次，大模型的前缀缓存才能命中 */
+const HISTORY_CHUNK = 10
+
+/** 对话记录太长时从前面一次丢一批（不是每次丢一条），见 aila-ai routes/chat.py 的 build_messages */
+export function trimHistory<T>(list: T[], max = MAX_HISTORY, chunk = HISTORY_CHUNK): T[] {
+  return list.length > max ? list.slice(-(max - chunk)) : list
+}
 
 /**
  * 一轮轮对话：发消息、收流式回复、把文字按说话节奏放出来，
@@ -174,7 +181,7 @@ export class Conversation {
 
   /** 启动时恢复上次的对话记录 */
   restore(saved: StoredMessage[]): void {
-    this.history = saved.filter((m) => !m.deleted).slice(-MAX_HISTORY)
+    this.history = trimHistory(saved.filter((m) => !m.deleted))
   }
 
   /** 别的设备说的话同步过来了（或者记录被删了、退出登录清空了） */
@@ -190,7 +197,7 @@ export class Conversation {
       if (!known.has(m.id) && !m.deleted) merged.push(m)
     }
     merged.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
-    this.history = merged.slice(-MAX_HISTORY)
+    this.history = trimHistory(merged)
   }
 
   /** heard：这句话是听来的（语音），气泡里先复述一下，让用户知道她听对了没有 */
@@ -526,7 +533,7 @@ export class Conversation {
   private record(role: StoredMessage['role'], content: string): void {
     const m: StoredMessage = { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() }
     this.history.push(m)
-    this.history = this.history.slice(-MAX_HISTORY)
+    this.history = trimHistory(this.history)
     this.onCommit(m)
   }
 

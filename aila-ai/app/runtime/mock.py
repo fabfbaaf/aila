@@ -14,6 +14,8 @@ from .cache import PrefixMeter
 NOTE = "（我现在是假模型：在设置里填好大模型密钥，才能真的帮你读代码、改代码。）"
 # 对假模型说这句话：走一遍改文件的完整流程（待办、读、改之前问你、跑命令），不用密钥也能看到工作窗口的每种卡片
 DEMO = "演示改文件"
+# 「演示查资料」：派两个子 Agent 一起去查（explore 工具），看子 Agent 的卡片和用量
+EXPLORE_DEMO = "演示查资料"
 
 
 class MockCoderModel:
@@ -29,6 +31,14 @@ class MockCoderModel:
         call: ToolCall | None = None
         if DEMO in _last_user(messages) and not (last["role"] == "user" and "交接说明" in str(last["content"])):
             text, call = self._demo(messages)
+        elif EXPLORE_DEMO in _last_user(messages):
+            text, calls = self._explore_demo(messages)
+            for i in range(0, len(text), 4):
+                yield text[i : i + 4]
+            for c in calls:
+                yield c
+            yield self.meter.measure(messages, tools, len(text) + sum(len(c.arguments) for c in calls))
+            return
         elif last["role"] == "user" and "交接说明" in str(last["content"]):
             text = "任务：用户让我看看这个项目。已经列过文件、读过 README。还没有改任何文件。"
         elif last["role"] == "user":
@@ -80,6 +90,15 @@ class MockCoderModel:
         if previous == "run_command":
             return "", self._call("todo_write", {"items": todo(3)})
         return f"演示结束。{NOTE}", None
+
+    def _explore_demo(self, messages: list[Message]) -> tuple[str, list[ToolCall]]:
+        """「演示查资料」：同一步里派两个助手去查（一起跑），拿回报告再总结"""
+        if messages[-1]["role"] != "tool":
+            return "我派两个助手分头去查。", [
+                self._call("explore", {"task": "这个项目是做什么的？看看 README。"}),
+                self._call("explore", {"task": "项目里有哪些文件？"}),
+            ]
+        return f"两个助手都查完了，报告在上面的卡片里。{NOTE}", []
 
     def _call(self, name: str, args: dict[str, Any]) -> ToolCall:
         self._n += 1

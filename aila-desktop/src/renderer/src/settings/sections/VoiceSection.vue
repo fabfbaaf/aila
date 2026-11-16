@@ -179,6 +179,6 @@ onActivated(load)
 <style scoped>
 .value {
   margin-left: 10px;
-  color: #555b70;
+  color: var(--label);
 }
 </style>

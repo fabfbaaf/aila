@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ChatEvent, ConfirmAsk } from '../../../shared/chat'
 import type { StoredMessage } from '../../../shared/cloud'
 import type { Behavior } from '../behavior/Behavior'
-import { Conversation } from './Conversation'
+import { Conversation, trimHistory } from './Conversation'
 import type { ChatTransport } from './transport'
 
 /** 行为全部是空操作，只记录调用过的方法名 */
@@ -154,5 +154,20 @@ describe('Conversation 是不是正在和你对话', () => {
     conv.send('你好')
     transport.push({ type: 'text', text: '你好。' })
     expect(conv.chatting).toBe(true)
+  })
+})
+
+describe('trimHistory', () => {
+  it('超过上限时一次丢一批，开头隔好几条才变', () => {
+    const list = Array.from({ length: 40 }, (_, i) => i)
+    expect(trimHistory(list)).toBe(list)
+    const over = trimHistory([...list, 40])
+    expect(over).toHaveLength(30)
+    expect(over[0]).toBe(11)
+    // 接下来 10 条里开头都不变
+    let h = over
+    for (let i = 41; i < 51; i++) h = trimHistory([...h, i])
+    expect(h[0]).toBe(11)
+    expect(trimHistory([...h, 51])[0]).toBe(22)
   })
 })

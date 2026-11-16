@@ -1,7 +1,7 @@
 import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import pytest
@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.config import load_settings
 from app.llm import MockModel, OpenAICompatibleModel, ToolCall
 from app.main import ChatMessage, app, build_messages, get_model, get_registry
+from app.persona import SYSTEM_PROMPT
 from app.tools import SkillRegistry, Toolbox
 from app.tools.search import MockSearch
 from app.tools.web import web_skill
@@ -82,7 +83,9 @@ def test_system_prompt_is_sent_first(client: TestClient) -> None:
 
     assert model.received[0]["role"] == "system"
     assert "艾拉" in model.received[0]["content"]
-    assert model.received[-1] == {"role": "user", "content": "在吗"}
+    assert model.received[0]["content"] == SYSTEM_PROMPT  # 日期、记忆不进系统提示词
+    assert model.received[-1]["role"] == "user"
+    assert model.received[-1]["content"].endswith("</背景>\n\n在吗")
 
 
 def test_model_failure_becomes_error_event(client: TestClient) -> None:
@@ -112,8 +115,29 @@ def test_build_messages_trims_and_merges() -> None:
         ChatMessage(role="user", content="3"),
         ChatMessage(role="user", content="4"),
     ]
-    # 只留最近 3 条时第一条是 assistant，要丢掉；连续两条用户消息合并
+    # 超过 3 条时从前面丢一批（2 条），剩下的要从用户消息开始；连续两条用户消息合并
     assert build_messages(history, max_history=3)[1:] == [{"role": "user", "content": "3\n4"}]
+
+
+def test_build_messages_keeps_the_prefix_stable() -> None:
+    """系统提示词不带会变的东西；背景跟着最新一句；历史一次丢一批，开头隔几轮才变"""
+    roles: list[Literal["user", "assistant"]] = ["user", "assistant"]
+    history = [ChatMessage(role=roles[i % 2], content=f"第{i}句") for i in range(41)]
+    first = build_messages(history[:21], max_history=20, context="今天是星期一")
+    assert first[0] == {"role": "system", "content": SYSTEM_PROMPT}
+    assert first[-1] == {"role": "user", "content": "<背景>\n今天是星期一\n</背景>\n\n第20句"}
+
+    starts = []
+    for n in range(21, 41, 2):  # 10 轮对话
+        msgs = build_messages(history[:n], max_history=20, context="今天是星期二")
+        assert msgs[1]["role"] == "user"
+        starts.append(msgs[1]["content"])
+    assert len(set(starts)) == 4  # 每次丢 5 条：10 轮里开头只换了 3 次，而不是每轮都换
+
+    # 开头没变的两轮：除了带背景的最新一句，前面的完全一样
+    a = build_messages(history[:23], max_history=20, context="x")
+    b = build_messages(history[:25], max_history=20, context="x")
+    assert b[: len(a) - 1] == a[:-1]
 
 
 def test_health(client: TestClient) -> None:

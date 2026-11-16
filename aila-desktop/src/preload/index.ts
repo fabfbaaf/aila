@@ -25,6 +25,7 @@ import type {
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
+import { cleanRoute, type ShellRoute } from '../shared/shell'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -158,9 +159,11 @@ const api = {
   codeRemove: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:remove', id),
   onKnowledgeBusy: (cb: (count: number) => void): Unsubscribe => listen('knowledge:busy', cb),
 
-  // 设置窗口
+  // 主窗口：主进程要它切到某一页（右键菜单、星图、屏幕上的报错这些入口）
+  onShellGo: (cb: (route: ShellRoute) => void): Unsubscribe => listen('shell:go', (raw: unknown) => cb(cleanRoute(raw))),
+
+  // 设置（主窗口里的设置页）
   openSettings: (section?: SettingsSection): void => ipcRenderer.send('settings:open', section),
-  onSettingsSection: (cb: (section: SettingsSection) => void): Unsubscribe => listen('settings:section', cb),
   aiSettings: (): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings'),
   aiSettingsPut: (update: AiSettingsUpdate): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings:put', update),
   aiSettingsTest: (): Promise<AiResult<{ ok: boolean; message: string }>> => ipcRenderer.invoke('ai:settings:test'),

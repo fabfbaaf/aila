@@ -72,11 +72,20 @@ def get_coder_model() -> CoderModel:
     return OpenAICompatibleModel(replace(settings, llm_model=name))
 
 
+def get_coder_fast_model() -> CoderModel:
+    """查资料的子 Agent 用的模型。不在一轮里来回换模型（前缀缓存按模型算），所以是按角色分：主 Agent 一个、子 Agent 一个"""
+    if settings.mock:
+        return MockCoderModel()
+    name = settings.coder_fast_model or settings.coder_model or settings.llm_model
+    return OpenAICompatibleModel(replace(settings, llm_model=name))
+
+
 @lru_cache
 def get_runtime() -> Runtime:
     config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
     # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
-    return Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects())
+    return Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
+                   fast_factory=lambda: get_coder_fast_model())
 
 
 def _load(kind: str, build: Any) -> Any:

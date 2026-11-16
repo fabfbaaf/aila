@@ -5,10 +5,12 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  nativeImage,
   safeStorage,
   screen,
   session,
   shell,
+  Tray,
   type MenuItemConstructorOptions
 } from 'electron'
 import {
@@ -37,6 +39,8 @@ import type { AuthForm, MemoryOp, StoredMessage } from '../shared/cloud'
 import type { AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
+import { routeForSection, toHash, type ShellRoute } from '../shared/shell'
+import { trayIcon } from './trayIcon'
 import { AgentRelay } from './agent'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
@@ -59,29 +63,31 @@ if (process.env['AILA_REMOTE_DEBUG'] && !app.isPackaged) {
 }
 
 let win: BrowserWindow | null = null
-let settingsWin: BrowserWindow | null = null
-/** 魔法工作台（代码星图）窗口 */
-let workbenchWin: BrowserWindow | null = null
-/** 工作窗口（编程 Agent），和打开时要显示的会话 */
-let agentWin: BrowserWindow | null = null
+/**
+ * 主窗口「艾拉」：任务（编程 Agent）、项目（含地图，原来的代码星图）、资料、记忆、设置都是它里面的页面。
+ * 以前是工作窗口、星图、设置三个窗口；IPC 里原来「只认工作窗口 / 星图窗口」的地方都改成只认主窗口
+ */
+let mainWin: BrowserWindow | null = null
+/** 主窗口打开时要显示的会话（任务页加载好以后来取） */
 let agentFocus: string | null = null
+let tray: Tray | null = null
 const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto']
 const agentRelay = new AgentRelay(AI_URL, {
-  emit: (sid, e) => agentWin?.webContents.send('agent:event', sid, e),
-  ended: (sid, error) => agentWin?.webContents.send('agent:stream-end', sid, error),
+  emit: (sid, e) => mainWin?.webContents.send('agent:event', sid, e),
+  ended: (sid, error) => mainWin?.webContents.send('agent:stream-end', sid, error),
   progress: (progress) => {
     characterEvent({ kind: 'agent', progress })
     // 要你确认、窗口又不在前面：任务栏图标闪一闪（点开窗口就不闪了）
-    if (progress.kind === 'confirm' && agentWin && !agentWin.isFocused()) agentWin.flashFrame(true)
+    if (progress.kind === 'confirm' && mainWin && !mainWin.isFocused()) mainWin.flashFrame(true)
   },
   // 她在哪个文件上干活：星图里读的星球闪一下、改过的变绿
-  activity: (a) => workbenchWin?.webContents.send('workbench:activity', a),
+  activity: (a) => mainWin?.webContents.send('workbench:activity', a),
   // 工作窗口里等你确认的改文件操作：星图里也显示这份 diff，双手合十可以确认
   confirm: (c) => {
     if (c) pendingFix = { id: c.id, detail: c.detail, source: 'agent' }
     else if (pendingFix?.source === 'agent') pendingFix = null
     else return
-    workbenchWin?.webContents.send('workbench:pending-fix', pendingFix)
+    mainWin?.webContents.send('workbench:pending-fix', pendingFix)
   }
 })
 /** 打开星图时要定位的报错：页面加载好以后来取 */
@@ -161,7 +167,7 @@ function createWindow(): void {
   })
 }
 
-/** 角色窗口和设置窗口加载同一个页面，设置窗口的地址后面带 #/settings/分区 */
+/** 角色窗口和主窗口加载同一个页面，主窗口的地址后面带 #/页面（见 shared/shell.ts） */
 function loadPage(w: BrowserWindow, hash = ''): void {
   const dev = process.env['ELECTRON_RENDERER_URL']
   if (dev) {
@@ -173,83 +179,21 @@ function loadPage(w: BrowserWindow, hash = ''): void {
   }
 }
 
-/** 设置窗口：普通窗口，可以调大小；已经开着就切到对应分区 */
-function openSettings(section: SettingsSection = 'model'): void {
-  if (settingsWin) {
-    settingsWin.webContents.send('settings:section', section)
-    if (settingsWin.isMinimized()) settingsWin.restore()
-    settingsWin.show()
-    settingsWin.focus()
+/** 打开主窗口并切到某一页；已经开着就切过去、拿到前面来 */
+function openMain(route: ShellRoute = { page: 'tasks' }): void {
+  if (mainWin) {
+    mainWin.webContents.send('shell:go', route)
+    if (mainWin.isMinimized()) mainWin.restore()
+    mainWin.show()
+    mainWin.focus()
     return
   }
-  settingsWin = new BrowserWindow({
-    width: 860,
-    height: 600,
-    minWidth: 700,
-    minHeight: 480,
-    title: '艾拉 · 设置',
-    backgroundColor: '#f6f7fb',
-    autoHideMenuBar: true,
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      sandbox: false
-    }
-  })
-  settingsWin.setMenu(null)
-  settingsWin.once('ready-to-show', () => settingsWin?.show())
-  settingsWin.on('closed', () => (settingsWin = null))
-  loadPage(settingsWin, `/settings/${section}`)
-}
-
-/** 代码星图：大窗口、深色背景；已经开着就把新的报错交给它 */
-function openWorkbench(focus?: WorkbenchFocus): void {
-  if (workbenchWin) {
-    if (focus) workbenchWin.webContents.send('workbench:focus', focus)
-    if (workbenchWin.isMinimized()) workbenchWin.restore()
-    workbenchWin.show()
-    workbenchWin.focus()
-    return
-  }
-  workbenchFocus = focus ?? null
-  workbenchWin = new BrowserWindow({
+  mainWin = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 900,
-    minHeight: 600,
-    title: '艾拉 · 代码星图',
-    backgroundColor: '#04060d',
-    autoHideMenuBar: true,
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      sandbox: false
-    }
-  })
-  workbenchWin.setMenu(null)
-  workbenchWin.once('ready-to-show', () => workbenchWin?.show())
-  workbenchWin.on('closed', () => (workbenchWin = null))
-  loadPage(workbenchWin, '/workbench')
-}
-
-/** 工作窗口：在里面给她编程任务。已经开着就切到要看的会话 */
-function openAgent(sid?: string): void {
-  if (agentWin) {
-    if (sid) agentWin.webContents.send('agent:focus', sid)
-    if (agentWin.isMinimized()) agentWin.restore()
-    agentWin.show()
-    agentWin.focus()
-    return
-  }
-  agentFocus = sid ?? null
-  agentWin = new BrowserWindow({
-    width: 1240,
-    height: 820,
-    minWidth: 860,
     minHeight: 560,
-    title: '艾拉 · 编程',
+    title: '艾拉',
     backgroundColor: '#0f1117',
     autoHideMenuBar: true,
     show: false,
@@ -259,11 +203,30 @@ function openAgent(sid?: string): void {
       sandbox: false
     }
   })
-  agentWin.setMenu(null)
-  agentWin.once('ready-to-show', () => agentWin?.show())
+  mainWin.setMenu(null)
+  mainWin.once('ready-to-show', () => mainWin?.show())
   // 关了窗口不停任务：AI 服务那边照样做完，做完她会说一声（事件流还在主进程里收）
-  agentWin.on('closed', () => (agentWin = null))
-  loadPage(agentWin, '/agent')
+  mainWin.on('closed', () => (mainWin = null))
+  loadPage(mainWin, toHash(route))
+}
+
+/** 原来的设置分区：资料库、记忆、代码库各自成了一页，其余在设置页里 */
+function openSettings(section: SettingsSection = 'model'): void {
+  openMain(routeForSection(section))
+}
+
+/** 地图（原来的代码星图）：要定位的报错先记下，地图挂上时来取；开着的话也直接发过去 */
+function openWorkbench(focus?: WorkbenchFocus): void {
+  if (focus) workbenchFocus = focus
+  openMain({ page: 'projects', tab: 'map' })
+  if (focus) mainWin?.webContents.send('workbench:focus', focus)
+}
+
+/** 任务页：要看的会话先记下，任务页加载好时来取；开着的话也直接发过去 */
+function openAgent(sid?: string): void {
+  if (sid) agentFocus = sid
+  openMain({ page: 'tasks' })
+  if (sid) mainWin?.webContents.send('agent:focus', sid)
 }
 
 function cleanFocus(raw: unknown): WorkbenchFocus | undefined {
@@ -275,7 +238,7 @@ function cleanFocus(raw: unknown): WorkbenchFocus | undefined {
   }
 }
 
-/** 状态变化发给所有窗口（角色窗口和设置窗口） */
+/** 状态变化发给所有窗口（角色窗口和主窗口） */
 function broadcast(channel: string, ...args: unknown[]): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, ...args)
 }
@@ -564,15 +527,15 @@ function registerIpc(): void {
     workbenchFocus = null
     return f
   })
-  // 在星图里点「问她」「让她修」：只认星图窗口发来的，交给桌面上的她去说
+  // 在地图里点「问她」：只认主窗口发来的，交给桌面上的她去说
   ipcMain.on('chat:say', (e, text: unknown) => {
-    if (e.sender !== workbenchWin?.webContents || typeof text !== 'string' || !text.trim()) return
+    if (e.sender !== mainWin?.webContents || typeof text !== 'string' || !text.trim()) return
     win?.webContents.send('chat:say', text.slice(0, 8000))
   })
-  // 工作窗口（编程 Agent）：只认工作窗口发来的
-  const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!agentWin && e.sender === agentWin.webContents
+  // 编程 Agent：只认主窗口发来的（角色窗口不能替你开会话、点「可以」）
+  const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
   const sidOk = (sid: unknown): sid is string => typeof sid === 'string' && /^[\w-]{1,64}$/.test(sid)
-  const notAllowed = { ok: false, error: '只有工作窗口能用' }
+  const notAllowed = { ok: false, error: '只有主窗口能用' }
   ipcMain.handle('agent:list', (e) => (fromAgent(e) ? agentRelay.list() : notAllowed))
   ipcMain.handle('agent:get', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.get(sid) : notAllowed))
   ipcMain.handle('agent:create', (e, cwd: unknown, mode: unknown, isolate: unknown) => {
@@ -600,8 +563,8 @@ function registerIpc(): void {
     return agentRelay.confirm(id, approved, remember === true)
   })
   ipcMain.handle('agent:pick-folder', async (e) => {
-    if (!fromAgent(e) || !agentWin) return null
-    const res = await dialog.showOpenDialog(agentWin, { title: '选一个项目文件夹', properties: ['openDirectory'] })
+    if (!fromAgent(e) || !mainWin) return null
+    const res = await dialog.showOpenDialog(mainWin, { title: '选一个项目文件夹', properties: ['openDirectory'] })
     return res.canceled ? null : (res.filePaths[0] ?? null)
   })
   ipcMain.handle('agent:take-focus', (e) => {
@@ -610,11 +573,11 @@ function registerIpc(): void {
     agentFocus = null
     return sid
   })
-  // 从别的窗口（菜单、设置、星图）打开工作窗口
+  // 从别处（菜单、设置、地图）打开任务页
   ipcMain.on('agent:open', (_e, sid: unknown) => openAgent(sidOk(sid) ? sid : undefined))
-  // 角色窗口（屏幕上的报错「交给她修」）、星图（「让她修」）交过来的任务：开会话、开始做、打开工作窗口
+  // 角色窗口（屏幕上的报错「交给她修」）、地图（「让她修」）交过来的任务：开会话、开始做、打开任务页
   ipcMain.handle('agent:task', async (e, raw: unknown) => {
-    const fromHere = e.sender === win?.webContents || e.sender === workbenchWin?.webContents
+    const fromHere = e.sender === win?.webContents || e.sender === mainWin?.webContents
     const t = (raw ?? {}) as { text?: unknown; project?: unknown; cwd?: unknown }
     if (!fromHere || typeof t.text !== 'string' || !t.text.trim()) return notAllowed
     const r = await agentRelay.task({
@@ -633,20 +596,20 @@ function registerIpc(): void {
     const next = f && typeof f.id === 'string' && typeof f.detail === 'string' ? { id: f.id, detail: f.detail, source: 'chat' as const } : null
     if (!next && pendingFix?.source === 'agent') return // 角色窗口没有要确认的，不影响工作窗口那边的
     pendingFix = next
-    workbenchWin?.webContents.send('workbench:pending-fix', pendingFix)
+    mainWin?.webContents.send('workbench:pending-fix', pendingFix)
   })
   ipcMain.handle('workbench:pending-fix', () => pendingFix)
-  // 星图里双手合十：只认星图窗口，而且只能确认它正显示着的那份修改。
+  // 地图里双手合十：只认主窗口，而且只能确认它正显示着的那份修改。
   // 对话里的修改由角色窗口去回答「好」；工作窗口里的改文件操作直接回答 AI 服务（id 要对得上正在等的那个）
   ipcMain.handle('gesture:seal', async (e, id: unknown) => {
-    if (e.sender !== workbenchWin?.webContents || !pendingFix || pendingFix.id !== id) return false
+    if (e.sender !== mainWin?.webContents || !pendingFix || pendingFix.id !== id) return false
     if (pendingFix.source === 'agent') return agentRelay.approvePending(pendingFix.id)
     win?.webContents.send('gesture:approve', pendingFix.id)
     return true
   })
   ipcMain.handle('code:remove', (_e, id: string) => codeProjectAction(AI_URL, String(id), 'delete'))
 
-  // 设置窗口
+  // 设置（主窗口里的页面）
   ipcMain.on('settings:open', (_e, section?: SettingsSection) => openSettings(section))
   ipcMain.handle('ai:settings', () => getAiSettings(AI_URL))
   ipcMain.handle('ai:settings:put', async (_e, update: AiSettingsUpdate) => {
@@ -711,10 +674,10 @@ function registerIpc(): void {
       },
       { type: 'separator' },
       { label: '技能包', submenu: skillItems },
-      { label: '编程任务…', click: () => openAgent() },
-      { label: '代码星图…', click: () => openWorkbench() },
-      { label: '资料库…', click: () => openSettings('knowledge') },
-      { label: '她记得的事…', click: () => openSettings('memory') },
+      { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
+      { label: '项目和地图…', click: () => openMain({ page: 'projects', tab: 'map' }) },
+      { label: '资料库…', click: () => openMain({ page: 'knowledge' }) },
+      { label: '她记得的事…', click: () => openMain({ page: 'memory' }) },
       { type: 'separator' },
       { label: '设置…', click: () => openSettings('model') },
       { label: '回到右下角', click: resetPosition },
@@ -728,12 +691,35 @@ function registerIpc(): void {
   ipcMain.handle('model:get-last', () => readModel(loadSettings().modelPath))
 }
 
+/** 托盘：桌面上的她被挡住、或者拖到别的屏幕上时，从这里也能打开主窗口 */
+function createTray(): void {
+  tray = new Tray(nativeImage.createFromBitmap(trayIcon(32), { width: 32, height: 32, scaleFactor: 2 }))
+  tray.setToolTip('艾拉')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
+      { label: '和她说话', accelerator: CHAT_SHORTCUT, click: openChat },
+      { label: '让她回到右下角', click: resetPosition },
+      { type: 'separator' },
+      { label: '退出', click: () => app.quit() }
+    ])
+  )
+  tray.on('click', () => openMain({ page: 'tasks' }))
+}
+
+// 只开一个：再启动一次（比如又双击了快捷方式）就把已经开着的主窗口拿到前面
+const firstInstance = app.requestSingleInstanceLock()
+if (!firstInstance) app.quit()
+else app.on('second-instance', () => openMain({ page: 'tasks' }))
+
 app.whenReady().then(() => {
+  if (!firstInstance) return
   restrictPermissions()
   account = createAccount() // 加密存储要在 ready 之后才能用
   account.start()
   registerIpc()
   createWindow()
+  createTray()
   if (!globalShortcut.register(CHAT_SHORTCUT, openChat)) {
     console.warn(`快捷键 ${CHAT_SHORTCUT} 被其他程序占用了，可以双击艾拉或者右键菜单打开对话`)
   }
@@ -746,5 +732,6 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   agentRelay.stopAll()
   account?.shutdown() // 还没写盘的聊天记录写下去
+  tray?.destroy()
 })
 app.on('window-all-closed', () => app.quit())

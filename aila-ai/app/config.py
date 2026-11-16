@@ -34,6 +34,8 @@ class Settings:
     mcp_config: Path
     # 编程 Agent：用的模型（默认和对话一样）、上下文窗口（快满时压缩）、一轮最多几步
     coder_model: str = ""
+    # 派出去查资料的子 Agent 用的模型（便宜、快的）；空 = 和 coder_model 一样
+    coder_fast_model: str = ""
     coder_context: int = 128_000
     coder_max_steps: int = 60
 
@@ -52,7 +54,7 @@ def load_settings() -> Settings:
         search_api_key=os.getenv("SEARCH_API_KEY", "").strip(),
         host=os.getenv("AILA_HOST", "127.0.0.1"),
         port=int(os.getenv("AILA_PORT", "8765")),
-        max_history=int(os.getenv("AILA_MAX_HISTORY", "20")),
+        max_history=int(os.getenv("AILA_MAX_HISTORY", "40")),
         voice=os.getenv("AILA_VOICE", "on").strip().lower() not in ("off", "0", "false"),
         models_dir=Path(os.getenv("AILA_MODELS_DIR", str(ROOT / "models"))),
         tts_engine=os.getenv("AILA_TTS_ENGINE", "melo").strip().lower(),
@@ -66,6 +68,7 @@ def load_settings() -> Settings:
         # 外部 MCP 服务的配置，参考 mcp.example.json
         mcp_config=Path(os.getenv("AILA_MCP_CONFIG", str(ROOT / "mcp.json"))),
         coder_model=os.getenv("AILA_CODER_MODEL", "").strip(),
+        coder_fast_model=os.getenv("AILA_CODER_FAST_MODEL", "").strip(),
         coder_context=int(os.getenv("AILA_CODER_CONTEXT", "128000")),
         coder_max_steps=int(os.getenv("AILA_CODER_MAX_STEPS", "60")),
     )

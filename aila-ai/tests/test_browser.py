@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from app.agent import STALE_NOTE, run_agent
+from app.agent import run_agent
 from app.browser import BrowserError, BrowserSession, click_needs_confirm
 from app.confirm import Confirmations
 from app.llm import ToolCall
@@ -243,7 +243,7 @@ async def test_private_addresses_are_blocked(tmp_path: Path, site: Site) -> None
 
 
 @pytest.mark.anyio
-async def test_agent_asks_before_clicking_and_drops_old_pages(browser: BrowserSession, site: Site) -> None:
+async def test_agent_asks_before_clicking_and_keeps_history_append_only(browser: BrowserSession, site: Site) -> None:
     await opened(browser, site.url + "/")
     like = ref_of(browser, "点赞")
     model = ScriptedModel([
@@ -265,5 +265,6 @@ async def test_agent_asks_before_clicking_and_drops_old_pages(browser: BrowserSe
     assert ("/like", "") in site.posts()
     third = model.calls[2][0]
     tool_results = [m["content"] for m in third if m["role"] == "tool"]
-    assert tool_results[0] == STALE_NOTE  # 第一次看的页面已经省略
+    assert "网页标题：" in tool_results[0]  # 第一次看的页面原样留着：只追加，前缀缓存才能命中
+    assert third[: len(model.calls[1][0])] == model.calls[1][0]
     assert "点了按钮「点赞」" in tool_results[1]

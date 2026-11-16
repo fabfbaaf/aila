@@ -88,7 +88,8 @@ export function buildTrace(events: AgentEvent[], now?: number): TraceTurn[] {
       }
       case 'usage':
         if (e.purpose === 'compaction') break
-        if (lastModel) {
+        if (lastModel && !e.purpose) {
+          // 子 Agent 的用量（purpose = explore）只算进这一轮的总数，不挂在主 Agent 的某一步上
           lastModel.tokens = { prompt: Number(e.prompt ?? 0), hit: Number(e.cache_hit ?? 0), completion: Number(e.completion ?? 0) }
         }
         turn.prompt += Number(e.prompt ?? 0)

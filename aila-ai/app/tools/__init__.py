@@ -70,8 +70,6 @@ class Tool:
     detail: Callable[[dict[str, Any]], str] | None = None
     # 参数检查：返回错误说明就不执行（也不去打扰用户确认一个注定失败的操作）
     validate: Callable[[dict[str, Any]], str | None] | None = None
-    # 返回的是「现在的样子」（比如网页快照）：有了新的，旧的就从对话里省略掉，省得越聊越长
-    ephemeral: bool = False
 
     @property
     def spec(self) -> dict[str, Any]:
@@ -135,10 +133,6 @@ class Toolbox:
     def status(self, call: ToolCall) -> str:
         tool = self._tools.get(call.name)
         return tool.status(parse_args(call.arguments) or {}) if tool else "正在处理"
-
-    def is_ephemeral(self, name: str) -> bool:
-        tool = self._tools.get(name)
-        return bool(tool and tool.ephemeral)
 
     def confirmation(self, call: ToolCall) -> Confirmation | None:
         """这次调用要不要先问用户；不用问（只读、工具不存在、参数不对）时返回 None，交给 run 处理"""

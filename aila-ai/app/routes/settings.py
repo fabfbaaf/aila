@@ -33,7 +33,7 @@ def read() -> dict[str, Any]:
     s = deps.settings
     return {
         "llm": {"baseUrl": s.llm_base_url, "model": s.llm_model, "apiKeySet": bool(s.llm_api_key),
-                "coderModel": s.coder_model},
+                "coderModel": s.coder_model, "coderFastModel": s.coder_fast_model},
         "search": {"provider": s.search_provider if s.search_provider in ("bocha", "tavily", "none") else "bocha",
                    "apiKeySet": bool(s.search_api_key)},
         "voice": {
@@ -60,6 +60,8 @@ class SettingsUpdate(BaseModel):
     llmApiKey: str | None = Field(default=None, max_length=300)
     # 编程 Agent 用的模型；空字符串 = 和对话一样
     coderModel: str | None = Field(default=None, max_length=100)
+    # 查资料的子 Agent 用的模型；空字符串 = 和编程用的一样
+    coderFastModel: str | None = Field(default=None, max_length=100)
     searchProvider: Literal["bocha", "tavily", "none"] | None = None
     searchApiKey: str | None = Field(default=None, max_length=300)
     ttsEngine: Literal["melo", "kokoro", "matcha"] | None = None
@@ -85,7 +87,8 @@ class SettingsUpdate(BaseModel):
 
 
 ENV_NAMES = {
-    "llmBaseUrl": "LLM_BASE_URL", "llmModel": "LLM_MODEL", "llmApiKey": "LLM_API_KEY", "coderModel": "AILA_CODER_MODEL",
+    "llmBaseUrl": "LLM_BASE_URL", "llmModel": "LLM_MODEL", "llmApiKey": "LLM_API_KEY",
+    "coderModel": "AILA_CODER_MODEL", "coderFastModel": "AILA_CODER_FAST_MODEL",
     "searchProvider": "SEARCH_PROVIDER", "searchApiKey": "SEARCH_API_KEY",
     "ttsEngine": "AILA_TTS_ENGINE", "ttsSpeaker": "AILA_TTS_SPEAKER", "ttsSpeed": "AILA_TTS_SPEED",
     "wakeThreshold": "AILA_WAKE_THRESHOLD", "endSilence": "AILA_END_SILENCE", "asrLanguage": "AILA_ASR_LANGUAGE",

@@ -95,7 +95,7 @@ onDeactivated(() => clearTimeout(timer))
     <p v-if="error" class="msg error">{{ error }}</p>
     <div class="actions">
       <button class="btn primary" :disabled="adding" @click="add">{{ adding ? '选择文件夹……' : '添加项目…' }}</button>
-      <button v-if="projects.length" class="btn" @click="api.openWorkbench()">打开代码星图</button>
+      <button v-if="projects.length" class="btn" @click="api.openWorkbench()">看地图</button>
       <span class="hint">是 Git 仓库的话按 .gitignore 跳过不用的文件；node_modules、.venv 这类总是跳过。</span>
     </div>
   </div>

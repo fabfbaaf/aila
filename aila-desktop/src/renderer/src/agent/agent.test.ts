@@ -100,6 +100,28 @@ describe('工作窗口：事件折叠', () => {
     expect(t.mode).toBe('auto')
     expect(t.items[t.items.length - 1]).toMatchObject({ kind: 'note', text: '权限模式：工作区内自动' })
   })
+
+  it('派助手去查：卡片带报告；助手的用量算进总数，不算主 Agent 的一步', () => {
+    const t = new Transcript()
+    t.apply(ev('start', { seq: 0 }))
+    t.apply(ev('user', { seq: 1, text: '查查', t: 1 }))
+    const calls = [
+      { id: 'a', name: 'explore', arguments: '{"task":"登录在哪处理"}' },
+      { id: 'b', name: 'explore', arguments: '{"task":"怎么跑测试"}' }
+    ]
+    t.apply(ev('assistant', { seq: 2, text: '分头查。', tool_calls: calls }))
+    t.apply(ev('usage', { seq: 3, prompt: 1000, cache_hit: 900, completion: 20 }))
+    t.apply(ev('tool_start', { id: 'a', name: 'explore' }))
+    t.apply(ev('tool_start', { id: 'b', name: 'explore' }))
+    t.apply(ev('tool', { seq: 4, id: 'a', name: 'explore', status: 'ok', content: '在 **auth.py:12**', sub: 's1', model: 'fast', steps: 3 }))
+    t.apply(ev('usage', { seq: 5, prompt: 500, cache_hit: 100, completion: 30, purpose: 'explore', step: 0 }))
+    const cards = t.items.filter((i): i is ToolItem => i.kind === 'tool')
+    expect(cards.map((c) => c.action)).toEqual(['派助手去查「登录在哪处理」', '派助手去查「怎么跑测试」'])
+    expect(cards[0].sub).toEqual({ model: 'fast', steps: 3 })
+    expect(cards[1].status).toBe('running')
+    expect(t.steps).toEqual([{ prompt: 1000, hit: 900 }])
+    expect(t.usage.prompt).toBe(1500)
+  })
 })
 
 describe('工作窗口：Markdown', () => {

@@ -175,11 +175,11 @@ def browse_skill(session: BrowserSession) -> Skill:
             "返回页面标题、可以操作的元素（带编号）和正文节选，之后用编号操作。只是读一篇文章用 read_page 更快。",
             {"type": obj, "properties": {"url": {"type": "string", "description": "完整网址，以 http:// 或 https:// 开头"}}, "required": ["url"]},
             wrap(open_), lambda a: f"正在打开 {urlsplit(str(a.get('url', ''))).hostname or '网页'}",
-            validate=check_url, ephemeral=True,
+            validate=check_url,
         ),
         Tool(
             "browser_read", "重新看一下浏览器里现在的页面（页面可能自己变了，或者编号对不上时）。",
-            {"type": obj, "properties": {}}, wrap(read), lambda _: "正在看网页", ephemeral=True,
+            {"type": obj, "properties": {}}, wrap(read), lambda _: "正在看网页",
         ),
         Tool(
             "browser_click",
@@ -187,7 +187,7 @@ def browse_skill(session: BrowserSession) -> Skill:
             {"type": obj, "properties": {"ref": REF}, "required": ["ref"]},
             wrap(click), lambda a: f"正在点{label_of(a, '网页')}",
             risk="mixed", needs_confirm=click_confirm,
-            action=lambda a: f"在网页上点「{short_label(a)}」", detail=click_detail, validate=check_ref, ephemeral=True,
+            action=lambda a: f"在网页上点「{short_label(a)}」", detail=click_detail, validate=check_ref,
         ),
         Tool(
             "browser_type",
@@ -200,20 +200,20 @@ def browse_skill(session: BrowserSession) -> Skill:
             }, "required": ["ref", "text"]},
             wrap(type_), lambda a: f"正在填{label_of(a, '输入框')}",
             risk="mixed", needs_confirm=type_confirm,
-            action=lambda a: f"在网页上提交「{short_label(a)}」", detail=type_detail, validate=check_type, ephemeral=True,
+            action=lambda a: f"在网页上提交「{short_label(a)}」", detail=type_detail, validate=check_type,
         ),
         Tool(
             "browser_select", "在普通下拉框里选一个选项（按选项文字）。",
             {"type": obj, "properties": {"ref": REF, "option": {"type": "string", "description": "选项的文字"}}, "required": ["ref", "option"]},
-            wrap(select), lambda a: f"正在选{label_of(a, '下拉框')}", validate=check_ref, ephemeral=True,
+            wrap(select), lambda a: f"正在选{label_of(a, '下拉框')}", validate=check_ref,
         ),
         Tool(
             "browser_scroll", "上下翻页，看页面其他部分的内容和元素。",
             {"type": obj, "properties": {"direction": {"type": "string", "enum": ["down", "up"]}}},
-            wrap(scroll), lambda a: "正在往上翻" if a.get("direction") == "up" else "正在往下翻", ephemeral=True,
+            wrap(scroll), lambda a: "正在往上翻" if a.get("direction") == "up" else "正在往下翻",
         ),
         Tool(
-            "browser_back", "返回上一页。", {"type": obj, "properties": {}}, wrap(back), lambda _: "正在返回上一页", ephemeral=True,
+            "browser_back", "返回上一页。", {"type": obj, "properties": {}}, wrap(back), lambda _: "正在返回上一页",
         ),
     ]
     return Skill(

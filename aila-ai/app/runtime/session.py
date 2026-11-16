@@ -112,7 +112,7 @@ class Session:
         for e in reversed(self.events):
             if e["type"] == "compaction":
                 return 0
-            if e["type"] == "usage":
+            if e["type"] == "usage" and e.get("purpose") in (None, "compaction"):  # 子 Agent 的上下文是它自己的
                 return int(e["prompt"])
         return 0
 
