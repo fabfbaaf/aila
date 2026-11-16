@@ -23,7 +23,7 @@ import type {
   VoicePrefs
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
-import type { AgentActivity, AgentEvent, AgentMode, AgentSession, AgentSessionSummary } from '../shared/agent'
+import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 
 /** 取消订阅 */
@@ -132,6 +132,8 @@ const api = {
   agentInterrupt: (sid: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:interrupt', sid),
   agentSetMode: (sid: string, mode: AgentMode): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:mode', sid, mode),
   agentCompact: (sid: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:compact', sid),
+  /** 上下文账本：下一步发给模型的上下文由哪几块组成 */
+  agentContext: (sid: string): Promise<AiResult<AgentLedger>> => ipcRenderer.invoke('agent:context', sid),
   agentConfirm: (id: string, approved: boolean, remember: boolean): Promise<boolean> =>
     ipcRenderer.invoke('agent:confirm', id, approved, remember),
   agentPickFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:pick-folder'),

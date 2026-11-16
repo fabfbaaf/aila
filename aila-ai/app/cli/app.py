@@ -36,6 +36,7 @@ from ..runtime.permissions import MODE_LABELS, MODES
 from .backend import Backend, BackendError, connect
 from .commands import COMMANDS, INIT_PROMPT, KEYS, changed_files, latest_todos, next_mode, parse, usage_lines
 from .render import Renderer
+from .views import build_trace, ledger_view, trace_view
 
 INTERRUPT_KEYS = {Keys.Escape, Keys.ControlC}
 
@@ -268,6 +269,15 @@ class Terminal:
                     self.console.print(Text("这个会话里她还没改过文件。", style="dim"))
                 for path, n in files:
                     self.console.print(f"  {path}" + (f"（{n} 次）" if n > 1 else ""))
+            elif name == "/trace":
+                turns = build_trace((await self.backend.session(self.sid))["events"])
+                back = int(arg) if arg.isdigit() and int(arg) > 0 else 1
+                if len(turns) < back:
+                    self.console.print(Text("还没有做过事。" if not turns else f"只有 {len(turns)} 轮。", style="dim"))
+                else:
+                    self.console.print(trace_view(turns[-back]))
+            elif name == "/context":
+                self.console.print(ledger_view(await self.backend.context(self.sid)))
             elif name == "/init":
                 await self.turn(INIT_PROMPT)
             elif name == "/merge":

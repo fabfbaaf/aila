@@ -17,6 +17,7 @@
 
 import asyncio
 import inspect
+import time
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -145,7 +146,12 @@ class Agent:
         text, thought = "", ""
         usage: Usage | None = None
         self._partial = ""
+        # 执行轨迹：这一步等了多久才收到第一个字（模型在想）、一共多久
+        t0 = time.perf_counter()
+        first: float | None = None
         async for item in self.model.step(messages, self.tools.specs, self.config.max_tokens):
+            if first is None:
+                first = time.perf_counter() - t0
             if isinstance(item, ToolCall):
                 calls.append(item)
             elif isinstance(item, Usage):
@@ -163,6 +169,7 @@ class Agent:
             "text": text,
             **({"reasoning": thought} if thought else {}),
             "tool_calls": [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls],
+            "timing": {"first": round(first or 0.0, 3), "total": round(time.perf_counter() - t0, 3)},
         })
         if usage:
             yield self.session.append({"type": "usage", "model": self.model.name, "step": step, **asdict(usage)})
@@ -216,6 +223,7 @@ class Agent:
 
         await self.hooks.emit("pre_tool", session=self.session, call=call, args=args)
         yield {"type": "tool_start", "id": call.id, "name": call.name, "status": tool.status(args)}
+        t0 = time.perf_counter()
         try:
             outcome = await tool.run(args)
         except asyncio.CancelledError:
@@ -225,6 +233,7 @@ class Agent:
         except Exception as err:  # 工具自己的 bug 不能拖垮任务
             log.exception("工具 %s 出错", call.name)
             outcome = Outcome(f"工具出错了（{type(err).__name__}：{err}）", ok=False)
+        outcome.extra["seconds"] = round(time.perf_counter() - t0, 3)  # 执行轨迹用
         event = self._tool_event(call, outcome)
         await self.hooks.emit("post_tool", session=self.session, call=call, args=args, outcome=outcome)
         yield event

@@ -18,6 +18,7 @@ from .branch import BranchError, BranchInfo, open_branch
 from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
+from .ledger import context_ledger
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
 from .prompt import build_context
@@ -205,6 +206,10 @@ class Runtime:
             raise RuntimeError_("她还在做事，做完再压缩。")
         async for event in agent.compact():
             self._publish(sid, event)
+
+    def context(self, sid: str) -> dict:
+        """上下文账本：下一步发给模型的上下文由哪几块组成、各占多少（见 ledger.py）"""
+        return context_ledger(self.agent(sid))
 
     def interrupt(self, sid: str) -> bool:
         task = self._tasks.get(sid)

@@ -49,6 +49,22 @@ export interface AgentSession extends Omit<AgentSessionSummary, 'events'> {
   events: AgentEvent[]
 }
 
+/** 上下文账本（GET /agent/sessions/{id}/context）：下一步发给模型的上下文由哪几块组成 */
+export interface AgentLedger {
+  /** 模型的上下文窗口（token），快满（compact_at）时压缩 */
+  window: number
+  compact_at: number
+  /** 下一步输入多少 token（按最近一步的真实用量校准；estimated 时只是按字数估的） */
+  prompt: number
+  /** 最近一步命中缓存的输入 */
+  cache_hit: number
+  estimated: boolean
+  /** 按发送顺序；fixed：每一步都一样的开头（命中缓存的部分） */
+  segments: { key: string; label: string; tokens: number; fixed: boolean }[]
+  biggest: { label: string; tokens: number }[]
+  messages: number
+}
+
 /** 她在哪个文件上干活（主进程转给星图：读的星球闪一下，改过的变绿） */
 export interface AgentActivity {
   sid: string

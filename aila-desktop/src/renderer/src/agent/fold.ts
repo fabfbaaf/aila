@@ -119,6 +119,9 @@ export class Transcript {
   /** 在新分支上做：分支名（放弃了是 null）；closed：分支放弃了，这个会话不再接任务 */
   branch: string | null = null
   closed = false
+  /** 写在日志里的事件（执行轨迹要用）；每一步的输入和命中缓存（上下文账本要用） */
+  events: AgentEvent[] = []
+  steps: { prompt: number; hit: number }[] = []
 
   private calls = new Map<string, { name: string; args: Record<string, unknown> }>()
   private tools = new Map<string, ToolItem>()
@@ -131,6 +134,7 @@ export class Transcript {
     if (typeof e.seq === 'number') {
       if (e.seq <= this.lastSeq) return // 重复的（补发和实时重叠）
       this.lastSeq = e.seq
+      this.events.push(e)
     }
     switch (e.type) {
       case 'start':
@@ -197,6 +201,7 @@ export class Transcript {
         this.usage.hit += hit
         this.usage.completion += completion
         this.usage.estimated ||= est
+        if (e.purpose !== 'compaction') this.steps.push({ prompt, hit })
         break
       }
       case 'confirm': {

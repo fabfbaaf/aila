@@ -1,6 +1,6 @@
 // 工作窗口的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import { SseParser } from '../../../shared/chat'
-import type { AgentEvent, AgentMode, AgentSession, AgentSessionSummary } from '../../../shared/agent'
+import type { AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 
@@ -21,6 +21,8 @@ export interface AgentSource {
   interrupt(sid: string): Promise<void>
   setMode(sid: string, mode: AgentMode): Promise<void>
   compact(sid: string): Promise<void>
+  /** 上下文账本 */
+  context(sid: string): Promise<AgentLedger>
   confirm(id: string, approved: boolean, remember: boolean): Promise<boolean>
   pickFolder(): Promise<string | null>
   takeFocus(): Promise<string | null>
@@ -51,6 +53,7 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     interrupt: async (sid) => void unwrap(await api.agentInterrupt(sid)),
     setMode: async (sid, mode) => void unwrap(await api.agentSetMode(sid, mode)),
     compact: async (sid) => void unwrap(await api.agentCompact(sid)),
+    context: async (sid) => unwrap(await api.agentContext(sid)),
     confirm: (id, approved, remember) => api.agentConfirm(id, approved, remember),
     pickFolder: () => api.agentPickFolder(),
     takeFocus: () => api.agentTakeFocus(),
@@ -122,6 +125,7 @@ function web(): AgentSource {
     interrupt: async (sid) => void (await call('POST', `/agent/sessions/${sid}/interrupt`)),
     setMode: async (sid, mode) => void (await call('PUT', `/agent/sessions/${sid}/mode`, { mode })),
     compact: async (sid) => void (await call('POST', `/agent/sessions/${sid}/compact`)),
+    context: (sid) => call('GET', `/agent/sessions/${sid}/context`),
     confirm: async (id, approved, remember) =>
       call('POST', '/agent/confirm', { id, approved, remember }).then(
         () => true,

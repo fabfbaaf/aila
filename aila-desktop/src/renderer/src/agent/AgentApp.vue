@@ -4,11 +4,14 @@
  * 左边是会话（终端里用 aila 开的也在这里），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
-import { MODE_HINTS, MODE_LABELS, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
-import { Transcript, compact, endStats, endText, type ToolItem } from './fold'
+import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { Transcript, endStats, endText, type ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
 import { createAgentSource, type ProjectChoice } from './source'
+import { buildTrace } from './trace'
+import LedgerPanel from './LedgerPanel.vue'
 import ToolCard from './ToolCard.vue'
+import TraceView from './TraceView.vue'
 
 document.title = '艾拉 · 编程'
 
@@ -33,7 +36,32 @@ const running = computed(() => t.value.running)
 const pending = computed(() => t.value.pending)
 const files = computed(() => [...t.value.files.entries()])
 const usage = computed(() => t.value.usage)
-const hitRate = computed(() => (usage.value.prompt ? Math.round((usage.value.hit / usage.value.prompt) * 100) : 0))
+
+// ---------- 执行轨迹、上下文账本 ----------
+
+/** 中间看什么：过程（对话和卡片）还是轨迹（时间线） */
+const view = ref<'chat' | 'trace'>('chat')
+/** 正在做的一轮，时间线要一直往右长：每秒走一下 */
+const now = ref(Date.now() / 1000)
+let clock = 0
+const trace = computed(() => buildTrace(t.value.events, running.value ? now.value : undefined))
+const ledger = ref<AgentLedger | null>(null)
+let ledgerTimer = 0
+
+/** 上下文账本：每一步结束、换会话、压缩以后重新取（连着来的合成一次） */
+function loadLedger(): void {
+  clearTimeout(ledgerTimer)
+  ledgerTimer = window.setTimeout(async () => {
+    const sid = current.value?.id
+    if (!sid) return
+    try {
+      const l = await source.context(sid)
+      if (current.value?.id === sid) ledger.value = l
+    } catch {
+      // 取不到就先不显示，下一步再取
+    }
+  }, 300)
+}
 const modelLabel = computed(() => {
   const m = models.value
   if (!m) return ''
@@ -73,6 +101,8 @@ async function open(sid: string): Promise<void> {
     t.value = tr
     current.value = { ...s, events: s.events.length }
     picking.value = false
+    ledger.value = null
+    loadLedger()
     if (s.running && !streaming.has(sid)) {
       streaming.add(sid)
       source.watch(sid, tr.lastSeq) // 正在做（可能是终端里开的）：接上实时事件
@@ -186,6 +216,7 @@ source.onEvent((sid, e) => {
   const near = nearBottom()
   t.value.apply(e)
   if (e.type === 'user' || e.type === 'turn_end') void refreshList()
+  if (['usage', 'turn_end', 'compaction', 'tool'].includes(e.type)) loadLedger()
   if (near) void nextTick(scrollToBottom)
 })
 source.onStreamEnd((sid, err) => {
@@ -246,6 +277,10 @@ const endMark: Record<string, string> = { done: '✓', error: '✗' }
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
+  // 轨迹里正在做的那一轮每秒往右长一点（只在看轨迹、而且她在做事的时候）
+  clock = window.setInterval(() => {
+    if (running.value && view.value === 'trace') now.value = Date.now() / 1000
+  }, 1000)
   if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__agent = { t, open, source }
   await refreshList()
   void source.projects().then((p) => (projects.value = p))
@@ -256,7 +291,11 @@ onMounted(async () => {
   else picking.value = true
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  clearInterval(clock)
+  clearTimeout(ledgerTimer)
+})
 </script>
 
 <template>
@@ -292,9 +331,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <option v-for="(label, m) in MODE_LABELS" :key="m" :value="m">{{ label }}</option>
         </select>
         <span class="model" title="编程用的模型：在「设置 → 对话」里改" @click="source.openSettings()">{{ modelLabel }}</span>
+        <div class="tabs">
+          <button :class="{ on: view === 'chat' }" @click="view = 'chat'">过程</button>
+          <button :class="{ on: view === 'trace' }" title="按时间看每一步花了多久" @click="view = 'trace'">轨迹</button>
+        </div>
       </header>
 
-      <div ref="scroller" class="scroll">
+      <div v-if="current && view === 'trace'" class="scroll">
+        <TraceView :turns="trace" />
+      </div>
+      <div v-else ref="scroller" class="scroll">
         <div v-if="current" class="transcript">
           <div v-if="!t.items.length" class="hello">
             <p>在 <b>{{ basename(current.cwd) }}</b> 里，要她做什么？</p>
@@ -381,13 +427,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <p v-else class="dim">还没有</p>
       </section>
       <section>
-        <h3>用量</h3>
-        <template v-if="usage.prompt">
-          <div class="rate"><b>{{ hitRate }}%</b> 的输入命中了缓存{{ usage.estimated ? '（估算）' : '' }}</div>
-          <div class="bar"><i :style="{ width: `${hitRate}%` }"></i></div>
-          <p class="dim">输入 {{ compact(usage.prompt) }} · 输出 {{ compact(usage.completion) }}</p>
-        </template>
-        <p v-else class="dim">还没有</p>
+        <h3>上下文账本</h3>
+        <LedgerPanel :ledger="ledger" :steps="t.steps" :totals="usage" />
         <button class="ghost" :disabled="running" title="用一份交接说明代替前面的对话（快满时会自动做）" @click="compactNow">压缩上下文</button>
       </section>
     </aside>
@@ -635,6 +676,25 @@ code {
 
 .model:hover {
   color: var(--accent);
+}
+
+.tabs {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tabs button {
+  padding: 3px 12px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+}
+
+.tabs button.on {
+  background: var(--accent-bg);
+  color: var(--text);
 }
 
 .scroll {

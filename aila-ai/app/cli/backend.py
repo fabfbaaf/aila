@@ -22,6 +22,7 @@ class Backend(Protocol):
 
     async def create(self, cwd: str, mode: str, isolate: bool = False) -> dict[str, Any]: ...
     async def merge(self, sid: str, run_tests: bool = True) -> Event: ...
+    async def context(self, sid: str) -> dict[str, Any]: ...
     async def discard(self, sid: str) -> Event: ...
     async def sessions(self) -> list[dict[str, Any]]: ...
     async def session(self, sid: str) -> dict[str, Any]: ...
@@ -51,6 +52,12 @@ class EmbeddedBackend:
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         try:
             return await self.rt.merge(sid, run_tests)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
+
+    async def context(self, sid: str) -> dict[str, Any]:
+        try:
+            return self.rt.context(sid)
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
 
@@ -124,6 +131,9 @@ class HttpBackend:
 
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/merge", json={"run_tests": run_tests}, timeout=660)
+
+    async def context(self, sid: str) -> dict[str, Any]:
+        return await self._call("GET", f"/agent/sessions/{sid}/context")
 
     async def discard(self, sid: str) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/discard", timeout=60)

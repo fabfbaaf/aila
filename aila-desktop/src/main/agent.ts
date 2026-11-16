@@ -5,7 +5,15 @@
 // - 等你确认的改文件操作交给星图显示（双手合十也能确认）
 // 工作窗口关了，正在做的任务照样做完（AI 服务那边在做），做完她会说一声。
 import { SseParser } from '../shared/chat'
-import type { AgentActivity, AgentEvent, AgentMode, AgentProgress, AgentSession, AgentSessionSummary } from '../shared/agent'
+import type {
+  AgentActivity,
+  AgentEvent,
+  AgentLedger,
+  AgentMode,
+  AgentProgress,
+  AgentSession,
+  AgentSessionSummary
+} from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 
 export interface RelayHooks {
@@ -73,6 +81,11 @@ export class AgentRelay {
 
   setMode(sid: string, mode: AgentMode): Promise<AiResult<unknown>> {
     return this.call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/mode`, { mode })
+  }
+
+  /** 上下文账本 */
+  context(sid: string): Promise<AiResult<AgentLedger>> {
+    return this.call('GET', `/agent/sessions/${encodeURIComponent(sid)}/context`)
   }
 
   compact(sid: string): Promise<AiResult<unknown>> {

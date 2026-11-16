@@ -594,6 +594,7 @@ function registerIpc(): void {
     fromAgent(e) && sidOk(sid) && AGENT_MODES.includes(mode as AgentMode) ? agentRelay.setMode(sid, mode as AgentMode) : notAllowed
   )
   ipcMain.handle('agent:compact', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.compact(sid) : notAllowed))
+  ipcMain.handle('agent:context', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.context(sid) : notAllowed))
   ipcMain.handle('agent:confirm', (e, id: unknown, approved: unknown, remember: unknown) => {
     if (!fromAgent(e) || typeof id !== 'string' || id.length > 64 || typeof approved !== 'boolean') return false
     return agentRelay.confirm(id, approved, remember === true)

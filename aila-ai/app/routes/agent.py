@@ -11,6 +11,7 @@
   POST   /agent/sessions/{id}/interrupt    打断
   PUT    /agent/sessions/{id}/mode         换权限模式 {mode}
   POST   /agent/sessions/{id}/compact      手动压缩上下文
+  GET    /agent/sessions/{id}/context      上下文账本：上下文由哪几块组成、各占多少
   POST   /agent/confirm                    回答她的确认 {id, approved, remember}
 
 和其他接口一样，只接受本机页面和本机程序的请求（见 security.py）。
@@ -142,6 +143,13 @@ async def set_mode(sid: str, req: SetMode, rt: Runtime = Depends(get_runtime)) -
     _session_or_404(rt, sid)
     rt.set_mode(sid, req.mode)
     return {"mode": req.mode, "label": MODE_LABELS[req.mode]}
+
+
+@router.get("/sessions/{sid}/context")
+async def context(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
+    """上下文账本：下一步发给模型的上下文由哪几块组成、各占多少、命中缓存多少"""
+    _session_or_404(rt, sid)
+    return rt.context(sid)
 
 
 @router.post("/sessions/{sid}/compact")
