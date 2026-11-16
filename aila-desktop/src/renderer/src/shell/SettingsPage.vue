@@ -10,6 +10,7 @@ import SkillsSection from '../settings/sections/SkillsSection.vue'
 import AccountSection from '../settings/sections/AccountSection.vue'
 import AppearanceSection from '../settings/sections/AppearanceSection.vue'
 import StatusSection from '../settings/sections/StatusSection.vue'
+import DesktopSection from '../settings/sections/DesktopSection.vue'
 
 const props = defineProps<{ section: SettingsSection }>()
 const emit = defineEmits<{ go: [route: ShellRoute] }>()
@@ -17,6 +18,7 @@ const emit = defineEmits<{ go: [route: ShellRoute] }>()
 const VIEWS: Partial<Record<SettingsSection, Component>> = {
   model: ModelSection,
   voice: VoiceSection,
+  desktop: DesktopSection,
   skills: SkillsSection,
   account: AccountSection,
   appearance: AppearanceSection,

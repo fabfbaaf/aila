@@ -23,6 +23,8 @@ import { VoiceController } from './voice/VoiceController'
 import { VoiceLink } from './voice/VoiceLink'
 import { MIC_SAMPLE_RATE } from './voice/Microphone'
 import type { VoiceMenuAction, VoiceMenuState } from '../../shared/voice'
+import type { DesktopStatus, Reminder } from '../../shared/desktop'
+import { targetFps } from './scene/frameBudget'
 
 const stageEl = ref<HTMLDivElement>()
 const fileInput = ref<HTMLInputElement>()
@@ -39,8 +41,22 @@ const screenAsk = ref<ScreenFinding | null>(null)
 const screenLocated = ref<LocatedError | null>(null)
 /** 正在看屏幕（脚边显示一个标识） */
 const watching = ref(false)
+/** 到点的提醒（气泡里「知道了 / 10 分钟后再提醒」） */
+const reminderAsk = ref<{ reminder: Reminder; late: boolean } | null>(null)
+/** 桌面状态：藏没藏、能不能说话、省不省电、拔没拔电（主进程推过来） */
+const desk = ref<DesktopStatus | null>(null)
 
 const bubbleAsk = computed<BubbleAsk | null>(() => {
+  if (reminderAsk.value && !convAsk.value) {
+    return {
+      tag: '提醒',
+      detail: reminderAsk.value.reminder.text,
+      buttons: [
+        { label: '知道了', value: 'ok', primary: true },
+        { label: '10 分钟后再提醒', value: 'snooze' }
+      ]
+    }
+  }
   if (convAsk.value) {
     const a = convAsk.value
     return {
@@ -106,7 +122,7 @@ function showBubble(text: string, holdMs: number | null): void {
   bubbleText.value = text
   bubbleVisible.value = true
   clearTimeout(bubbleTimer)
-  if (holdMs !== null && !screenAsk.value) bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
+  if (holdMs !== null && !screenAsk.value && !reminderAsk.value) bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
 }
 
 behavior.onSay = showBubble
@@ -156,7 +172,8 @@ screenWatch.onState = (s) => {
 }
 
 screenWatch.onFinding = (f) => {
-  if (conversation.busy || convAsk.value || screenAsk.value) pendingFinding = f
+  // 忙着、或者现在不方便说话（别人在全屏、在演示、免打扰）：先记着，之后再问
+  if (conversation.busy || convAsk.value || screenAsk.value || reminderAsk.value || desk.value?.presence.quiet) pendingFinding = f
   else askAboutFinding(f)
 }
 
@@ -217,8 +234,76 @@ async function startFix(project: string, snippet: string): Promise<void> {
 }
 
 function onAnswer(value: string): void {
-  if (convAsk.value) conversation.answer(value === 'yes')
+  if (reminderAsk.value && !convAsk.value) answerReminder(value)
+  else if (convAsk.value) conversation.answer(value === 'yes')
   else answerScreen(value)
+}
+
+// ---------- 提醒、久坐 ----------
+
+/** 到点的提醒多久没回答就收起（不算没看到：主进程那边已经响过了） */
+const REMINDER_ASK_MS = 120_000
+let reminderTimer = 0
+/** 她正在问你别的事（确认、报错）时到点的提醒：问完再说 */
+const pendingReminders: { reminder: Reminder; late: boolean }[] = []
+
+function showReminder(r: { reminder: Reminder; late: boolean }): void {
+  if (convAsk.value || screenAsk.value || reminderAsk.value) {
+    pendingReminders.push(r)
+    return
+  }
+  reminderAsk.value = r
+  behavior.react('happy')
+  behavior.gesture('tilt')
+  const lateAt = r.late ? new Date(r.reminder.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null
+  conversation.announce(lines.reminder(r.reminder.text, lateAt))
+  clearTimeout(reminderTimer)
+  reminderTimer = window.setTimeout(() => {
+    reminderAsk.value = null
+    bubbleVisible.value = false
+  }, REMINDER_ASK_MS)
+}
+
+function answerReminder(value: string): void {
+  const r = reminderAsk.value
+  if (!r) return
+  clearTimeout(reminderTimer)
+  reminderAsk.value = null
+  if (value === 'snooze') {
+    void bridge?.reminderSnooze(r.reminder.text, 10)
+    behavior.gesture('nod')
+    behavior.say(lines.reminderSnoozed, 2500)
+  } else {
+    behavior.gesture('nod')
+    bubbleVisible.value = false
+  }
+}
+
+// ---------- 藏起来、省电 ----------
+
+/** 最近一次和她互动（点、拖、打字）的时间，和鼠标最近一次动的时间：省电时决定帧率 */
+let lastInteraction = performance.now()
+let lastCursorMove = performance.now()
+const INTERACTION_GRACE_MS = 3000
+
+function applyDesktop(s: DesktopStatus | null): void {
+  desk.value = s
+  // 藏起来了：听到唤醒词也不应声
+  voiceControl.muted = !!s && !s.presence.visible
+}
+
+function frameLimit(): number | null {
+  const s = desk.value
+  if (!s) return null
+  const now = performance.now()
+  const active =
+    chatOpen.value ||
+    bubbleVisible.value ||
+    conversation.busy ||
+    speaker.playing ||
+    press !== null ||
+    now - lastInteraction < INTERACTION_GRACE_MS
+  return targetFps({ saver: s.prefs.powerSaver, onBattery: s.onBattery, active, sinceMove: now - lastCursorMove })
 }
 
 /** 调试：用她自己的合成声音模拟用户说一句话，整条语音链路照常走一遍（不需要麦克风） */
@@ -232,6 +317,7 @@ async function hear(text: string): Promise<void> {
 // ---------- 对话框 ----------
 
 async function openChat(): Promise<void> {
+  lastInteraction = performance.now()
   if (!chatOpen.value) {
     chatOpen.value = true
     if (!conversation.busy) behavior.listen()
@@ -281,13 +367,26 @@ function onCharacterEvent(ev: CharacterEvent): void {
     case 'agent':
       onAgentProgress(ev.progress)
       break
+    case 'reminder':
+      showReminder({ reminder: ev.reminder, late: ev.late })
+      break
+    case 'reminder-failed':
+      behavior.react('sad')
+      behavior.say(lines.reminderFailed(ev.why), 4000)
+      break
+    case 'sit-break':
+      if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
+        behavior.gesture('tilt')
+        conversation.announce(pick(lines.sitBreak(ev.minutes)))
+      }
+      break
   }
 }
 
 /** 工作窗口里的编程任务有进展：做个动作，说一句。她正在和你说话或者等你回答时不插嘴（工作窗口里都看得到） */
 function onAgentProgress(p: AgentProgress): void {
   // 只在真的和你对话、等你回答时不插嘴；她自己念的上一句台词（「要改……可以吗」）可以被新的进展盖掉
-  const quiet = conversation.chatting || !!convAsk.value || !!screenAsk.value
+  const quiet = conversation.chatting || !!convAsk.value || !!screenAsk.value || !!desk.value?.presence.quiet
   switch (p.kind) {
     case 'start':
       behavior.gesture('nod')
@@ -379,6 +478,7 @@ function updateHover(x: number, y: number): void {
 
 function lookAt(x: number, y: number): void {
   if (!stage) return
+  lastCursorMove = performance.now()
   behavior.cursorMoved(stage.screenToLookTarget(x, y, lookTarget))
 }
 
@@ -389,6 +489,7 @@ const DOUBLE_CLICK_MS = 260
 let pendingPoke = 0
 
 function onPointerDown(e: PointerEvent): void {
+  lastInteraction = performance.now()
   if (e.button !== 0 || !stage) return
   const region = stage.hitTest(e.clientX, e.clientY)
   if (!region) return
@@ -447,9 +548,13 @@ onMounted(async () => {
   stage = new Stage(stageEl.value!, behavior)
   stage.onStep = (dt) => {
     conversation.tick(dt)
-    // 忙的时候看到的报错，忙完再问
-    if (pendingFinding && !conversation.busy && !convAsk.value && !screenAsk.value) askAboutFinding(pendingFinding)
+    // 忙的时候看到的报错，忙完（而且方便说话了）再问
+    const free = !conversation.busy && !convAsk.value && !screenAsk.value && !reminderAsk.value
+    if (pendingFinding && free && !desk.value?.presence.quiet) askAboutFinding(pendingFinding)
+    // 问别的事时到点的提醒：问完再说
+    if (pendingReminders.length && free) showReminder(pendingReminders.shift()!)
   }
+  stage.maxFps = frameLimit
   stage.setAvatar(new PlaceholderAvatar())
   stage.start()
   if (import.meta.env.DEV) {
@@ -483,8 +588,10 @@ onMounted(async () => {
       // 星图里双手合十：确认的必须正是她现在问的这一份修改
       bridge.onGestureApprove((id) => {
         if (convAsk.value?.id === id) conversation.answer(true)
-      })
+      }),
+      bridge.onDesktopStatus(applyDesktop)
     )
+    void bridge.desktopStatus().then(applyDesktop)
   }
   void voiceControl.init()
   screenWatch.init()
@@ -503,6 +610,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onMouseMove)
   // 开发时改了 preload 没重启，旧的订阅函数不返回退订函数：跳过，别让卸载出错
   for (const off of subscriptions.splice(0)) if (typeof off === 'function') off()
+  clearTimeout(reminderTimer)
   conversation.interrupt()
   voiceControl.dispose()
   screenWatch.dispose()

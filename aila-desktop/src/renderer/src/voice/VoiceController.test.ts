@@ -77,6 +77,18 @@ describe('VoiceController', () => {
     expect(conversation.send).toHaveBeenCalledWith('明天天气怎么样？', true)
   })
 
+  it('她藏起来时（免打扰、别人在全屏）听到唤醒词不应声', () => {
+    const { vc, ear, behavior, conversation } = setup()
+    vc.muted = true
+    ear.onEvent({ type: 'wake', keyword: '你好艾拉' })
+    expect(behavior.hearWake).not.toHaveBeenCalled()
+    expect(conversation.interrupt).not.toHaveBeenCalled()
+    expect(ear.mode).not.toBe('listen')
+    vc.muted = false
+    ear.onEvent({ type: 'wake', keyword: '你好艾拉' })
+    expect(behavior.hearWake).toHaveBeenCalled()
+  })
+
   it('记录说完到开口的延迟', () => {
     const { vc, ear, conversation } = setup()
     ear.onEvent({ type: 'wake', keyword: '你好艾拉' })

@@ -10,6 +10,7 @@ import {
 } from 'three'
 import type { Avatar } from '../avatar/types'
 import type { Behavior } from '../behavior/Behavior'
+import { shouldDraw } from './frameBudget'
 
 export type HitRegion = 'head' | 'body'
 
@@ -59,12 +60,19 @@ export class Stage {
     this.frame()
   }
 
+  /** 每秒最多画几帧（省电，见 frameBudget.ts）；null = 不限。每帧都问一次 */
+  maxFps: () => number | null = () => null
+
   start(): void {
-    const loop = (): void => {
+    let lastDrawn = -Infinity
+    const loop = (now: number): void => {
       this.frameId = requestAnimationFrame(loop)
+      if (!shouldDraw(now, lastDrawn, this.maxFps())) return
+      lastDrawn = now
+      // getDelta 是离上次画的时间：跳过的帧都算进去，动作速度不受帧率影响
       this.step(Math.min(this.clock.getDelta(), 0.1))
     }
-    loop()
+    this.frameId = requestAnimationFrame(loop)
   }
 
   /** 每帧在行为更新之前调用（对话的打字节奏挂在这里） */

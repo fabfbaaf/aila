@@ -21,12 +21,14 @@ ACTIONS = {
     "search": lambda a: f"搜「{str(a.get('pattern', ''))[:30]}」",
     "edit_file": lambda a: f"改 {a.get('path', '')}",
     "write_file": lambda a: f"写 {a.get('path', '')}",
-    "run_command": lambda a: str(a.get("description") or a.get("command", ""))[:50],
+    "run_command": lambda a: ("后台：" if a.get("background") else "") + str(a.get("description") or a.get("command", ""))[:50],
     "todo_write": lambda a: "更新待办清单",
     "code_search": lambda a: f"按意思搜「{str(a.get('query', ''))[:24]}」",
     "code_locate": lambda a: "按报错定位代码",
     "code_symbol": lambda a: f"看 {str(a.get('name', ''))[:30]} 的调用关系",
     "explore": lambda a: f"派助手去查「{str(a.get('task', '')).strip()[:24]}」",
+    "job_output": lambda a: f"看后台任务 {a.get('id', '')} 的输出",
+    "job_stop": lambda a: f"停掉后台任务 {a.get('id', '')}",
 }
 
 

@@ -109,3 +109,13 @@ async def test_trace_and_context_commands(project: Path, tmp_path: Path) -> None
     assert "还没有做过事" in out
     assert "轨迹 看 README" in out and "读 README.md" in out
     assert "上下文账本" in out and "系统提示词" in out and "工具结果：读文件" in out
+
+
+def test_trace_labels_background_jobs_and_helpers() -> None:
+    """终端 /trace 的标题和任务页（fold.ts 的 actionOf）一样"""
+    from app.cli.views import action
+
+    assert action("run_command", {"command": "npm run dev", "background": True}) == "后台：npm run dev"
+    assert action("job_output", {"id": "job-1"}) == "看后台任务 job-1 的输出"
+    assert action("job_stop", {"id": "job-1"}) == "停掉后台任务 job-1"
+    assert action("explore", {"task": "登录在哪处理"}) == "派助手去查「登录在哪处理」"

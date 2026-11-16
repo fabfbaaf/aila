@@ -49,6 +49,8 @@ export class VoiceController {
   /** 开关变了（设置窗口要显示） */
   onPrefsChanged: (prefs: VoiceSwitches) => void = () => {}
   readonly latencies: LatencySample[] = []
+  /** 她藏起来时为 true：听到唤醒词也不应声（快捷键「听我说」不受影响，那是你明确叫她） */
+  muted = false
 
   private prefs: Prefs
   private session: 'idle' | 'awaiting' | 'conversing' = 'idle'
@@ -145,6 +147,8 @@ export class VoiceController {
   private onEvent(ev: VoiceEvent): void {
     switch (ev.type) {
       case 'wake':
+        // 她藏起来了（免打扰、别人在全屏或演示）：叫她也不应声，免得开会时突然出声
+        if (this.muted) break
         this.conversation.interrupt()
         this.behavior.hearWake()
         this.greeted = false

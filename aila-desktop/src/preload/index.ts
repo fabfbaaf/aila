@@ -26,6 +26,7 @@ import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
+import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -158,6 +159,14 @@ const api = {
   codeRefresh: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:refresh', id),
   codeRemove: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:remove', id),
   onKnowledgeBusy: (cb: (count: number) => void): Unsubscribe => listen('knowledge:busy', cb),
+
+  // 桌面上的她：全屏时躲开、免打扰、省电、提醒（改偏好、免打扰、删提醒只认主窗口；「过会儿再提醒」只认角色窗口）
+  desktopStatus: (): Promise<DesktopStatus | null> => ipcRenderer.invoke('desktop:status'),
+  desktopSetPrefs: (prefs: Partial<DesktopPrefs>): Promise<DesktopStatus | null> => ipcRenderer.invoke('desktop:prefs', prefs),
+  desktopSetDnd: (on: boolean): Promise<boolean> => ipcRenderer.invoke('desktop:dnd', on),
+  reminderDelete: (id: string): Promise<boolean> => ipcRenderer.invoke('reminder:delete', id),
+  reminderSnooze: (text: string, minutes: number): Promise<boolean> => ipcRenderer.invoke('reminder:snooze', text, minutes),
+  onDesktopStatus: (cb: (status: DesktopStatus) => void): Unsubscribe => listen('desktop:status', cb),
 
   // 主窗口：主进程要它切到某一页（右键菜单、星图、屏幕上的报错这些入口）
   onShellGo: (cb: (route: ShellRoute) => void): Unsubscribe => listen('shell:go', (raw: unknown) => cb(cleanRoute(raw))),

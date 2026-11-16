@@ -199,6 +199,10 @@ class MockModel:
                 where = re.search(r"在\s*([A-Za-z0-9_.\-]+)\s*(?:项目)?里", task)  # 「在 demo 里……」
                 args = {"task": task, **({"project": where.group(1)} if where else {})}
                 call = ToolCall("mock-coding", "coding_task", json.dumps(args, ensure_ascii=False))
+            elif (m := re.search(r"(\d+)\s*分钟后.*?(?:提醒|叫)我(.*)", text)) and "set_reminder" in names:
+                reply = "[nod]好。"
+                what = m.group(2).strip(" ，。,.") or "时间到了"
+                call = ToolCall("mock-remind", "set_reminder", json.dumps({"text": what, "in_minutes": int(m.group(1))}, ensure_ascii=False))
             elif text.startswith("我这边报错了") and "code_locate" in names:  # 看屏幕看到的报错：先找出错的代码
                 reply = "[think]我看一下是哪里的代码……"
                 call = ToolCall("mock-locate", "code_locate", json.dumps({"error": text}, ensure_ascii=False))
@@ -247,6 +251,8 @@ def _mock_summary(tool_result: str) -> str:
             return "[tilt]……这个报错不在你登记的项目里，我找不到对应的代码。"
         if line.startswith("已经在任务页里开始做了"):
             return "[nod]在任务页里做着了……[relaxed]做完告诉你。"
+        if line.startswith("记好了："):
+            return f"{line[4:].split('提醒用户')[0].strip()} 叫你。"
         if line.startswith("有好几个项目"):
             return "[tilt]……是哪个项目呢？"
         if line.startswith("还不知道用户的项目在哪"):

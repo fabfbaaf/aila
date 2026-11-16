@@ -34,6 +34,8 @@ TOOL_LABELS = {
     "code_locate": "按报错定位",
     "code_symbol": "调用关系",
     "explore": "助手的报告",
+    "job_output": "后台任务的输出",
+    "job_stop": "后台任务的输出",
 }
 TOP = 5
 

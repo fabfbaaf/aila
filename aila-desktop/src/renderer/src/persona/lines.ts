@@ -62,6 +62,16 @@ export const lines = {
   agentTaskStarted: ['好，我去任务页里修。', '……交给我。改之前会先问你。'],
   agentTaskFailed: (why: string): string => `……没开成。${why}`,
   /** 交给编程 Agent 的修报错任务（报错原文附在后面） */
+  // 提醒（对话里说「25 分钟后叫我」记下的）、久坐
+  reminder: (text: string, lateAt: string | null): string =>
+    lateAt ? `……刚才 ${lateAt} 该提醒你的：${text}` : `……到时间了：${text}`,
+  reminderSnoozed: '好，过 10 分钟再叫你。',
+  reminderFailed: (why: string): string => `……那个提醒没记上：${why}。`,
+  sitBreak: (minutes: number): string[] => [
+    `……已经坐了 ${minutes} 分钟了。起来走走吧。`,
+    `${minutes} 分钟了……喝口水，活动一下？`,
+    '……眼睛也休息一下吧。看看远处。'
+  ],
   fixTask: (snippet: string): string => `修好这个报错。先定位到出错的代码、弄清原因，改完跑相关的测试验证：\n${snippet}`
 }
 

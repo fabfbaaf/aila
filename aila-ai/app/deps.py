@@ -30,6 +30,7 @@ from .tools import Skill, SkillRegistry
 from .tools.browser import browse_skill, browser_skill
 from .tools.code import code_skill
 from .tools.coding import coding_skill
+from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, MockSearch, SearchProvider, TavilySearch
@@ -198,7 +199,7 @@ def get_registry() -> SkillRegistry:
     log.info("联网搜索：%s", search.name if search else "未配置（只能读用户给的链接）")
     registry = SkillRegistry([
         web_skill(http_client, search), knowledge_skill(get_knowledge()), code_skill(get_code_projects()),
-        browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()),
+        browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()), reminder_skill(),
     ])
     for skill in _mcp_skills:
         registry.add(skill)

@@ -41,6 +41,8 @@ import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
 import { routeForSection, toHash, type ShellRoute } from '../shared/shell'
 import { trayIcon } from './trayIcon'
+import { DesktopKeeper } from './desktopKeeper'
+import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
@@ -54,6 +56,8 @@ const SNAP_DISTANCE = 24
 const CHAT_SHORTCUT = 'Alt+Shift+A'
 /** 不用唤醒词，直接开始听（V = Voice） */
 const LISTEN_SHORTCUT = 'Alt+Shift+V'
+/** 免打扰：把她藏起来 / 叫回来（H = Hide） */
+const HIDE_SHORTCUT = 'Alt+Shift+H'
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
 
 // 开发调试：设置 AILA_REMOTE_DEBUG=端口 时打开远程调试，用脚本驱动真实窗口做端到端测试（打包后无效）
@@ -71,6 +75,8 @@ let mainWin: BrowserWindow | null = null
 /** 主窗口打开时要显示的会话（任务页加载好以后来取） */
 let agentFocus: string | null = null
 let tray: Tray | null = null
+/** 全屏时躲开、免打扰、省电、提醒（见 desktopKeeper.ts） */
+let desktop: DesktopKeeper | null = null
 const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto']
 const agentRelay = new AgentRelay(AI_URL, {
   emit: (sid, e) => mainWin?.webContents.send('agent:event', sid, e),
@@ -105,6 +111,8 @@ const chats = new Map<number, AbortController>()
 
 interface Settings {
   modelPath?: string
+  /** 桌面上的她的偏好（DesktopPrefs，读的时候再检查） */
+  desktop?: unknown
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -156,7 +164,9 @@ function createWindow(): void {
   win.setIgnoreMouseEvents(true, { forward: true })
   win.setAlwaysOnTop(true, 'floating')
 
-  win.once('ready-to-show', () => win?.showInactive())
+  win.once('ready-to-show', () => {
+    if (desktop?.presence.visible ?? true) win?.showInactive()
+  })
 
   loadPage(win)
   startCursorFeed()
@@ -253,7 +263,7 @@ function startCursorFeed(): void {
   let lastX = NaN
   let lastY = NaN
   cursorTimer = setInterval(() => {
-    if (!win) return
+    if (!win || !win.isVisible()) return
     const p = screen.getCursorScreenPoint()
     if (p.x === lastX && p.y === lastY) return
     lastX = p.x
@@ -300,12 +310,20 @@ function resetPosition(): void {
 
 function openChat(): void {
   if (!win) return
+  desktop?.setDnd(false)
   win.focus() // 窗口平时不抢焦点，要打字时才拿过来
   win.webContents.send('chat:open')
 }
 
 function voiceMenu(action: VoiceMenuAction): void {
+  if (action === 'listen') desktop?.setDnd(false)
   win?.webContents.send('voice:menu', action)
+}
+
+/** 免打扰开关（右键菜单、托盘、快捷键、设置页都走这里） */
+function toggleDnd(on = !desktop?.dnd): void {
+  desktop?.setDnd(on)
+  updateTray()
 }
 
 // ---------- 麦克风权限：只给自己的页面 ----------
@@ -411,6 +429,11 @@ async function relayChat(id: number, messages: ChatMessage[]): Promise<void> {
       (ev) => {
         // 她在对话里把编程任务交给了工作窗口：打开工作窗口、接上那个任务
         if (ev.type === 'agent_task') openAgent(ev.session)
+        // 她记下了一个提醒：存起来，到点叫你。没记上（时间不对、太多了）让她说一声
+        if (ev.type === 'reminder' && desktop) {
+          const r = desktop.addReminder(String(ev.at).slice(0, 64), String(ev.text).slice(0, 500))
+          if (typeof r === 'string') characterEvent({ kind: 'reminder-failed', why: r })
+        }
         win?.webContents.send('chat:event', id, ev)
       },
       extra
@@ -645,6 +668,25 @@ function registerIpc(): void {
   })
   ipcMain.handle('screen:status', () => getScreenStatus(AI_URL))
 
+  // 桌面上的她：状态谁都能读；改偏好、免打扰、删提醒只认主窗口；「过 10 分钟再提醒」只认角色窗口（气泡里的按钮）
+  const fromMain = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
+  ipcMain.handle('desktop:status', () => desktop?.status() ?? null)
+  ipcMain.handle('desktop:prefs', (e, prefs: unknown) => (fromMain(e) && desktop ? desktop.setPrefs(prefs) : null))
+  ipcMain.handle('desktop:dnd', (e, on: unknown) => {
+    if (!fromMain(e) || typeof on !== 'boolean') return false
+    toggleDnd(on)
+    return true
+  })
+  ipcMain.handle('reminder:delete', (e, id: unknown) =>
+    fromMain(e) && typeof id === 'string' && id.length <= 64 ? (desktop?.removeReminder(id) ?? false) : false
+  )
+  ipcMain.handle('reminder:snooze', (e, text: unknown, minutes: unknown) => {
+    if (e.sender !== win?.webContents || typeof text !== 'string' || !desktop) return false
+    const m = Number(minutes)
+    if (!Number.isInteger(m) || m < 1 || m > 120) return false
+    return typeof desktop.snooze(text.slice(0, 500), m) !== 'string'
+  })
+
   ipcMain.on('menu:show', async (_e, voice: VoiceMenuState) => {
     if (!win) return
     // 技能包列表从 AI 服务实时取（接进来的 MCP 服务也会出现在这里）
@@ -679,6 +721,8 @@ function registerIpc(): void {
       { label: '资料库…', click: () => openMain({ page: 'knowledge' }) },
       { label: '她记得的事…', click: () => openMain({ page: 'memory' }) },
       { type: 'separator' },
+      { label: '提醒…', click: () => openSettings('desktop') },
+      { label: '免打扰（先藏起来）', accelerator: HIDE_SHORTCUT, click: () => toggleDnd(true) },
       { label: '设置…', click: () => openSettings('model') },
       { label: '回到右下角', click: resetPosition },
       { type: 'separator' },
@@ -694,17 +738,25 @@ function registerIpc(): void {
 /** 托盘：桌面上的她被挡住、或者拖到别的屏幕上时，从这里也能打开主窗口 */
 function createTray(): void {
   tray = new Tray(nativeImage.createFromBitmap(trayIcon(32), { width: 32, height: 32, scaleFactor: 2 }))
-  tray.setToolTip('艾拉')
+  tray.on('click', () => openMain({ page: 'tasks' }))
+  updateTray()
+}
+
+/** 托盘菜单跟着免打扰的状态变 */
+function updateTray(): void {
+  if (!tray) return
+  const dnd = desktop?.dnd ?? false
+  tray.setToolTip(dnd ? '艾拉（免打扰中）' : '艾拉')
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
       { label: '和她说话', accelerator: CHAT_SHORTCUT, click: openChat },
+      { label: '免打扰（藏起来）', type: 'checkbox', checked: dnd, accelerator: HIDE_SHORTCUT, click: () => toggleDnd() },
       { label: '让她回到右下角', click: resetPosition },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() }
     ])
   )
-  tray.on('click', () => openMain({ page: 'tasks' }))
 }
 
 // 只开一个：再启动一次（比如又双击了快捷方式）就把已经开着的主窗口拿到前面
@@ -714,17 +766,34 @@ else app.on('second-instance', () => openMain({ page: 'tasks' }))
 
 app.whenReady().then(() => {
   if (!firstInstance) return
+  // Windows 上系统通知（提醒）要有应用 ID；开发时用 electron.exe 的路径
+  if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'com.aila.desktop' : process.execPath)
   restrictPermissions()
   account = createAccount() // 加密存储要在 ready 之后才能用
   account.start()
   registerIpc()
+  desktop = new DesktopKeeper({
+    dataDir: app.getPath('userData'),
+    character: () => win,
+    characterEvent,
+    onChange: (status) => {
+      broadcast('desktop:status', status)
+      updateTray()
+    },
+    loadPrefs: () => loadSettings().desktop,
+    savePrefs: (prefs: DesktopPrefs) => saveSettings({ ...loadSettings(), desktop: prefs })
+  })
   createWindow()
   createTray()
+  desktop.start()
   if (!globalShortcut.register(CHAT_SHORTCUT, openChat)) {
     console.warn(`快捷键 ${CHAT_SHORTCUT} 被其他程序占用了，可以双击艾拉或者右键菜单打开对话`)
   }
   if (!globalShortcut.register(LISTEN_SHORTCUT, () => voiceMenu('listen'))) {
     console.warn(`快捷键 ${LISTEN_SHORTCUT} 被其他程序占用了，可以用右键菜单「听我说」`)
+  }
+  if (!globalShortcut.register(HIDE_SHORTCUT, () => toggleDnd())) {
+    console.warn(`快捷键 ${HIDE_SHORTCUT} 被其他程序占用了，可以用托盘菜单的「免打扰」`)
   }
 })
 
@@ -732,6 +801,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   agentRelay.stopAll()
   account?.shutdown() // 还没写盘的聊天记录写下去
+  desktop?.stop()
   tray?.destroy()
 })
 app.on('window-all-closed', () => app.quit())

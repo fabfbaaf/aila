@@ -25,7 +25,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
   padding: 0;
   border: none;
   border-radius: 11px;
-  background: #d5d8e3;
+  background: var(--field-line, #d5d8e3);
   cursor: pointer;
   transition: background 0.15s;
 }

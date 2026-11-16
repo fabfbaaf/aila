@@ -32,6 +32,7 @@ export const PAGES: { id: Page; name: string; icon: string; key: string }[] = [
 export const SETTINGS_TABS: { id: SettingsSection; name: string }[] = [
   { id: 'model', name: '对话' },
   { id: 'voice', name: '语音' },
+  { id: 'desktop', name: '桌面' },
   { id: 'skills', name: '技能包' },
   { id: 'account', name: '账号与同步' },
   { id: 'appearance', name: '形象' },

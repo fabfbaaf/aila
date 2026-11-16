@@ -1,5 +1,6 @@
 // 设置窗口：主进程、预加载和渲染层共用的类型
 import type { AgentProgress } from './agent'
+import type { Reminder } from './desktop'
 
 export type SettingsSection =
   | 'model'
@@ -11,6 +12,8 @@ export type SettingsSection =
   | 'account'
   | 'appearance'
   | 'status'
+  /** 桌面上的她：全屏时躲开、免打扰、省电、开机启动、提醒 */
+  | 'desktop'
 
 /** 她修代码的记录：修过几次、跑了测试的几次、测试通过几次、改进用户代码几次（GET /code/fixes） */
 export interface FixStats {
@@ -70,6 +73,12 @@ export type CharacterEvent =
   | { kind: 'settings-saved' }
   /** 工作窗口里的编程任务有进展：她说一句、做个动作 */
   | { kind: 'agent'; progress: AgentProgress }
+  /** 提醒到点了（late：程序没开时就过了点，现在补上） */
+  | { kind: 'reminder'; reminder: Reminder; late: boolean }
+  /** 对话里让她记的提醒没记上（主进程那边检查没过） */
+  | { kind: 'reminder-failed'; why: string }
+  /** 连续用电脑满 N 分钟了 */
+  | { kind: 'sit-break'; minutes: number }
 
 /** AI 服务的设置（GET /settings）。密钥只告诉设没设 */
 export interface AiSettings {

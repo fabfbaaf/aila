@@ -34,6 +34,8 @@ export type ChatEvent =
   | { type: 'confirm_end'; id: string; result: ConfirmResult }
   /** 她把编程任务交给了工作窗口（对话里的「编程任务」工具）：桌面端打开工作窗口接上这个会话 */
   | { type: 'agent_task'; session: string; project: string }
+  /** 她记下了一个提醒（对话里的「提醒」技能包）：主进程存起来，到点叫你。at 是带时区的 ISO 时间 */
+  | { type: 'reminder'; at: string; text: string }
   | { type: 'done' }
   | { type: 'error'; code: ChatErrorCode; message: string }
 
