@@ -134,6 +134,9 @@ const api = {
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
   agentMerge: (sid: string, runTests: boolean): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:merge', sid, runTests),
   agentDiscard: (sid: string): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:discard', sid),
+  /** 仅主窗口：改会话标题、删除会话 */
+  agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
+  agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),
   /** 说一句话开始一轮；事件从 onAgentEvent 来 */
   agentSend: (sid: string, text: string): void => ipcRenderer.send('agent:send', sid, text),
   /** 接上一个会话：补发 after 之后的事件，正在做的话接着推 */

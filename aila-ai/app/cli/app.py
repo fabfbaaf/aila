@@ -33,6 +33,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..runtime.permissions import MODE_LABELS, MODES
+from ..runtime.session import SESSION_ID, same_project
 from .backend import Backend, BackendError, connect
 from .commands import COMMANDS, INIT_PROMPT, KEYS, changed_files, latest_todos, next_mode, parse, usage_lines
 from .render import Renderer
@@ -109,6 +110,7 @@ class Terminal:
         self.inp = inp or create_input()
         self.watcher = KeyWatcher(self.inp)
         self._last_ctrl_c = 0.0
+        self._resume_ids: list[str] | None = None
         self.prompt: PromptSession[str] = PromptSession(
             history=FileHistory(str(history)) if history else InMemoryHistory(),
             completer=SlashCompleter(),
@@ -253,6 +255,23 @@ class Terminal:
                 self.renderer.header(self.info, self.backend.label)
             elif name == "/resume":
                 await self._resume(arg)
+            elif name == "/rename":
+                renamed = await self.backend.rename(self.sid, arg)
+                self.info["title"] = renamed["title"]
+                self.console.print(Text(f"会话改名为：{renamed['title']}", style="dim"))
+            elif name == "/delete":
+                try:
+                    answer = await self.prompt.prompt_async("删除当前会话和它的分支？[y/n] ")
+                except (KeyboardInterrupt, EOFError):
+                    answer = "n"
+                if answer.strip().lower() not in ("y", "yes"):
+                    self.console.print(Text("没删，继续这个会话。", style="dim"))
+                else:
+                    await self.backend.delete(self.sid)
+                    self.info = await self.backend.create(self.info["cwd"], self.info.get("mode", "ask"))
+                    self._resume_ids = None
+                    self.console.print(Text("删掉了，已在这个目录开一个新会话。", style="dim"))
+                    self.renderer.header(self.info, self.backend.label)
             elif name == "/usage":
                 for line in usage_lines(await self.backend.session(self.sid)):
                     self.console.print(Text(line, style="dim"))
@@ -328,27 +347,38 @@ class Terminal:
         self.console.print(table)
 
     async def _resume(self, arg: str) -> None:
-        mine = [s for s in await self.backend.sessions() if _same_dir(s.get("cwd", ""), self.info["cwd"])]
-        if not arg:
-            if not mine:
-                self.console.print(Text("这个目录还没有别的会话。", style="dim"))
-            for i, s in enumerate(mine[:10], 1):
+        searching = bool(arg and not arg.isdigit() and not SESSION_ID.fullmatch(arg))
+        found = await self.backend.search_sessions(arg, self.info["cwd"]) if searching else await self.backend.sessions()
+        mine = [s for s in found if _same_dir(s.get("cwd", ""), self.info["cwd"])]
+        if not arg or searching:
+            key = arg.casefold()
+            matches = [s for s in mine if key in s["title"].casefold() or key in s.get("cwd", "").casefold()]
+            self._resume_ids = [s["id"] for s in matches[:10]]
+            if not matches:
+                self.console.print(Text("没找到匹配的会话。" if arg else "这个目录还没有别的会话。", style="dim"))
+            for i, s in enumerate(matches[:10], 1):
                 when = datetime.fromtimestamp(s["updated"]).strftime("%m-%d %H:%M") if s.get("updated") else ""
                 self.console.print(Text.assemble((f"{i:>2}. ", "bold"), s["title"], (f"  {when} · {s['id']}", "dim")))
             self.console.print(Text("/resume 编号 打开", style="dim"))
             return
-        target = mine[int(arg) - 1]["id"] if arg.isdigit() and 0 < int(arg) <= len(mine) else arg
+        if arg.isdigit():
+            ids = self._resume_ids if self._resume_ids is not None else [s["id"] for s in mine]
+            if not 0 < int(arg) <= len(ids):
+                self.console.print(Text("没有这个编号，先用 /resume 看会话。", style="dim"))
+                return
+            target = ids[int(arg) - 1]
+        else:
+            target = arg
         info = await self.backend.session(target)
+        if not _same_dir(info.get("cwd", ""), self.info["cwd"]):
+            self._resume_ids = None
         self.info = {**info, "shell": info.get("shell") or self.info.get("shell", "")}
         self.renderer.header(self.info, self.backend.label)
         self.renderer.replay(info.get("events", []))
 
 
 def _same_dir(a: str, b: str) -> bool:
-    try:
-        return Path(a).resolve() == Path(b).resolve()
-    except OSError:
-        return a == b
+    return same_project(a, b)
 
 
 # ---------- 一次性模式 ----------

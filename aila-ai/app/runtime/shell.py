@@ -372,10 +372,14 @@ class BackgroundJobs:
             pass
         return job
 
-    async def shutdown(self) -> None:
+    async def stop_all(self) -> None:
+        """停掉当前进程，保留任务记录和后续启动能力。"""
         async with self._lock:
-            self._closed = True
             await asyncio.gather(*(job.stop() for job in self.jobs.values()))
+
+    async def shutdown(self) -> None:
+        self._closed = True
+        await self.stop_all()
 
 
 def decode(data: bytes) -> str:

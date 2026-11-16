@@ -70,6 +70,25 @@ export class AgentRelay {
     return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/discard`, undefined, 60000)
   }
 
+  /** 改名只追加标题事件，历史和模型消息保持原样 */
+  async rename(sid: string, title: string): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('PATCH', `/agent/sessions/${encodeURIComponent(sid)}`, { title }))
+  }
+
+  /** 服务端停掉后台进程、放弃分支并删日志后，再清理本地订阅 */
+  async delete(sid: string): Promise<AiResult<{ ok: boolean }>> {
+    const result = await this.call<{ ok: boolean }>('DELETE', `/agent/sessions/${encodeURIComponent(sid)}`, undefined, 60000)
+    if (result.ok) {
+      this.streams.get(sid)?.abort()
+      this.streams.delete(sid)
+      this.cwds.delete(sid)
+      this.turnFiles.delete(sid)
+      for (const key of this.callFiles.keys()) if (key.startsWith(`${sid}:`)) this.callFiles.delete(key)
+      if (this.pendingConfirm?.sid === sid) this.clearPending()
+    }
+    return result
+  }
+
   /** 开一个会话并马上开始做（屏幕上的报错、星图交过来的任务） */
   async task(task: { text: string; project?: string; cwd?: string }): Promise<AiResult<AgentSessionSummary>> {
     return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/tasks', task))

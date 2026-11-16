@@ -7,11 +7,13 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 
 from ..code import CodeProjects
+from ..code.fix import FixError, git
 from ..confirm import Confirmations
 from ..llm import CoderModel
 from .branch import BranchError, BranchInfo, open_branch
@@ -70,6 +72,8 @@ class Runtime:
         self._agents: dict[str, Agent] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._listeners: dict[str, set[asyncio.Queue[Event | None]]] = {}
+        self._deleting: set[str] = set()
+        self._operations: set[str] = set()
 
     # ---------- 会话 ----------
 
@@ -92,6 +96,8 @@ class Runtime:
         return self.store.create(root, mode, model.name, context, {"branch": asdict(info)})
 
     def agent(self, sid: str) -> Agent:
+        if sid in self._deleting:
+            raise RuntimeError_("这个会话正在删除，等删完再开新会话。")
         if sid in self._agents:
             return self._agents[sid]
         session = self.store.get(sid)
@@ -129,6 +135,54 @@ class Runtime:
         agent.policy.mode = mode
         self._publish(sid, agent.session.append({"type": "mode", "mode": mode}))
 
+    def rename(self, sid: str, title: str) -> Session:
+        """改名只追加展示事件，不重写历史，也不改变模型的上下文。"""
+        if sid in self._deleting:
+            raise RuntimeError_("这个会话正在删除，不能改名。")
+        session = self.store.get(sid)
+        if session is None:
+            raise RuntimeError_("没有这个会话。")
+        if not title.strip() or not 1 <= len(title) <= 100:
+            raise RuntimeError_("标题要有 1–100 个字。")
+        title = title.strip()
+        self._publish(sid, session.append({"type": "title", "title": title}))
+        return session
+
+    async def delete(self, sid: str) -> None:
+        """先停掉会话的后台进程、放弃分支，再移除日志和订阅；不打断正在做的轮次。"""
+        if sid in self._deleting:
+            raise RuntimeError_("这个会话正在删除，等删完再开新会话。")
+        session = self.store.get(sid)
+        if session is None:
+            raise RuntimeError_("没有这个会话。")
+        if self.running(sid):
+            raise RuntimeError_("她还在做事，先打断这一轮再删除。")
+        if sid in self._operations:
+            raise RuntimeError_("这个会话正在合并、放弃分支或压缩，等它结束再删除。")
+        self._deleting.add(sid)
+        try:
+            agent = self._agents.get(sid)
+            if agent is not None:
+                await agent.tools.jobs.stop_all()
+            if info := session.branch:
+                await asyncio.to_thread(discard_branch, BranchInfo.of(info))
+                if Path(info["worktree"]).exists():
+                    raise RuntimeError_("分支的临时目录还在，没删会话。关闭占用它的程序后再试。")
+                ref = f"refs/heads/{info['branch']}"
+                refs = await asyncio.to_thread(git, Path(info["repo"]), "for-each-ref", "--format=%(refname)", ref)
+                if ref in refs.splitlines():
+                    raise RuntimeError_("任务的 Git 分支还在，没删会话。确认它没有在别的工作区使用后再试。")
+                self._publish(sid, session.append({"type": "branch_closed", "branch": info["branch"]}))
+            self.store.delete(sid)
+            self._agents.pop(sid, None)
+            self._tasks.pop(sid, None)
+            for queue in self._listeners.pop(sid, set()):
+                queue.put_nowait(None)
+        except (BranchError, FixError, OSError) as err:
+            raise RuntimeError_(f"会话没删掉：{err}") from err
+        finally:
+            self._deleting.discard(sid)
+
     # ---------- 跑一轮 ----------
 
     def run(self, sid: str, text: str) -> AsyncIterator[Event]:
@@ -146,6 +200,8 @@ class Runtime:
         agent = self.agent(sid)
         if self.running(sid):
             raise RuntimeError_("她还在做上一件事：等她做完，或者先打断。")
+        if sid in self._operations:
+            raise RuntimeError_("这个会话正在合并、放弃分支或压缩，等它结束再说。")
         if not text.strip():
             raise RuntimeError_("要做什么？")
         if agent.session.branch_closed:
@@ -154,31 +210,40 @@ class Runtime:
 
     # ---------- 在新分支上做 ----------
 
+    @contextmanager
+    def _maintenance(self, sid: str) -> Iterator[None]:
+        """这些操作会在等待期间继续写日志，结束前不能删除会话或开始另一轮。"""
+        if self.running(sid) or sid in self._operations:
+            raise RuntimeError_("她还在做事，等她做完或先打断。")
+        self._operations.add(sid)
+        try:
+            yield
+        finally:
+            self._operations.discard(sid)
+
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         """跑测试、合并回你的代码。结果记进会话（工作窗口、终端都看得到）"""
         session = self.agent(sid).session
-        if self.running(sid):
-            raise RuntimeError_("她还在做事，做完再合并。")
-        info = session.branch
-        if info is None:
-            raise RuntimeError_("这个会话不在新分支上。")
-        report = await asyncio.to_thread(merge_branch, BranchInfo.of(info), run_tests)
-        event = session.append(report.as_event())
-        self._publish(sid, event)
-        return event
+        with self._maintenance(sid):
+            info = session.branch
+            if info is None:
+                raise RuntimeError_("这个会话不在新分支上。")
+            report = await asyncio.to_thread(merge_branch, BranchInfo.of(info), run_tests)
+            event = session.append(report.as_event())
+            self._publish(sid, event)
+            return event
 
     async def discard(self, sid: str) -> Event:
         """放弃分支：删掉分支和临时目录，你的代码保持原样。这个会话之后不再接任务"""
         session = self.agent(sid).session
-        if self.running(sid):
-            raise RuntimeError_("她还在做事，先打断再放弃。")
-        info = session.branch
-        if info is None:
-            raise RuntimeError_("这个会话不在新分支上。")
-        await asyncio.to_thread(discard_branch, BranchInfo.of(info))
-        event = session.append({"type": "branch_closed", "branch": info["branch"]})
-        self._publish(sid, event)
-        return event
+        with self._maintenance(sid):
+            info = session.branch
+            if info is None:
+                raise RuntimeError_("这个会话不在新分支上。")
+            await asyncio.to_thread(discard_branch, BranchInfo.of(info))
+            event = session.append({"type": "branch_closed", "branch": info["branch"]})
+            self._publish(sid, event)
+            return event
 
     def _begin(self, sid: str, agent: Agent, text: str) -> None:
         agent.model = self.model_factory()  # 设置里换了模型或密钥：从这一轮起用新的
@@ -208,10 +273,9 @@ class Runtime:
 
     async def compact(self, sid: str) -> None:
         agent = self.agent(sid)
-        if self.running(sid):
-            raise RuntimeError_("她还在做事，做完再压缩。")
-        async for event in agent.compact():
-            self._publish(sid, event)
+        with self._maintenance(sid):
+            async for event in agent.compact():
+                self._publish(sid, event)
 
     def context(self, sid: str) -> dict:
         """上下文账本：下一步发给模型的上下文由哪几块组成、各占多少（见 ledger.py）"""
@@ -278,7 +342,7 @@ class Runtime:
             for event in list(session.events[last + 1 :]):
                 yield event
         finally:
-            self._listeners[sid].discard(queue)
+            self._listeners.get(sid, set()).discard(queue)
 
     async def shutdown(self) -> None:
         for task in list(self._tasks.values()):

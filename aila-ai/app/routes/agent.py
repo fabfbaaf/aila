@@ -106,8 +106,8 @@ async def new_task(req: NewTask, rt: Runtime = Depends(get_runtime)) -> dict:
 
 
 @router.get("/sessions")
-async def list_sessions(rt: Runtime = Depends(get_runtime)) -> list[dict]:
-    return [{**s, "running": rt.running(s["id"])} for s in rt.store.list()]
+async def list_sessions(rt: Runtime = Depends(get_runtime), q: str | None = None, cwd: str | None = None) -> list[dict]:
+    return [{**s, "running": rt.running(s["id"])} for s in rt.store.list(query=q, cwd=cwd)]
 
 
 @router.get("/sessions/{sid}")
@@ -203,4 +203,31 @@ async def forget_rule(req: ForgetRule, rt: Runtime = Depends(get_runtime)) -> di
     if req.command not in rt.rules.commands(req.project):  # type: ignore[arg-type]
         raise HTTPException(404, "没有这条记住的命令，可能已经删掉了。")
     rt.rules.forget(req.project, req.command)  # type: ignore[arg-type]
+    return {"ok": True}
+
+
+class RenameSession(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+
+
+@router.patch("/sessions/{sid}")
+async def rename_session(sid: str, req: RenameSession, rt: Runtime = Depends(get_runtime)) -> dict:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    if not req.title.strip():
+        raise HTTPException(422, "标题要有 1–100 个字。")
+    try:
+        return {**rt.rename(sid, req.title).summary(), "running": rt.running(sid)}
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
+@router.delete("/sessions/{sid}")
+async def delete_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        await rt.delete(sid)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
     return {"ok": True}
