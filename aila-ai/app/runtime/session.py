@@ -16,12 +16,14 @@
   todo         待办清单的最新状态
   compaction   上下文压缩：summary 代替 upto 之前的事件
   mode         权限模式变了
+  title        用户改了会话标题（不进模型消息）
   turn_end     一轮结束（done / max_steps / interrupted / error）
   merge        在新分支上做时：跑测试、合并回你的代码的结果
   branch_closed  分支放弃了（这个会话之后不再接任务）
 """
 
 import json
+import posixpath
 import re
 import secrets
 import time
@@ -94,6 +96,9 @@ class Session:
 
     @property
     def title(self) -> str:
+        for e in reversed(self.events):
+            if e["type"] == "title":
+                return str(e["title"])
         first = next((e["text"] for e in self.events if e["type"] == "user"), "")
         line = first.strip().splitlines()[0] if first.strip() else "（还没开始）"
         return line[:60]
@@ -232,13 +237,35 @@ class SessionStore:
         self._open[sid] = session
         return session
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
-        if not self.root.exists():
+    def delete(self, sid: str) -> bool:
+        """运行时清理进程和分支后，移除日志及已加载的对象。"""
+        session = self.get(sid)
+        if session is None:
+            return False
+        session.path.unlink(missing_ok=True)
+        self._open.pop(sid, None)
+        return True
+
+    def list(self, limit: int = 50, query: str | None = None, cwd: str | None = None) -> list[dict[str, Any]]:
+        if not self.root.exists() or limit <= 0:
             return []
-        files = sorted(self.root.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
+        files = sorted(self.root.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        key = (query or "").strip().casefold()
         out = []
         for f in files:
             s = self.get(f.stem)
-            if s:
-                out.append(s.summary())
+            if s is None or (cwd is not None and not same_project(s.cwd, cwd)):
+                continue
+            if key and key not in s.title.casefold() and key not in str(s.cwd).casefold():
+                continue
+            out.append(s.summary())
+            if len(out) >= limit:
+                break
         return out
+
+
+def same_project(a: str | Path, b: str | Path) -> bool:
+    """项目目录按路径比较，忽略大小写、斜杠方向和末尾斜杠。"""
+    left = posixpath.normpath(str(a).replace("\\", "/")).casefold()
+    right = posixpath.normpath(str(b).replace("\\", "/")).casefold()
+    return left == right

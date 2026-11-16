@@ -546,6 +546,14 @@ function registerIpc(): void {
     fromAgent(e) && sidOk(sid) ? agentRelay.merge(sid, runTests !== false) : notAllowed
   )
   ipcMain.handle('agent:discard', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.discard(sid) : notAllowed))
+  ipcMain.handle('agent:rename', (e, sid: unknown, title: unknown) => {
+    if (!fromAgent(e) || !sidOk(sid)) return notAllowed
+    if (typeof title !== 'string' || !title.trim() || Array.from(title).length > 100) {
+      return { ok: false, error: '标题要有 1–100 个字。' }
+    }
+    return agentRelay.rename(sid, title)
+  })
+  ipcMain.handle('agent:delete', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.delete(sid) : notAllowed))
   ipcMain.on('agent:send', (e, sid: unknown, text: unknown) => {
     if (fromAgent(e) && sidOk(sid) && typeof text === 'string' && text.trim()) agentRelay.send(sid, text.slice(0, 20000))
   })

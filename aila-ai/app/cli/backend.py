@@ -24,6 +24,9 @@ class Backend(Protocol):
     async def merge(self, sid: str, run_tests: bool = True) -> Event: ...
     async def context(self, sid: str) -> dict[str, Any]: ...
     async def discard(self, sid: str) -> Event: ...
+    async def rename(self, sid: str, title: str) -> dict[str, Any]: ...
+    async def delete(self, sid: str) -> None: ...
+    async def search_sessions(self, query: str, cwd: str) -> list[dict[str, Any]]: ...
     async def sessions(self) -> list[dict[str, Any]]: ...
     async def session(self, sid: str) -> dict[str, Any]: ...
     def run(self, sid: str, text: str) -> AsyncIterator[Event]: ...
@@ -69,6 +72,21 @@ class EmbeddedBackend:
 
     async def sessions(self) -> list[dict[str, Any]]:
         return self.rt.store.list()
+
+    async def rename(self, sid: str, title: str) -> dict[str, Any]:
+        try:
+            return self.rt.rename(sid, title).summary()
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
+
+    async def search_sessions(self, query: str, cwd: str) -> list[dict[str, Any]]:
+        return self.rt.store.list(query=query, cwd=cwd)
+
+    async def delete(self, sid: str) -> None:
+        try:
+            await self.rt.delete(sid)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
 
     async def session(self, sid: str) -> dict[str, Any]:
         try:
@@ -140,6 +158,15 @@ class HttpBackend:
 
     async def sessions(self) -> list[dict[str, Any]]:
         return await self._call("GET", "/agent/sessions")
+
+    async def rename(self, sid: str, title: str) -> dict[str, Any]:
+        return await self._call("PATCH", f"/agent/sessions/{sid}", json={"title": title})
+
+    async def search_sessions(self, query: str, cwd: str) -> list[dict[str, Any]]:
+        return await self._call("GET", "/agent/sessions", params={"q": query, "cwd": cwd})
+
+    async def delete(self, sid: str) -> None:
+        await self._call("DELETE", f"/agent/sessions/{sid}", timeout=60)
 
     async def session(self, sid: str) -> dict[str, Any]:
         return await self._call("GET", f"/agent/sessions/{sid}")
