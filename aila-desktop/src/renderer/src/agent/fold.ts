@@ -89,9 +89,13 @@ export function actionOf(name: string, args: Record<string, unknown>): string {
     case 'write_file':
       return `写 ${s('path')}`
     case 'run_command':
-      return (s('description') || s('command')).slice(0, 80)
+      return (args.background ? '后台：' : '') + (s('description') || s('command')).slice(0, 80)
     case 'todo_write':
       return '更新待办清单'
+    case 'job_output':
+      return `看后台任务 ${s('id')} 的输出`
+    case 'job_stop':
+      return `停掉后台任务 ${s('id')}`
     default:
       return name
   }

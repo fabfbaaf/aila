@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .shell import DEFAULT_TIMEOUT, MAX_TIMEOUT, Shell, run
+from .shell import BackgroundJobs, DEFAULT_TIMEOUT, Job, JobLimitError, MAX_TIMEOUT, Shell, run
 from .workspace import Workspace, WorkspaceError, glob_match, read_text, write_text
 
 READ_LINES = 2000
@@ -69,6 +69,7 @@ class CodingTools:
     def __init__(self, workspace: Workspace, shell: Shell, extra: list[CodingTool] | None = None) -> None:
         self.ws = workspace
         self.shell = shell
+        self.jobs = BackgroundJobs()
         self.todos: list[dict[str, str]] = []
         # 基本工具在前、额外的（代码库）在后，顺序固定
         self.tools: dict[str, CodingTool] = {t.name: t for t in [*self._build(), *(extra or [])]}
@@ -121,11 +122,14 @@ class CodingTools:
             ),
             CodingTool(
                 "run_command",
-                "在项目根目录执行一条命令（构建、测试、git 等），返回退出码和输出。每次都是新的 shell。",
+                "在项目根目录执行一条命令（构建、测试、git 等）。每次都是新的 shell。"
+                "开发服务器、watch 等长时间命令用 background=true，返回任务号和启动输出。",
                 _obj({"command": _str("要执行的命令"), "description": _str("一句话说明这条命令做什么"),
-                      "timeout": _int(f"超时秒数，默认 {DEFAULT_TIMEOUT:.0f}，最多 {MAX_TIMEOUT:.0f}")}, ["command"]),
+                      "timeout": _int(f"前台命令的超时秒数，默认 {DEFAULT_TIMEOUT:.0f}，最多 {MAX_TIMEOUT:.0f}"),
+                      "background": {"type": "boolean", "description": "放到后台跑，默认 false；一个会话最多同时 3 个"}}, ["command"]),
                 self._command, lambda _: "command",
-                lambda a: str(a.get("description") or a.get("command", ""))[:60], self._command_preview,
+                lambda a: ("后台：" if a.get("background") is True else "")
+                + str(a.get("description") or a.get("command", ""))[:60], self._command_preview,
             ),
             CodingTool(
                 "todo_write",
@@ -134,6 +138,18 @@ class CodingTools:
                     {"content": _str("这一步做什么"), "status": {"type": "string", "enum": list(TODO_STATUS)}},
                     ["content", "status"])}}, ["items"]),
                 self._todo, lambda _: "meta", lambda _: "更新待办清单",
+            ),
+            CodingTool(
+                "job_output",
+                "看这个会话里后台任务的状态、退出码和上次看过之后的新输出（有上限）。",
+                _obj({"id": _str("后台任务号，比如 job-1"), "tail": _int("新输出的最后几行，默认 40，最多 1000")}, ["id"]),
+                self._job_output, lambda _: "read", lambda a: f"看后台任务 {a.get('id', '')} 的输出",
+            ),
+            CodingTool(
+                "job_stop",
+                "停掉这个会话的后台任务和它开的子进程，返回最后几行输出。用完开发服务器后记得停掉。",
+                _obj({"id": _str("后台任务号，比如 job-1")}, ["id"]),
+                self._job_stop, lambda _: "meta", lambda a: f"停掉后台任务 {a.get('id', '')}",
             ),
         ]
 
@@ -318,15 +334,48 @@ class CodingTools:
 
     def _command_preview(self, args: dict[str, Any]) -> str:
         desc = str(args.get("description") or "").strip()
-        return f"{args.get('command', '')}" + (f"\n（{desc}）" if desc else "") + f"\n在 {self.ws.root} 里执行"
+        return f"{args.get('command', '')}" + (f"\n（{desc}）" if desc else "") + f"\n在 {self.ws.root} 里执行" + (
+            "（后台）" if args.get("background") is True else ""
+        )
 
     async def _command(self, args: dict[str, Any]) -> Outcome:
         command = str(args.get("command", "")).strip()
         if not command:
             return Outcome("没给命令。", ok=False)
+        if not isinstance(args.get("background", False), bool):
+            return Outcome("background 要是 true 或 false。", ok=False)
+        if args.get("background"):
+            try:
+                job = await self.jobs.start(self.shell, command, self.ws.root)
+            except JobLimitError as err:
+                return Outcome(str(err), ok=False)
+            return self._job_result(job, job.read())
         timeout = float(args.get("timeout") or DEFAULT_TIMEOUT)
         result = await run(self.shell, command, self.ws.root, timeout)
         return Outcome(result.render(timeout), ok=result.exit_code == 0, extra={"exit_code": result.exit_code})
+
+    def _job_result(self, job: Job, content: str) -> Outcome:
+        return Outcome(content, extra={
+            "job_id": job.id, "exit_code": None if job.running else job.proc.returncode,
+            "total_bytes": job.buffer.total_bytes,
+        })
+
+    async def _job_output(self, args: dict[str, Any]) -> Outcome:
+        job = self.jobs.jobs.get(str(args.get("id", "")))
+        if job is None:
+            return Outcome(f"这个会话里没有后台任务 {args.get('id', '')}。先用 run_command 的 background=true 启动。", ok=False)
+        try:
+            tail = int(args.get("tail", 40))
+        except (TypeError, ValueError):
+            return Outcome("tail 要是行数，比如 40。", ok=False)
+        return self._job_result(job, job.read(tail))
+
+    async def _job_stop(self, args: dict[str, Any]) -> Outcome:
+        job = self.jobs.jobs.get(str(args.get("id", "")))
+        if job is None:
+            return Outcome(f"这个会话里没有后台任务 {args.get('id', '')}。", ok=False)
+        await job.stop()
+        return self._job_result(job, job.read(40, fresh=False))
 
     # ---------- 待办 ----------
 

@@ -25,6 +25,22 @@ function turn(): AgentEvent[] {
 }
 
 describe('工作窗口：事件折叠', () => {
+  it('重放后台命令和任务工具时显示对应的操作标题', () => {
+    const t = new Transcript()
+    t.apply(ev('assistant', { seq: 1, text: '', tool_calls: [
+      { id: 'a', name: 'run_command', arguments: '{"command":"npm test","background":false}' },
+      { id: 'b', name: 'run_command', arguments: '{"command":"npm run dev","description":"启动开发服务器","background":true}' },
+      { id: 'c', name: 'job_output', arguments: '{"id":"job-1"}' },
+      { id: 'd', name: 'job_stop', arguments: '{"id":"job-1"}' }
+    ] }))
+    for (const [id, name] of [['a', 'run_command'], ['b', 'run_command'], ['c', 'job_output'], ['d', 'job_stop']]) {
+      t.apply(ev('tool', { id, name, status: 'ok', content: 'job-1' }))
+    }
+    expect(t.items.filter((i) => i.kind === 'tool').map((i) => (i as ToolItem).action)).toEqual([
+      'npm test', '后台：启动开发服务器', '看后台任务 job-1 的输出', '停掉后台任务 job-1'
+    ])
+  })
+
   it('一轮：文字、带确认的工具卡片、统计', () => {
     const t = new Transcript()
     for (const e of turn()) t.apply(e)

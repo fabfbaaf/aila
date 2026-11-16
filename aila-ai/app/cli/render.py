@@ -285,6 +285,8 @@ def _action(name: str, args: dict[str, Any]) -> str:
         "search": f"搜「{str(args.get('pattern', ''))[:40]}」",
         "edit_file": f"改 {args.get('path', '')}",
         "write_file": f"写 {args.get('path', '')}",
-        "run_command": str(args.get("description") or args.get("command", ""))[:60],
+        "run_command": ("后台：" if args.get("background") else "") + str(args.get("description") or args.get("command", ""))[:60],
         "todo_write": "更新待办清单",
+        "job_output": f"看后台任务 {args.get('id', '')} 的输出",
+        "job_stop": f"停掉后台任务 {args.get('id', '')}",
     }.get(name, name)
