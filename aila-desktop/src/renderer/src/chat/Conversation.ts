@@ -1,3 +1,4 @@
+/** 对话全文用于记录，口播片段和标签走原有的语音、打字队列。 */
 import type { ChatErrorCode, ChatEvent, ChatMessage, ConfirmAsk, Emotion, Gesture } from '../../../shared/chat'
 import type { RemoteChanges, StoredMessage } from '../../../shared/cloud'
 import type { Mouth } from '../avatar/types'
@@ -8,7 +9,7 @@ import { confirmIntent } from './confirmIntent'
 import type { ChatStream, ChatTransport } from './transport'
 
 type Item =
-  | { kind: 'char'; ch: string }
+  | { kind: 'char'; ch: string; save: boolean }
   | { kind: 'emotion'; name: Emotion }
   | { kind: 'action'; name: Gesture }
   | { kind: 'status'; text: string }
@@ -77,12 +78,12 @@ export function trimHistory<T>(list: T[], max = MAX_HISTORY, chunk = HISTORY_CHU
  */
 export class Conversation {
   /** holdMs 为 null 表示一直显示（还在说），否则多少毫秒后收起气泡 */
-  onBubble: (text: string, holdMs: number | null) => void = () => {}
+  onBubble: (text: string, holdMs: number | null, fullText?: string) => void = () => {}
   /** 这次回复说完了（正常结束或出错，不包括被打断） */
   onReplyEnd: () => void = () => {}
   /** 开口了：第一句声音开始播放，或第一个字显示出来 */
   onFirstWords: () => void = () => {}
-  /** 一句话正式进入对话记录（用户说的，或她说出口的部分）：交给主进程保存和同步 */
+  /** 一句话正式进入对话记录：交给主进程保存和同步 */
   onCommit: (m: StoredMessage) => void = () => {}
   /** 开始 / 结束等用户确认（界面显示或收起「好 / 不要」） */
   onAsk: (ask: ConfirmAsk | null) => void = () => {}
@@ -92,14 +93,22 @@ export class Conversation {
   private stream: ChatStream | null = null
   private shown = ''
   /**
-   * 已经说出口的部分（带标签）。只把这部分存进历史：被打断时，没说出来的话用户并没有听到。
-   * 标签也留着，大模型看到自己之前用过标签，后面会继续用。
+   * 服务收完后存全文（保留表情和动作标签），收完前打断或出错只存已经说出口的部分。
+   * 气泡展开用不带标签的全文。
    */
-  private spoken = ''
+  private transcript = ''
+  private delivered = ''
+  private fullText = ''
+  private hasSummary = false
+  private hasDetails = false
+  private moreHint = false
+  private lastTextSpoken = true
+  private gestures: Extract<Item, { kind: 'emotion' | 'action' }>[] = []
   /** 正在搜索、阅读时显示在气泡最后一行；她开口说下一句时清掉。不算说出口的话，不进历史 */
   private status = ''
   private committed = false
   private receiving = false
+  private receivedDone = false
   private replying = false
   /** 不是大模型的回复（比如被唤醒时说的「我在」），不进历史 */
   private announcing = false
@@ -220,7 +229,7 @@ export class Conversation {
     this.onEvent({ type: 'done' })
   }
 
-  /** 打断当前回复：已经说出口的部分记进历史，免得上下文断掉 */
+  /** 打断当前回复：服务收完后保留全文，否则只记已经说出口的部分 */
   interrupt(): void {
     if (!this.replying) return
     this.stream?.cancel()
@@ -267,7 +276,7 @@ export class Conversation {
       changed = this.consume(item) || changed
       this.queue.shift()
     }
-    if (changed) this.onBubble(this.bubbleText(), null)
+    if (changed) this.showReply()
     this.behavior.setTalking(this.pause <= 0 && this.queue.length > 0)
   }
 
@@ -285,7 +294,7 @@ export class Conversation {
       if (item.kind === 'char') c.revealed++
       changed = this.consume(item) || changed
     }
-    if (changed) this.onBubble(this.bubbleText(), null)
+    if (changed) this.showReply()
 
     if (c.voiced) this.behavior.setMouth(this.voice!.mouth())
     else this.behavior.setTalking(c.items.length > 0)
@@ -337,11 +346,11 @@ export class Conversation {
   }
 
   /** 收到一个字：攒成句子，句子完整了就去合成 */
-  private pushChar(ch: string): void {
-    const cut = sentenceCut(this.buildingText, ch, this.sentenceCount === 0)
+  private pushChar(item: Extract<Item, { kind: 'char' }>): void {
+    const cut = sentenceCut(this.buildingText, item.ch, this.sentenceCount === 0)
     if (cut === 'before') this.closeSentence()
-    this.building.push({ kind: 'char', ch })
-    this.buildingText += ch
+    this.building.push(item)
+    this.buildingText += item.ch
     if (cut === 'after') this.closeSentence()
   }
 
@@ -382,9 +391,16 @@ export class Conversation {
     this.interrupt()
     this.stopAll()
     this.shown = ''
-    this.spoken = ''
+    this.transcript = ''
+    this.delivered = ''
+    this.fullText = ''
+    this.hasSummary = false
+    this.hasDetails = false
+    this.moreHint = false
+    this.lastTextSpoken = true
     this.status = ''
     this.committed = false
+    this.receivedDone = false
     this.announcing = announcing
     this.pause = 0
     this.budget = 0
@@ -406,11 +422,11 @@ export class Conversation {
     switch (item.kind) {
       case 'emotion':
         this.behavior.emote(item.name)
-        this.spoken += `[${item.name}]`
+        this.delivered += `[${item.name}]`
         return false
       case 'action':
         this.behavior.gesture(item.name)
-        this.spoken += `[${item.name}]`
+        this.delivered += `[${item.name}]`
         return false
       case 'status':
         // 说完「我查一下」才显示进度，然后摆出思考的样子等结果
@@ -421,7 +437,7 @@ export class Conversation {
       case 'char':
         this.status = ''
         this.shown += item.ch
-        this.spoken += item.ch
+        if (item.save) this.delivered += item.ch
         if (!this.voiced) this.firstWords()
         return true
       case 'ask':
@@ -446,39 +462,71 @@ export class Conversation {
     return `${this.shown}${this.shown ? '\n' : ''}（${s}……）`
   }
 
+  private showReply(holdMs: number | null = null): void {
+    const summary = this.bubbleText() || (this.hasDetails ? '……' : '')
+    this.onBubble(summary, holdMs, this.hasDetails ? this.fullText : undefined)
+  }
+
+  private queueText(text: string, save: boolean): void {
+    for (const ch of text) {
+      const item = { kind: 'char' as const, ch, save }
+      if (this.voiced) this.pushChar(item)
+      else this.queue.push(item)
+    }
+  }
+
+  private queueGestures(spoken: boolean): void {
+    if (spoken) {
+      if (this.voiced) this.building.push(...this.gestures)
+      else this.queue.push(...this.gestures)
+    }
+    this.gestures = []
+  }
+
   private onEvent(ev: ChatEvent): void {
     if (!this.receiving) return
-    const item: Item | null =
-      ev.type === 'emotion'
-        ? { kind: 'emotion', name: ev.name }
-        : ev.type === 'action'
-          ? { kind: 'action', name: ev.name }
-          : ev.type === 'status'
-            ? { kind: 'status', text: ev.text }
-            : null
-
     switch (ev.type) {
       case 'text':
-        for (const ch of ev.text) {
-          if (this.voiced) this.pushChar(ch)
-          else this.queue.push({ kind: 'char', ch })
+        if (ev.text) {
+          this.transcript += ev.text
+          this.fullText += ev.text
+          this.lastTextSpoken = ev.spoken !== false
+          if (!this.lastTextSpoken || ev.text.trim()) this.queueGestures(this.lastTextSpoken)
+          if (this.lastTextSpoken) {
+            this.hasSummary ||= Boolean(ev.text.trim())
+            this.queueText(ev.text, true)
+          } else if (this.hasDetails || ev.text.trim()) {
+            this.hasDetails = true
+            this.showReply()
+          }
+        }
+        if (ev.hint === 'more' && !this.moreHint) {
+          this.moreHint = true
+          this.queueGestures(false)
+          // 单独念固定提示，也让它在气泡里有自己的一行；不记进对话。
+          if (this.hasSummary) this.queueText('\n', false)
+          this.queueText(lines.chatMore, false)
         }
         break
       case 'emotion':
       case 'action':
-        if (this.voiced) this.building.push(item!)
-        else this.queue.push(item!)
+        this.transcript += `[${ev.name}]`
+        this.gestures.push(ev.type === 'emotion' ? { kind: 'emotion', name: ev.name } : { kind: 'action', name: ev.name })
         break
-      case 'status':
+      case 'status': {
+        const item: Item = { kind: 'status', text: ev.text }
+        this.queueGestures(this.lastTextSpoken)
         if (this.voiced) {
           this.closeSentence(true)
-          this.sentences.push({ items: [item!], text: '', audio: null, requested: true })
+          this.sentences.push({ items: [item], text: '', audio: null, requested: true })
         } else {
-          this.queue.push(item!)
+          this.queue.push(item)
         }
         break
+      }
       case 'confirm': {
         // 先问一句（和平常说话一样打字或出声），问完再显示按钮；具体内容只显示，不念
+        this.queueGestures(this.lastTextSpoken)
         this.onEvent({ type: 'action', name: 'tilt' })
         this.onEvent({ type: 'text', text: lines.confirmAsk(ev.action) })
         const ask: Item = { kind: 'ask', ask: { id: ev.id, skill: ev.skill, action: ev.action, detail: ev.detail } }
@@ -498,7 +546,9 @@ export class Conversation {
       case 'done':
         // 收完了，但可能还没说完：等 tick 把剩下的说完再结束
         this.receiving = false
+        this.receivedDone = true
         this.stream = null
+        this.queueGestures(this.lastTextSpoken)
         if (this.voiced) this.closeSentence(true)
         break
       case 'error':
@@ -517,6 +567,7 @@ export class Conversation {
     this.buildingText = ''
     this.sentenceCount = 0
     this.current = null
+    this.gestures = []
     this.recent = []
     this.setAsk(null) // 回复被打断：AI 服务那边的确认随着流关闭作废，操作不会执行
     this.behavior.setThinking(false)
@@ -524,10 +575,11 @@ export class Conversation {
     this.behavior.setMouth(null)
   }
 
-  private commit(): void {
-    if (this.committed || !this.spoken || this.announcing) return
+  private commit(full = false): void {
+    const content = full || this.receivedDone ? this.transcript : this.delivered
+    if (this.committed || !content || this.announcing) return
     this.committed = true
-    this.record('assistant', this.spoken)
+    this.record('assistant', content)
   }
 
   private record(role: StoredMessage['role'], content: string): void {
@@ -538,7 +590,7 @@ export class Conversation {
   }
 
   private finish(): void {
-    this.commit()
+    this.commit(true)
     this.setAsk(null)
     this.replying = false
     this.behavior.setTalking(false)
@@ -546,7 +598,7 @@ export class Conversation {
     this.behavior.endReply()
     this.status = ''
     // 什么都没说（比如只调了工具就结束）时收起气泡，不让「……」一直挂着
-    if (this.shown) this.onBubble(this.shown, Math.min(10000, 2500 + this.shown.length * 80))
+    if (this.shown || this.hasDetails) this.showReply(Math.min(10000, 2500 + this.shown.length * 80))
     else this.onBubble('', 0)
     this.onReplyEnd()
   }

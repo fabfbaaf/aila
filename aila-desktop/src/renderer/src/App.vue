@@ -32,6 +32,8 @@ const fileInput = ref<HTMLInputElement>()
 const chatInput = ref<InstanceType<typeof ChatInput>>()
 const bubbleText = ref('')
 const bubbleVisible = ref(false)
+const bubbleFullText = ref('')
+const bubbleExpanded = ref(false)
 const overAvatar = ref(false)
 const chatOpen = ref(false)
 /** 她在等用户确认的操作（气泡里显示「好 / 不要」） */
@@ -147,11 +149,20 @@ let bubbleTimer = 0
 const lookTarget = new Vector3()
 
 /** holdMs 为 null 时一直显示，直到下一次更新；在问用户报错的事时也一直显示，等回答 */
-function showBubble(text: string, holdMs: number | null): void {
+function showBubble(text: string, holdMs: number | null, fullText = ''): void {
   bubbleText.value = text
+  bubbleFullText.value = fullText
+  if (!fullText) bubbleExpanded.value = false
   bubbleVisible.value = true
   clearTimeout(bubbleTimer)
-  if (holdMs !== null && !screenAsk.value && !reminderAsk.value && !briefingAsk.value && !dropAsk.value) bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
+  if (holdMs !== null && !bubbleExpanded.value && !screenAsk.value && !reminderAsk.value && !briefingAsk.value && !dropAsk.value) {
+    bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
+  }
+}
+
+function toggleBubbleFullText(): void {
+  bubbleExpanded.value = !bubbleExpanded.value
+  showBubble(bubbleText.value, conversation.busy ? null : 10_000, bubbleFullText.value)
 }
 
 behavior.onSay = showBubble
@@ -794,6 +805,7 @@ onBeforeUnmount(() => {
   for (const off of subscriptions.splice(0)) if (typeof off === 'function') off()
   clearTimeout(reminderTimer)
   clearTimeout(briefingTimer)
+  clearTimeout(bubbleTimer)
   conversation.interrupt()
   voiceControl.dispose()
   screenWatch.dispose()
@@ -810,7 +822,15 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
     ></div>
-    <SpeechBubble :text="bubbleText" :visible="bubbleVisible" :ask="bubbleAsk" @answer="onAnswer" />
+    <SpeechBubble
+      :text="bubbleText"
+      :visible="bubbleVisible"
+      :ask="bubbleAsk"
+      :full-text="bubbleFullText"
+      :expanded="bubbleExpanded"
+      @answer="onAnswer"
+      @toggle-full-text="toggleBubbleFullText"
+    />
     <!-- 开着「留意屏幕上的报错」时一直显示：她在看 -->
     <div v-if="watching" class="watching" title="正在留意屏幕上的报错（只看写代码的窗口）">● 正在看屏幕</div>
     <ChatInput v-if="chatOpen" ref="chatInput" @send="onSend" @close="closeChat" />

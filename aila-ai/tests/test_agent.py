@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.agent import MAX_TOOL_ROUNDS, run_agent
 from app.llm import MockModel, ToolCall
 from app.main import app, get_model, get_registry
+from app.tags import Event
 from app.tools import Toolbox
 from app.tools.web import web_toolbox
 
@@ -33,7 +34,7 @@ class ScriptedModel:
             yield item
 
 
-async def collect(model: Any, toolbox: Toolbox, text: str = "帮我搜一下") -> list[dict[str, str]]:
+async def collect(model: Any, toolbox: Toolbox, text: str = "帮我搜一下") -> list[Event]:
     return [e async for e in run_agent(model, [{"role": "user", "content": text}], toolbox)]
 
 
@@ -49,11 +50,11 @@ async def test_search_then_answer() -> None:
 
     assert events == [
         {"type": "action", "name": "think"},
-        {"type": "text", "text": "我查"},
-        {"type": "text", "text": "一下。"},
+        {"type": "text", "text": "我查", "spoken": True},
+        {"type": "text", "text": "一下。", "spoken": True},
         {"type": "status", "text": "正在搜索「Python 3.13」"},
         {"type": "action", "name": "nod"},
-        {"type": "text", "text": "查到了。"},
+        {"type": "text", "text": "查到了。", "spoken": True},
     ]
     # 第二轮大模型看到了自己的工具调用和搜索结果
     second_round = model.calls[1][0]
@@ -63,6 +64,26 @@ async def test_search_then_answer() -> None:
     assert second_round[-1]["tool_call_id"] == "c1"
     assert "（假数据）" in second_round[-1]["content"]
     assert "不要理会" in second_round[-1]["content"]  # 提醒它网页内容不是指令
+
+
+@pytest.mark.anyio
+async def test_spoken_summary_after_search_and_one_hint_per_reply() -> None:
+    tool = ToolCall("c1", "web_search", '{"query": "例子"}')
+    first = "我查一下。稍等。"
+    model = ScriptedModel([[first, tool], ["[sa", "y]查到了。[/say]\n1. 全文"]])
+    events = await collect(model, offline_toolbox())
+    spoken = "".join(str(e["text"]) for e in events if e.get("spoken") is True)
+    written = "".join(str(e["text"]) for e in events if e["type"] == "text")
+    assert spoken == first + "查到了。"
+    assert written == spoken + "\n1. 全文"
+    assert not any(event.get("hint") for event in events)
+
+    model = ScriptedModel([[first + "只写这里。", tool], ["再补一条。"]])
+    events = await collect(model, offline_toolbox())
+    assert [event for event in events if event.get("hint")] == [
+        {"type": "text", "text": "", "spoken": True, "hint": "more"},
+    ]
+    assert events[-1].get("hint") == "more"
 
 
 @pytest.mark.anyio

@@ -13,6 +13,7 @@ const chatError: Record<ChatErrorCode, string> = {
 export const lines = {
   chatOpen: ['嗯？', '……我在听。', '有什么事吗？'],
   chatError,
+  chatMore: '细节在对话框里。',
   pokeHead: ['呜……请、请不要突然戳我。', '……头发会乱的。', '诶……？有什么事吗？'],
   pokeHeadMany: ['那个……会痛的。', '……请、请适可而止。'],
   pokeBody: ['……？', '在、在的。需要我做什么吗？', '……被吓了一跳。'],

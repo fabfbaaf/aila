@@ -69,9 +69,9 @@ def test_stream_emits_text_emotion_action_and_done(client: TestClient) -> None:
     assert res.headers["content-type"].startswith("text/event-stream")
     assert parse_sse(res.text) == [
         {"type": "emotion", "name": "happy"},
-        {"type": "text", "text": "你好。"},
+        {"type": "text", "text": "你好。", "spoken": True},
         {"type": "action", "name": "nod"},
-        {"type": "text", "text": "很高兴见到你。"},
+        {"type": "text", "text": "很高兴见到你。", "spoken": True},
         {"type": "done"},
     ]
 
@@ -92,7 +92,7 @@ def test_model_failure_becomes_error_event(client: TestClient) -> None:
     use_model(FakeModel(["说到一半"], fail=RuntimeError("boom")))
     events = parse_sse(client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]}).text)
 
-    assert events[0] == {"type": "text", "text": "说到一半"}
+    assert events[0] == {"type": "text", "text": "说到一半", "spoken": True}
     assert events[-1]["type"] == "error"
     assert events[-1]["code"] == "unknown"
 
