@@ -23,6 +23,7 @@ from .codetools import CodeAccess
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, remember_tool
+from .planning import MAX_CONTINUES, PLAN_PROMPT, plan_state, plan_title, plan_tools, stage_message
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
 from .pricing import validate_budget
@@ -135,8 +136,8 @@ class Runtime:
             session,
             self.model_factory(),
             # 记忆按你原来的项目记（在新分支上做时也是）
-            CodingTools(workspace, self.shell, [*extra, explorer.tool(), remember_tool(self.memory, session.cwd, session.id),
-                                                *bridge_tools(self.mcp)],
+            CodingTools(workspace, self.shell, [*extra, explorer.tool(), *plan_tools(session.events),
+                                                remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp)],
                         snapshots=Snapshots(session.path.with_suffix(".snap"))),
             Policy(session.cwd, self.rules, mode, self.mcp),  # type: ignore[arg-type]
             self.confirms,
@@ -229,12 +230,13 @@ class Runtime:
 
     # ---------- 跑一轮 ----------
 
-    def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]:
+    def run(self, sid: str, text: str, review: bool = False, plan: bool = False) -> AsyncIterator[Event]:
         """开始一轮，返回这一轮的事件流（先订阅再开始，一个字都不会漏）。
 
         review=True：/review，只读地审一遍没提交的改动；text 是可选的「特别注意什么」。
+        plan=True：先出方案，这一轮只读，text 是目标；她用 propose_plan 交计划，等你批准（decide_plan）。
         """
-        agent, request, extra = self._ready(sid, text, review)
+        agent, request, extra = self._ready(sid, text, review, plan)
         stream = self.subscribe(sid, len(agent.session.events) - 1)
         self._begin(sid, agent, request, extra)
         return stream
@@ -244,7 +246,7 @@ class Runtime:
         agent, request, extra = self._ready(sid, text)
         self._begin(sid, agent, request, extra)
 
-    def _ready(self, sid: str, text: str, review: bool = False) -> tuple[Agent, str, dict]:
+    def _ready(self, sid: str, text: str, review: bool = False, plan: bool = False) -> tuple[Agent, str, dict]:
         agent = self.agent(sid)
         if self.running(sid):
             raise RuntimeError_("她还在做上一件事：等她做完，或者先打断。")
@@ -254,6 +256,8 @@ class Runtime:
             raise RuntimeError_("要做什么？")
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
+        if plan:
+            return agent, PLAN_PROMPT.format(goal=text.strip()), {"plan_request": True, "title": plan_title(text)}
         if not review:
             return agent, text, {}
         # 在新分支上做时审的是分支临时目录里的改动
@@ -347,10 +351,83 @@ class Runtime:
     def _begin(self, sid: str, agent: Agent, text: str, extra: dict | None = None) -> None:
         agent.model = self.model_factory()  # 设置里换了模型或密钥：从这一轮起用新的
         events = agent.turn(text.strip(), extra)
-        if extra and extra.get("review"):
+        if extra and (extra.get("review") or extra.get("plan_request")):
             events = self._read_only(sid, agent, events)
         events = self._with_mcp(agent, events)
         self._tasks[sid] = asyncio.create_task(self._drive(sid, events))
+
+    # ---------- 长任务：按计划一阶段一阶段做 ----------
+
+    def decide_plan(self, sid: str, approved: bool, pause_each: bool = False) -> Event:
+        """你对最新那份计划的决定。批准以后用 drive_plan 开始做"""
+        agent = self.agent(sid)
+        if self.running(sid):
+            raise RuntimeError_("她还在做事：等她做完再决定。")
+        state = plan_state(agent.session.events)
+        if state is None or state.decision != "proposed":
+            raise RuntimeError_("现在没有等你决定的计划。")
+        event = agent.session.append({"type": "plan_decision", "approved": bool(approved), "pause_each": bool(pause_each)})
+        self._publish(sid, event)
+        return event
+
+    def drive_plan(self, sid: str, after: int | None = None) -> AsyncIterator[Event]:
+        """按批准过的计划往下做（批准以后、停下以后接着做都用它）；返回一直到停下的事件流。
+        after：从日志第几条之后开始推（批准时从批准那条开始，订阅的人也能看到这个决定）"""
+        agent = self.agent(sid)
+        if self.running(sid):
+            raise RuntimeError_("她还在做事：等她做完，或者先打断。")
+        if sid in self._operations:
+            raise RuntimeError_("这个会话正在合并、放弃分支或压缩，等它结束再说。")
+        if agent.session.branch_closed:
+            raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
+        state = plan_state(agent.session.events)
+        if state is None or state.decision != "approved":
+            raise RuntimeError_("没有批准过的计划。")
+        if state.finished:
+            raise RuntimeError_("计划已经全部做完了。")
+        stream = self.subscribe(sid, len(agent.session.events) - 1 if after is None else after)
+        self._tasks[sid] = asyncio.create_task(self._plan_loop(sid, agent))
+        return stream
+
+    async def _plan_loop(self, sid: str, agent: Agent) -> None:
+        """一阶段一阶段地开新的一轮，直到做完或者该停下；停下的原因记成 plan_pause / plan_end 事件"""
+        session = agent.session
+        first = True
+        try:
+            while True:
+                state = plan_state(session.events)
+                if state is None or state.decision != "approved" or state.current is None:
+                    if state is not None and state.finished:
+                        self._publish(sid, session.append({"type": "plan_end"}))
+                    return
+                n = state.current
+                stage = state.stages[n]
+                last = _last_reason(session)
+                if not first:
+                    pause = None
+                    if last not in ("done", "max_steps"):
+                        pause = ("stopped", _STOP_WHY.get(last or "", "这一轮停下了"))
+                    elif stage.status == "blocked":
+                        pause = ("blocked", stage.summary or "她说这个阶段卡住了")
+                    elif stage.status == "running" and state.continues >= MAX_CONTINUES:
+                        pause = ("limit", f"第 {n + 1} 阶段接着做了 {MAX_CONTINUES} 次还没做完")
+                    elif stage.status == "pending" and state.pause_each:
+                        pause = ("pause_each", f"第 {n} 阶段做完了，等你看一眼再接着做")
+                    if pause:
+                        self._publish(sid, session.append({"type": "plan_pause", "reason": pause[0], "text": pause[1], "stage": n}))
+                        return
+                if stage.status == "running":
+                    why = ("上一轮走到步数上限停了" if last == "max_steps"
+                           else "上一轮结束时还没调用 stage_done" if last == "done" else "上次停下了")
+                    text, extra = stage_message(state, n, continuing=why)
+                else:
+                    text, extra = stage_message(state, n)
+                first = False
+                agent.model = self.model_factory()
+                await self._drive(sid, self._with_mcp(agent, agent.turn(text, extra)), close=False)
+        finally:
+            for q in self._listeners.get(sid, set()):
+                q.put_nowait(None)  # 这次推进结束了
 
     async def _with_mcp(self, agent: Agent, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
         """一轮开始前对齐 MCP 工具：等还在启动的服务一会儿，工具变了才换（一轮里不变，前缀缓存稳定）"""
@@ -409,7 +486,8 @@ class Runtime:
         task.cancel()
         return True
 
-    async def _drive(self, sid: str, events: AsyncIterator[Event]) -> None:
+    async def _drive(self, sid: str, events: AsyncIterator[Event], close: bool = True) -> None:
+        """跑完一轮，把事件推给订阅的人。close=False：按计划连着做，订阅留着给下一轮"""
         session = self.agent(sid).session
         published = len(session.events) - 1
         try:
@@ -424,8 +502,9 @@ class Runtime:
         finally:
             for event in session.events[published + 1 :]:
                 self._publish(sid, event)  # 打断时补上的事件
-            for q in self._listeners.get(sid, set()):
-                q.put_nowait(None)  # 这一轮结束了
+            if close:
+                for q in self._listeners.get(sid, set()):
+                    q.put_nowait(None)  # 这一轮结束了
 
     def _publish(self, sid: str, event: Event) -> None:
         for q in self._listeners.get(sid, set()):
@@ -475,6 +554,20 @@ class Runtime:
                 pass
         await asyncio.gather(*(agent.tools.jobs.shutdown() for agent in self._agents.values()))
         await self.mcp.stop_all()
+
+
+_STOP_WHY = {
+    "interrupted": "你打断了",
+    "budget": "花到上限了",
+    "error": "出错了",
+    "rejected": "你没同意她要做的操作",
+    "timeout": "等你确认等超时了",
+}
+
+
+def _last_reason(session: Session) -> str | None:
+    """最近一轮怎么结束的（turn_end 的 reason）"""
+    return next((e.get("reason") for e in reversed(session.events) if e["type"] == "turn_end"), None)
 
 
 def _unfinished(session: Session) -> bool:

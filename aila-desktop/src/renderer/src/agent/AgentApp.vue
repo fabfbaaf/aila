@@ -4,6 +4,8 @@
  * 左边是会话（终端里用 aila 开的也在这里；能搜、改名、删除），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
  * 输入框下面的「审查改动」（或者输入 /review）让她只读地审一遍没提交的改动。
  * 右边的「项目记忆」是她在这个项目里记下的约定（你也能加、删），下次在这个项目开任务时放进开头。
+ * 长任务：「出方案」（或者输入 /plan 目标）让她先只读地交一份分阶段的计划，你批准后一阶段一阶段做下去；
+ * 计划和进度从日志推出来（plan.ts），右边有计划进度和「接着做」。
  */
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
@@ -19,6 +21,8 @@ import BudgetControls from './BudgetControls.vue'
 import { parseBudget, validBudget } from '../../../shared/budget'
 import Icon from '../theme/Icon.vue'
 import { deleteNotice, groupSessions } from './sessions'
+import { canContinue, planState } from './plan'
+import PlanCard from './PlanCard.vue'
 
 const source = createAgentSource()
 const sessions = ref<AgentSessionSummary[]>([])
@@ -32,6 +36,8 @@ const newMode = ref<AgentMode>('ask')
 /** 新任务在新分支上做（git worktree，测试通过才合并回来） */
 const newIsolate = ref(false)
 const newBudget = ref('')
+/** 新任务：先出方案再动手 */
+const newPlan = ref(false)
 const newBudgetError = ref('')
 const merging = ref('')
 const models = ref<{ coder: string; chat: string; keySet: boolean } | null>(null)
@@ -62,6 +68,20 @@ const notes = ref<AgentMemoryNote[]>([])
 const noteText = ref('')
 const noteBusy = ref(false)
 let notesFor = ''
+
+// 长任务的计划
+const plan = computed(() => planState(t.value.events))
+/** 最新一张「交计划」卡片：只有它显示成计划卡片，之前交的照普通工具卡片显示 */
+const latestPlanKey = computed(() => {
+  for (let i = t.value.items.length - 1; i >= 0; i--) {
+    const item = t.value.items[i]
+    if (item.kind === 'tool' && item.name === 'propose_plan' && item.status === 'ok') return item.key
+  }
+  return ''
+})
+const planBusy = ref(false)
+/** 新任务里勾了「先出方案」：下一句话当作目标，让她先出计划 */
+const planNext = ref(false)
 
 const running = computed(() => t.value.running)
 const pending = computed(() => t.value.pending)
@@ -183,6 +203,7 @@ async function startNew(path: string): Promise<void> {
     const s = await source.create(path, newMode.value, newIsolate.value, budget)
     await refreshList()
     await open(s.id)
+    planNext.value = newPlan.value
   } catch (err) {
     error.value = (err as Error).message
   }
@@ -342,11 +363,49 @@ function send(): void {
   // 「/review 重点」= 点「审查改动」
   const command = /^\/review(?:\s+([\s\S]*))?$/.exec(msg)
   if (command) return review(command[1] ?? '')
+  const planCommand = /^\/plan(?:\s+([\s\S]*))?$/.exec(msg)
+  if (planCommand) return proposePlan(planCommand[1] ?? '')
+  if (planNext.value) return proposePlan(msg)
   if (!canStart() || !current.value) return
   error.value = ''
   text.value = ''
   streaming.add(current.value.id)
   source.send(current.value.id, msg)
+  void nextTick(scrollToBottom)
+}
+
+/** 出方案：这一轮只读，goal 是目标；她交计划以后等你批准 */
+function proposePlan(goal: string): void {
+  if (!goal.trim()) {
+    error.value = '先在输入框里写下要做的大目标，再点「出方案」。'
+    return
+  }
+  if (!canStart() || !current.value) return
+  error.value = ''
+  text.value = ''
+  planNext.value = false
+  streaming.add(current.value.id)
+  source.send(current.value.id, goal.trim(), false, true)
+  void nextTick(scrollToBottom)
+}
+
+/** 批准计划并开始做 / 停下以后接着做 / 不要这份计划 */
+async function planAction(action: 'approve' | 'continue' | 'reject', pauseEach = false): Promise<void> {
+  const sid = current.value?.id
+  if (!sid || planBusy.value) return
+  if (action !== 'reject' && !canStart()) return
+  planBusy.value = true
+  error.value = ''
+  try {
+    if (action !== 'reject') streaming.add(sid)
+    await source.plan(sid, action, pauseEach)
+    void refreshList()
+  } catch (err) {
+    streaming.delete(sid)
+    error.value = (err as Error).message
+  } finally {
+    planBusy.value = false
+  }
   void nextTick(scrollToBottom)
 }
 
@@ -661,9 +720,18 @@ onBeforeUnmount(() => {
           </div>
           <template v-for="item in t.items" :key="item.key">
             <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>只读</span></div>
+            <div v-else-if="item.kind === 'user' && item.tag === 'plan'" class="user review"><Icon name="plan" :size="16" />{{ item.text }}<span>只读</span></div>
+            <div v-else-if="item.kind === 'user' && item.tag === 'stage'" class="stage-line"><Icon name="play" :size="12" :stroke="2" />{{ item.text }}</div>
             <div v-else-if="item.kind === 'user'" class="user">{{ item.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
             <div v-else-if="item.kind === 'text'" class="md" :class="{ live: item.live }" v-html="renderMarkdown(item.text)"></div>
+            <PlanCard
+              v-else-if="item.kind === 'tool' && item.key === latestPlanKey && plan"
+              :plan="plan"
+              :busy="planBusy || running"
+              @approve="(pause: boolean) => planAction('approve', pause)"
+              @reject="planAction('reject')"
+            />
             <ToolCard v-else-if="item.kind === 'tool'" :item="item" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
             <div v-else-if="item.kind === 'merge'" class="merge" :class="{ ok: item.merged }">
               <div class="merge-head">{{ item.merged ? '✓ 合并了' : '■ 没有合并' }}</div>
@@ -712,11 +780,22 @@ onBeforeUnmount(() => {
                 ? '这个会话的分支已经放弃了，点左上角「新任务」开一个新的'
                 : running
                   ? '她在做事……想好的下一句可以先写着'
-                  : '要她做什么？'
+                  : planNext
+                    ? '说一下大目标：她先出一份分阶段的计划给你看'
+                    : '要她做什么？'
             "
             @keydown="onComposerKey"
           ></textarea>
           <div class="bar">
+            <button
+              class="chip"
+              :class="{ on: planNext }"
+              :disabled="running || undoBusy || opening || t.closed"
+              title="大活先出方案：她只读地看一遍代码，交一份分阶段的计划给你批准，再一阶段一阶段做。也可以输入「/plan 目标」"
+              @click="proposePlan(text)"
+            >
+              <Icon name="plan" :size="15" />出方案
+            </button>
             <button
               class="chip"
               :disabled="running || undoBusy || opening || t.closed"
@@ -734,6 +813,26 @@ onBeforeUnmount(() => {
     </main>
 
     <aside v-if="current" class="info">
+      <section v-if="plan && plan.decision !== 'rejected'" class="plan-side">
+        <h3>计划</h3>
+        <p class="plan-side-goal">{{ plan.goal }}</p>
+        <ol class="plan-steps">
+          <li v-for="(s, i) in plan.stages" :key="i" :class="s.status" :title="s.summary || s.goal">
+            <i aria-hidden="true"></i>{{ s.title }}
+          </li>
+        </ol>
+        <p v-if="plan.decision === 'proposed'" class="dim">等你在左边的计划卡片上决定</p>
+        <p v-else-if="plan.finished" class="plan-ok">全部做完了</p>
+        <p v-else-if="plan.paused" class="plan-paused">停下了：{{ plan.paused.text }}</p>
+        <button
+          v-if="canContinue(plan, running)"
+          class="ghost plan-continue"
+          :disabled="planBusy || undoBusy || opening"
+          @click="planAction('continue')"
+        >
+          <Icon name="play" :size="12" :stroke="2" />接着做第 {{ (plan.current ?? 0) + 1 }} 阶段
+        </button>
+      </section>
       <section v-if="t.branch">
         <h3>分支</h3>
         <p class="dim">她在 <code>{{ t.branch }}</code> 上改，你的代码一个字都没动。觉得可以了就合并：先跑项目的测试，全过、而且你这期间没改过同样的文件，才写回你的代码（不替你提交）。</p>
@@ -846,6 +945,13 @@ onBeforeUnmount(() => {
             <b>{{ label }}</b><span>{{ MODE_HINTS[m] }}</span>
           </label>
         </div>
+        <label class="isolate" :class="{ on: newPlan }">
+          <input v-model="newPlan" type="checkbox" />
+          <span>
+            <b>先出方案再动手</b>
+            大活用这个：她先只读地看一遍代码，交一份分阶段的计划给你批准，再一阶段一阶段做下去，不受一轮步数的限制
+          </span>
+        </label>
         <div class="new-budget">
           <label for="new-task-budget">花费上限（元，可以不填）</label>
           <input
@@ -1393,6 +1499,96 @@ code {
   gap: 8px;
   border-color: var(--ui-cyan-line);
   background: var(--ui-cyan-soft);
+}
+
+.stage-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 0 8px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--accent-line);
+  color: var(--ui-accent-hi);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chip.on {
+  border-color: var(--accent-line);
+  background: var(--accent-bg);
+  color: var(--ui-accent-hi);
+}
+
+.plan-side-goal {
+  margin: 0 0 8px !important;
+  color: var(--text-2);
+}
+
+.plan-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.info .plan-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  white-space: normal;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.plan-steps i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+.plan-steps .running {
+  color: var(--ui-accent-hi);
+}
+
+.plan-steps .running i {
+  border-color: var(--accent);
+  background: var(--accent);
+  animation: pulse 1.2s infinite;
+}
+
+.plan-steps .done {
+  color: var(--dim);
+}
+
+.plan-steps .done i {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.plan-steps .blocked {
+  color: var(--warn);
+}
+
+.plan-steps .blocked i {
+  border-color: var(--warn);
+}
+
+.plan-ok {
+  margin-top: 8px !important;
+  color: var(--ok);
+}
+
+.plan-paused {
+  margin-top: 8px !important;
+  color: var(--warn);
+}
+
+.plan-continue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .user.review span {

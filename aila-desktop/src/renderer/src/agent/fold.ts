@@ -78,8 +78,8 @@ export interface MergeItem {
 }
 
 export type Item =
-  /** review：/review 那一轮，text 是一句话的标题（完整的请求不摆出来） */
-  | { kind: 'user'; key: string; text: string; review?: boolean }
+  /** 代码发的那几种（/review、出方案、计划的某个阶段）：text 是一句话的标题，完整的请求不摆出来 */
+  | { kind: 'user'; key: string; text: string; review?: boolean; tag?: 'review' | 'plan' | 'stage' }
   | MergeItem
   | { kind: 'text'; key: string; text: string; live: boolean }
   | ToolItem
@@ -118,6 +118,14 @@ export function actionOf(name: string, args: Record<string, unknown>): string {
       return `看后台任务 ${s('id')} 的输出`
     case 'job_stop':
       return `停掉后台任务 ${s('id')}`
+    case 'propose_plan':
+      return '交计划给你看'
+    case 'stage_done':
+      return '这个阶段做完了'
+    case 'stage_blocked':
+      return '这个阶段卡住了'
+    case 'remember':
+      return '记进项目记忆'
     default:
       return name
   }
@@ -212,7 +220,9 @@ export class Transcript {
         break
       case 'user':
         this.closeText()
-        if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '审查没提交的改动'), review: true })
+        if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '审查没提交的改动'), review: true, tag: 'review' })
+        else if (e.plan_request) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '出方案'), tag: 'plan' })
+        else if (typeof e.plan_stage === 'number') this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `第 ${e.plan_stage + 1} 阶段`), tag: 'stage' })
         else this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
         this.turn = newTurn(Number(e.t ?? 0), e.seq)
         this.turnNo++
@@ -311,6 +321,18 @@ export class Transcript {
         }
         break
       }
+      case 'plan_decision':
+        this.closeText()
+        this.items.push({ kind: 'note', key: this.key(), text: e.approved ? (e.pause_each ? '你批准了计划：每个阶段做完停一下' : '你批准了计划：按阶段做下去') : '你没要这份计划' })
+        break
+      case 'plan_pause':
+        this.closeText()
+        this.items.push({ kind: 'note', key: this.key(), text: `计划停在第 ${Number(e.stage ?? 0) + 1} 阶段：${String(e.text ?? '')}` })
+        break
+      case 'plan_end':
+        this.closeText()
+        this.items.push({ kind: 'note', key: this.key(), text: '计划全部做完了' })
+        break
       case 'compaction':
         this.closeText()
         this.items.push({ kind: 'note', key: this.key(), text: '上下文快满了：用交接说明代替了前面的对话' })

@@ -150,7 +150,9 @@ const api = {
     ipcRenderer.invoke('agent:memory-add', cwd, text),
   agentForgetMemory: (cwd: string, id: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:memory-forget', cwd, id),
   /** 说一句话开始一轮；事件从 onAgentEvent 来 */
-  agentSend: (sid: string, text: string, review = false): void => ipcRenderer.send('agent:send', sid, text, review),
+  agentSend: (sid: string, text: string, review = false, plan = false): void => ipcRenderer.send('agent:send', sid, text, review, plan),
+  agentPlan: (sid: string, action: 'approve' | 'continue' | 'reject', pauseEach = false): Promise<AiResult<unknown>> =>
+    ipcRenderer.invoke('agent:plan', sid, action, pauseEach),
   /** 接上一个会话：补发 after 之后的事件，正在做的话接着推 */
   agentWatch: (sid: string, after: number): void => ipcRenderer.send('agent:watch', sid, after),
   agentInterrupt: (sid: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:interrupt', sid),

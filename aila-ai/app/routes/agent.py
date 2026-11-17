@@ -10,6 +10,9 @@
                                             {text, review}：review=true 是 /review，只读地审没提交的改动，text 可以空着（要特别注意什么）
   GET    /agent/sessions/{id}/events       订阅：补发 after 之后的事件，正在做的话接着推实时事件（SSE）
   POST   /agent/sessions/{id}/interrupt    打断
+  POST   /agent/sessions/{id}/plan/approve 批准她交的计划并开始按阶段做 {pause_each}；返回一直到计划停下的事件流（SSE）
+  POST   /agent/sessions/{id}/plan/continue 计划停下以后接着做（SSE）
+  POST   /agent/sessions/{id}/plan/reject  不要这份计划
   PUT    /agent/sessions/{id}/mode         换权限模式 {mode}
   POST   /agent/sessions/{id}/compact      手动压缩上下文
   GET    /agent/sessions/{id}/context      上下文账本：上下文由哪几块组成、各占多少
@@ -82,12 +85,17 @@ class NewTask(BaseModel):
 class Say(BaseModel):
     text: str = Field(default="", max_length=20000)
     review: bool = False
+    plan: bool = False  # 先出方案：这一轮只读，text 是目标
 
     @model_validator(mode="after")
     def _needs_text(self) -> "Say":
         if not self.review and not self.text:
             raise ValueError("要做什么？")
         return self
+
+
+class PlanApprove(BaseModel):
+    pause_each: bool = False  # 每个阶段做完停一下，等你看过再接着做
 
 
 class SetMode(BaseModel):
@@ -152,7 +160,7 @@ async def get_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
 async def say(sid: str, req: Say, rt: Runtime = Depends(get_runtime)) -> StreamingResponse:
     _session_or_404(rt, sid)
     try:
-        stream = rt.run(sid, req.text, review=req.review)
+        stream = rt.run(sid, req.text, review=req.review, plan=req.plan)
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
     return _sse(stream)
@@ -412,4 +420,37 @@ async def mcp_forget(name: str, req: McpForget, rt: Runtime = Depends(get_runtim
     if not rt.mcp.forget(_mcp_name(name), req.tool):
         raise HTTPException(404, "这个工具没有设成「以后都不用问」。")
     return rt.mcp.status()
+
+
+# ---------- 长任务：按计划做 ----------
+
+
+@router.post("/sessions/{sid}/plan/approve")
+async def plan_approve(sid: str, req: PlanApprove, rt: Runtime = Depends(get_runtime)) -> StreamingResponse:
+    _session_or_404(rt, sid)
+    try:
+        decision = rt.decide_plan(sid, True, req.pause_each)
+        stream = rt.drive_plan(sid, after=decision["seq"] - 1)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+    return _sse(stream)
+
+
+@router.post("/sessions/{sid}/plan/continue")
+async def plan_continue(sid: str, rt: Runtime = Depends(get_runtime)) -> StreamingResponse:
+    _session_or_404(rt, sid)
+    try:
+        stream = rt.drive_plan(sid)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+    return _sse(stream)
+
+
+@router.post("/sessions/{sid}/plan/reject")
+async def plan_reject(sid: str, rt: Runtime = Depends(get_runtime)) -> Event:
+    _session_or_404(rt, sid)
+    try:
+        return rt.decide_plan(sid, False)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
 

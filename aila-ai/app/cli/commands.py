@@ -18,6 +18,7 @@ COMMANDS: dict[str, str] = {
     "/todo": "看她的待办清单",
     "/changes": "这个会话里她改过的文件",
     "/init": "让她读一遍项目，写一份 AGENTS.md（以后每个会话开头都会带上）",
+    "/plan": "长任务：/plan 目标（先出分阶段的计划）；/plan go 照这个做（/plan go 每段停：每阶段做完停一下）；/plan no 不要；/plan continue 停下以后接着做；/plan 看进度",
     "/review": "让她只读地审一遍没提交的改动，按严重程度列出问题：/review 重点（可以不写）",
     "/mcp": "MCP 外部工具服务：/mcp 看状态和工具，/mcp restart 名字 重启（在设置页 → 编程里加服务）",
     "/memory": "项目记忆（下次在这个项目开会话时带上）：/memory 看，/memory add 一句话，/memory forget 编号",

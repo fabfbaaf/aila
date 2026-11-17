@@ -26,6 +26,24 @@ function turn(): AgentEvent[] {
 }
 
 describe('工作窗口：事件折叠', () => {
+  it('长任务：出方案、阶段开始只显示标题；决定、停下、做完是一行说明', () => {
+    const t = new Transcript()
+    t.apply(ev('start', { seq: 0, mode: 'ask' }))
+    t.apply(ev('user', { seq: 1, t: 1, text: '先为下面这个目标出一份分阶段的计划……', plan_request: true, title: '出方案：加打折' }))
+    t.apply(ev('plan_decision', { seq: 2, approved: true, pause_each: false }))
+    t.apply(ev('user', { seq: 3, t: 2, text: '开始第 1/2 阶段……', plan_stage: 0, title: '第 1/2 阶段：写函数' }))
+    t.apply(ev('plan_pause', { seq: 4, reason: 'blocked', text: '要你定折扣', stage: 0 }))
+    t.apply(ev('plan_end', { seq: 5 }))
+    const rows = t.items.map((i) => (i.kind === 'user' ? `${i.tag}:${i.text}` : i.kind === 'note' ? i.text : i.kind))
+    expect(rows).toEqual([
+      'plan:出方案：加打折',
+      '你批准了计划：按阶段做下去',
+      'stage:第 1/2 阶段：写函数',
+      '计划停在第 1 阶段：要你定折扣',
+      '计划全部做完了'
+    ])
+  })
+
   it('/review 那一轮只显示一句标题，不把整段请求摆出来', () => {
     const t = new Transcript()
     t.apply(ev('start', { seq: 0, mode: 'ask' }))

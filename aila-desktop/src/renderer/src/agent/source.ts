@@ -25,8 +25,10 @@ export interface AgentSource {
   merge(sid: string, runTests: boolean): Promise<AgentEvent>
   discard(sid: string): Promise<AgentEvent>
   undo(sid: string, turnSeq: number): Promise<AgentUndoEvent>
-  /** review：/review，只读地审没提交的改动 */
-  send(sid: string, text: string, review?: boolean): void
+  /** review：/review，只读地审没提交的改动；plan：先出方案（这一轮只读，text 是目标） */
+  send(sid: string, text: string, review?: boolean, plan?: boolean): void
+  /** 长任务：批准计划并开始做（事件从 onEvent 来）、停下以后接着做、不要这份计划 */
+  plan(sid: string, action: 'approve' | 'continue' | 'reject', pauseEach?: boolean): Promise<void>
   watch(sid: string, after: number): void
   interrupt(sid: string): Promise<void>
   setMode(sid: string, mode: AgentMode): Promise<void>
@@ -65,7 +67,8 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),
     discard: async (sid) => unwrap(await api.agentDiscard(sid)),
     undo: async (sid, turnSeq) => unwrap(await api.agentUndo(sid, turnSeq)),
-    send: (sid, text, review = false) => api.agentSend(sid, text, review),
+    send: (sid, text, review = false, plan = false) => api.agentSend(sid, text, review, plan),
+    plan: async (sid, action, pauseEach = false) => void unwrap(await api.agentPlan(sid, action, pauseEach)),
     watch: (sid, after) => api.agentWatch(sid, after),
     interrupt: async (sid) => void unwrap(await api.agentInterrupt(sid)),
     setMode: async (sid, mode) => void unwrap(await api.agentSetMode(sid, mode)),
@@ -144,8 +147,16 @@ function web(): AgentSource {
     merge: (sid, runTests) => call('POST', `/agent/sessions/${sid}/merge`, { run_tests: runTests }),
     discard: (sid) => call('POST', `/agent/sessions/${sid}/discard`),
     undo: (sid, turnSeq) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/undo`, { turn_seq: turnSeq }),
-    send: (sid, text, review = false) =>
-      void stream(sid, `/agent/sessions/${sid}/messages`, { method: 'POST', body: JSON.stringify(review ? { text, review: true } : { text }) }),
+    send: (sid, text, review = false, plan = false) =>
+      void stream(sid, `/agent/sessions/${sid}/messages`, {
+        method: 'POST',
+        body: JSON.stringify(review ? { text, review: true } : plan ? { text, plan: true } : { text })
+      }),
+    plan: async (sid, action, pauseEach = false) => {
+      if (action === 'reject') return void (await call('POST', `/agent/sessions/${encodeURIComponent(sid)}/plan/reject`))
+      const body = action === 'approve' ? JSON.stringify({ pause_each: pauseEach }) : '{}'
+      void stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/${action}`, { method: 'POST', body })
+    },
     watch: (sid, after) => void stream(sid, `/agent/sessions/${sid}/events?after=${after}`, { method: 'GET' }),
     interrupt: async (sid) => void (await call('POST', `/agent/sessions/${sid}/interrupt`)),
     setMode: async (sid, mode) => void (await call('PUT', `/agent/sessions/${sid}/mode`, { mode })),

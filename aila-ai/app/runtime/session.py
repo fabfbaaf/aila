@@ -19,6 +19,9 @@
   budget       用户改了会话的花费上限（不进模型消息）
   title        用户改了会话标题（不进模型消息）
   turn_end     一轮结束（done / max_steps / interrupted / error / budget），带本轮费用
+  plan_decision  你对她交的计划的决定（批准 / 不要、每阶段要不要停一下）；计划本身在 propose_plan 的 tool 事件里
+  plan_pause   按计划做到一半停下了（reason：stopped / blocked / limit / pause_each，text 是给你看的原因）
+  plan_end     计划全部做完
   undo         撤销已完成的一轮，结果放到下一句用户消息前
   merge        在新分支上做时：跑测试、合并回你的代码的结果
   branch_closed  分支放弃了（这个会话之后不再接任务）
@@ -109,6 +112,8 @@ class Session:
         event = next((e for e in self.events if e["type"] == "user"), None)
         if event and event.get("review"):
             return review_title(str(event.get("focus", "")))[:60]
+        if event and event.get("title"):  # 出方案、按计划做的那句话：用代码给的标题，不用整段请求
+            return str(event["title"])[:60]
         first = event["text"] if event else ""
         line = first.strip().splitlines()[0] if first.strip() else "（还没开始）"
         return line[:60]
@@ -189,7 +194,18 @@ class Session:
             "usage": {"prompt": u.prompt, "completion": u.completion, "cache_hit": u.cache_hit, "cache_miss": u.cache_miss},
             "cost": self.cost,
             "budget": self.budget,
+            "plan": self.plan_brief(),
         }
+
+    def plan_brief(self) -> dict[str, Any] | None:
+        """列表里显示用：计划做到第几阶段了（没有计划是 None）"""
+        from .planning import plan_state
+
+        state = plan_state(self.events)
+        if state is None:
+            return None
+        done = sum(1 for s in state.stages if s.status == "done")
+        return {"decision": state.decision, "stages": len(state.stages), "done": done, "finished": state.finished}
 
 
 def latest_turn(events: list[Event]) -> list[Event]:

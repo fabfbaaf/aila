@@ -5,7 +5,7 @@ import { AgentRelay } from './agent'
 /** 假的 AI 服务：会话详情返回项目目录，说话返回一段事件流 */
 function fakeService(events: AgentEvent[]): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (url: string) => {
-    if (url.endsWith('/messages')) {
+    if (url.endsWith('/messages') || url.endsWith('/plan/approve') || url.endsWith('/plan/continue')) {
       const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
       return new Response(
         new ReadableStream({
@@ -172,6 +172,36 @@ describe('工作窗口的转发（主进程）', () => {
     }))
     await r.mcpRemove('my-db')
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/my-db', expect.objectContaining({ method: 'DELETE' }))
+  })
+
+  it('长任务：出方案、批准、接着做、不要；按阶段做时每轮不说做完了，阶段和计划做完才说', async () => {
+    const fetchMock = fakeService([
+      { type: 'user', seq: 1, text: '开始第 1/2 阶段……', plan_stage: 0, title: '第 1/2 阶段：写函数' },
+      { type: 'tool', seq: 2, id: 'c1', name: 'stage_done', status: 'ok', stage: 0 },
+      { type: 'turn_end', seq: 3, reason: 'done' },
+      { type: 'plan_pause', seq: 4, reason: 'pause_each', text: '等你看一眼', stage: 1 }
+    ])
+    const { r, seen } = relay()
+    r.send('s1', '加打折', false, true)
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s1/messages', expect.objectContaining({
+      body: JSON.stringify({ text: '加打折', plan: true })
+    }))
+    await vi.waitFor(() => expect(seen.progress.length).toBe(4))
+    r.planApprove('s1', true)
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s1/plan/approve', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ pause_each: true })
+    }))
+    await vi.waitFor(() => expect(seen.progress.length).toBe(8))
+    expect(seen.progress.slice(4)).toEqual([
+      { kind: 'start', title: '第 1/2 阶段：写函数' },
+      { kind: 'stage', title: '写函数' },
+      { kind: 'stopped', reason: 'plan' }, // 这一轮做完不说「做完了」
+      { kind: 'plan_pause', text: '等你看一眼' }
+    ])
+    r.planContinue('s1')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s1/plan/continue', expect.objectContaining({ method: 'POST' }))
+    await r.planReject('s1')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s1/plan/reject', expect.objectContaining({ method: 'POST' }))
   })
 
   it('删不了时保留等确认的状态，删除后清理它', async () => {

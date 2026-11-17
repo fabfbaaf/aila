@@ -1,5 +1,7 @@
 """没填大模型密钥时的假编程模型：固定走一遍「列文件 → 读 README → 总结」，让整条链路（工具、权限、日志、
-接口、界面）不联网也能跑通。用量按前缀估算（见 cache.py），可以看出上下文排布对缓存是否友好。"""
+接口、界面）不联网也能跑通。用量按前缀估算（见 cache.py），可以看出上下文排布对缓存是否友好。
+
+长任务也能演示：让它「出方案」，它看一眼文件列表就交一份两个阶段的计划；按计划做时每个阶段读一下 README 就标完成。"""
 
 import asyncio
 import json
@@ -16,6 +18,10 @@ NOTE = "（我现在是假模型：在设置里填好大模型密钥，才能真
 DEMO = "演示改文件"
 # 「演示查资料」：派两个子 Agent 一起去查（explore 工具），看子 Agent 的卡片和用量
 EXPLORE_DEMO = "演示查资料"
+# 出方案、按计划做的那几句话由代码生成（planning.py），认开头
+PLAN_MARK = re.compile(r"^先为下面这个目标出一份分阶段的计划", re.MULTILINE)
+STAGE_MARK = re.compile(r"^(开始第 \d+/\d+ 阶段|第 \d+/\d+ 阶段「)", re.MULTILINE)
+GOAL = re.compile(r"^目标：(.+)$", re.MULTILINE)
 
 
 class MockCoderModel:
@@ -29,7 +35,12 @@ class MockCoderModel:
     async def step(self, messages: list[Message], tools: list[dict[str, Any]] | None, max_tokens: int = 8192) -> AsyncIterator[StepItem]:
         last = messages[-1]
         call: ToolCall | None = None
-        if DEMO in _last_user(messages) and not (last["role"] == "user" and "交接说明" in str(last["content"])):
+        user = _last_user(messages)
+        if PLAN_MARK.search(user):
+            text, call = self._plan(messages, user)
+        elif STAGE_MARK.search(user):
+            text, call = self._stage(messages)
+        elif DEMO in user and not (last["role"] == "user" and "交接说明" in str(last["content"])):
             text, call = self._demo(messages)
         elif EXPLORE_DEMO in _last_user(messages):
             text, calls = self._explore_demo(messages)
@@ -99,6 +110,28 @@ class MockCoderModel:
                 self._call("explore", {"task": "项目里有哪些文件？"}),
             ]
         return f"两个助手都查完了，报告在上面的卡片里。{NOTE}", []
+
+    def _plan(self, messages: list[Message], user: str) -> tuple[str, ToolCall | None]:
+        """出方案：先看文件列表，再交一份两个阶段的计划"""
+        if messages[-1]["role"] == "user":
+            return "我先看看项目里有哪些文件。", self._call("list_files", {"pattern": "*"})
+        previous = _last_tool_name(messages)
+        if previous == "list_files":
+            goal = (GOAL.search(user).group(1).strip() if GOAL.search(user) else "这个任务")[:80]
+            return "看过了，分两步做。", self._call("propose_plan", {"goal": goal, "stages": [
+                {"title": "读一遍项目", "goal": "弄清相关代码在哪", "verify": "能说出要改哪些文件"},
+                {"title": "动手并验证", "goal": f"完成：{goal}", "verify": "跑项目的测试"},
+            ]})
+        return f"计划交给你了：先读一遍项目，再动手并验证。{NOTE}", None
+
+    def _stage(self, messages: list[Message]) -> tuple[str, ToolCall | None]:
+        """按计划做的一个阶段：读一下 README，再标完成"""
+        if messages[-1]["role"] == "user":
+            return "开始这一段。", self._call("read_file", {"path": "README.md", "limit": 10})
+        previous = _last_tool_name(messages)
+        if previous == "read_file":
+            return "", self._call("stage_done", {"summary": "（假模型）读了 README，没有改文件", "verified": "假模型不跑测试"})
+        return "这一段做完了。", None
 
     def _call(self, name: str, args: dict[str, Any]) -> ToolCall:
         self._n += 1
