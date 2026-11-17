@@ -36,7 +36,7 @@ class Settings:
     coder_model: str = ""
     # 派出去查资料的子 Agent 用的模型（便宜、快的）；空 = 和 coder_model 一样
     coder_fast_model: str = ""
-    coder_context: int = 128_000
+    coder_context: int | None = None  # 只在用户明确配置时覆盖模型窗口
     coder_max_steps: int = 60
 
     @property
@@ -46,6 +46,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    coder_context = os.getenv("AILA_CODER_CONTEXT")
     return Settings(
         llm_base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
@@ -69,6 +70,6 @@ def load_settings() -> Settings:
         mcp_config=Path(os.getenv("AILA_MCP_CONFIG", str(ROOT / "mcp.json"))),
         coder_model=os.getenv("AILA_CODER_MODEL", "").strip(),
         coder_fast_model=os.getenv("AILA_CODER_FAST_MODEL", "").strip(),
-        coder_context=int(os.getenv("AILA_CODER_CONTEXT", "128000")),
+        coder_context=int(coder_context) if coder_context is not None else None,
         coder_max_steps=int(os.getenv("AILA_CODER_MAX_STEPS", "60")),
     )

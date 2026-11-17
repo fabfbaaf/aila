@@ -33,6 +33,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     saved_env, saved_settings = dict(os.environ), deps.settings
     for key in ("LLM_API_KEY", "SEARCH_API_KEY"):
         os.environ.pop(key, None)
+    # 固定用例里的对话模型，避免测试结果受本机配置影响。
+    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
     monkeypatch.setenv("AILA_DATA_DIR", str(tmp_path / "data"))  # 别在 aila-ai/data 里建资料库
     deps.settings = replace(deps.settings, llm_api_key="", search_api_key="", data_dir=tmp_path / "data")
     for cached in (deps.get_model, deps.get_registry, deps.get_knowledge):

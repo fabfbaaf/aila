@@ -1,14 +1,17 @@
 """执行轨迹要的计时，和上下文账本（上下文由哪几块组成、各占多少）"""
 
 import json
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import load_settings
 from app.deps import get_runtime
-from app.llm import ToolCall, Usage
+from app.llm import OpenAICompatibleModel, ToolCall, Usage
 from app.main import app
+from app.runtime.loop import AgentConfig
 from app.runtime.runner import Runtime
 
 from .test_runtime import SHELL, Scripted, drive, project  # noqa: F401（project 是 fixture）
@@ -53,6 +56,40 @@ async def test_context_ledger(project: Path, tmp_path: Path) -> None:
     assert abs(sum(s["tokens"] for s in ledger["segments"]) - 3600) <= len(keys)  # 按真实输入等比例校准
     assert ledger["biggest"][0]["label"] in ("读文件 README.md", "命令 git status")
     assert ledger["window"] == 128_000 and ledger["compact_at"] == 0.8
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("model_name", "base_url", "override", "window"), [
+    ("deepseek-flash", "https://api.deepseek.com", None, 1_000_000),
+    ("deepseek-v4-pro", "https://api.deepseek.com/v1", None, 1_000_000),
+    ("other-model", "https://api.deepseek.com", None, 128_000),
+    ("deepseek-flash", "https://example.org/v1", None, 128_000),
+    ("deepseek-flash", "https://api.deepseek.com", "256000", 256_000),
+])
+async def test_context_window_controls_ledger_and_compaction(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    model_name: str, base_url: str, override: str | None, window: int,
+) -> None:
+    if override is None:
+        monkeypatch.delenv("AILA_CODER_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("AILA_CODER_CONTEXT", override)
+    settings = replace(load_settings(), llm_api_key="test-key", llm_model=model_name, llm_base_url=base_url)
+    model = OpenAICompatibleModel(settings)
+    try:
+        config = AgentConfig(context_window=settings.coder_context)
+        rt = Runtime(tmp_path / "data", lambda: model, shell=SHELL, config=config)
+        session = rt.create(str(project))
+        agent = rt.agent(session.id)
+        assert rt.context(session.id)["window"] == window
+
+        threshold = window * 4 // 5
+        session.append({"type": "usage", "model": model.name, **asdict(Usage(prompt=threshold, cache_miss=threshold))})
+        assert not agent._should_compact()
+        session.append({"type": "usage", "model": model.name, **asdict(Usage(prompt=threshold + 1, cache_miss=threshold + 1))})
+        assert agent._should_compact()
+    finally:
+        await model._client.close()
 
 
 def test_context_api(project: Path, tmp_path: Path) -> None:

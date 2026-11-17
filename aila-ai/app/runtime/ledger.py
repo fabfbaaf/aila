@@ -99,7 +99,7 @@ def context_ledger(agent: Agent) -> dict[str, Any]:
     biggest = sorted(items, key=lambda x: -x[1])[:TOP]
     config = agent.config
     return {
-        "window": config.context_window,
+        "window": agent.context_window,
         "compact_at": config.compact_at,
         "prompt": prompt,
         "cache_hit": last["cache_hit"] if last else 0,

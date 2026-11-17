@@ -62,7 +62,7 @@ class Explorer:
     extra: list[CodingTool]
     rules: Rules
     model_factory: Callable[[], CoderModel]
-    context_window: int = 128_000
+    context_window: int | None = None
 
     @property
     def root(self) -> Path:

@@ -49,13 +49,14 @@ SKIPPED = "前面的操作没有被同意，这个也没有执行。"
 INTERRUPTED = "被用户打断了，没有执行。"
 # 一步里连着的可以一起跑的调用（子 Agent），最多同时跑几个
 MAX_PARALLEL = 4
+DEFAULT_CONTEXT_WINDOW = 128_000
 
 
 @dataclass
 class AgentConfig:
     max_steps: int = 60
     max_tokens: int = 8192
-    context_window: int = 128_000
+    context_window: int | None = None
     compact_at: float = 0.8
 
 
@@ -318,8 +319,15 @@ class Agent:
         budget = self.session.budget
         return budget is not None and self.session.known_cost >= Decimal(str(budget))
 
+    @property
+    def context_window(self) -> int:
+        """显式配置优先，否则按当前模型的窗口决定何时压缩。"""
+        if self.config.context_window is not None:
+            return self.config.context_window
+        return getattr(self.model, "context_window", None) or DEFAULT_CONTEXT_WINDOW
+
     def _should_compact(self) -> bool:
-        return self.session.last_prompt_tokens > self.config.context_window * self.config.compact_at
+        return self.session.last_prompt_tokens > self.context_window * self.config.compact_at
 
     async def compact(self) -> AsyncIterator[Event]:
         """用模型把前面的工作总结成交接说明，之后用它代替前面的全部消息"""
