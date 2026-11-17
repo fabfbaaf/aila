@@ -31,10 +31,17 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(deps, "get_voice", lambda: None)  # 别在测试里真的去加载语音模型
     monkeypatch.setattr(deps, "get_ears", lambda: None)
     saved_env, saved_settings = dict(os.environ), deps.settings
-    for key in ("LLM_API_KEY", "SEARCH_API_KEY"):
+    # 真的 aila-ai/.env 在导入时已经读进环境变量：模型这些也要去掉，不然你在设置里改过模型，这里就跟着变
+    for key in ("LLM_API_KEY", "SEARCH_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "AILA_CODER_MODEL", "AILA_CODER_FAST_MODEL",
+                "SEARCH_PROVIDER"):
         os.environ.pop(key, None)
     monkeypatch.setenv("AILA_DATA_DIR", str(tmp_path / "data"))  # 别在 aila-ai/data 里建资料库
-    deps.settings = replace(deps.settings, llm_api_key="", search_api_key="", data_dir=tmp_path / "data")
+    # 改设置时是按环境变量重新加载的：照 EXAMPLE 放进去，不跟着默认值或真的 .env 走
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
+    monkeypatch.setenv("SEARCH_PROVIDER", "bocha")
+    deps.settings = replace(deps.settings, llm_api_key="", search_api_key="", data_dir=tmp_path / "data",
+                            llm_base_url="https://api.deepseek.com", llm_model="deepseek-chat", coder_model="", coder_fast_model="")
     for cached in (deps.get_model, deps.get_registry, deps.get_knowledge):
         cached.cache_clear()
     yield path
