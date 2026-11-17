@@ -93,7 +93,7 @@ export class Conversation {
   private stream: ChatStream | null = null
   private shown = ''
   /**
-   * 正常结束存全文（保留表情和动作标签），打断或出错时只存已经说出口的部分。
+   * 服务收完后存全文（保留表情和动作标签），收完前打断或出错只存已经说出口的部分。
    * 气泡展开用不带标签的全文。
    */
   private transcript = ''
@@ -108,6 +108,7 @@ export class Conversation {
   private status = ''
   private committed = false
   private receiving = false
+  private receivedDone = false
   private replying = false
   /** 不是大模型的回复（比如被唤醒时说的「我在」），不进历史 */
   private announcing = false
@@ -228,7 +229,7 @@ export class Conversation {
     this.onEvent({ type: 'done' })
   }
 
-  /** 打断当前回复：已经说出口的部分记进历史，免得上下文断掉 */
+  /** 打断当前回复：服务收完后保留全文，否则只记已经说出口的部分 */
   interrupt(): void {
     if (!this.replying) return
     this.stream?.cancel()
@@ -399,6 +400,7 @@ export class Conversation {
     this.lastTextSpoken = true
     this.status = ''
     this.committed = false
+    this.receivedDone = false
     this.announcing = announcing
     this.pause = 0
     this.budget = 0
@@ -544,6 +546,7 @@ export class Conversation {
       case 'done':
         // 收完了，但可能还没说完：等 tick 把剩下的说完再结束
         this.receiving = false
+        this.receivedDone = true
         this.stream = null
         this.queueGestures(this.lastTextSpoken)
         if (this.voiced) this.closeSentence(true)
@@ -573,7 +576,7 @@ export class Conversation {
   }
 
   private commit(full = false): void {
-    const content = full ? this.transcript : this.delivered
+    const content = full || this.receivedDone ? this.transcript : this.delivered
     if (this.committed || !content || this.announcing) return
     this.committed = true
     this.record('assistant', content)

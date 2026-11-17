@@ -7,7 +7,7 @@
 - AI 服务从流式回复里识别开头的 `[say]…[/say]`。查资料时，工具返回后新一段开头的首个 `[say]` 也能标记结论。两个标签可跨多个数据块，事件里的回复文字保留原顺序，带 `spoken` 区分摘要和正文。
 - 没有 `[say]` 时，按开头两句、最多 60 个可念字符兜底。遇到列表、代码块或网址提前收住。兜底还有正文时，整次回复末尾发一次 `hint: "more"`。空白尾部不会单独触发提示。
 - 气泡显示摘要，有正文时可以点「看全文」在原处展开、滚动和选择文字。展开后气泡保留，收起后恢复显示摘要。关闭出声时也提供同样的气泡操作。
-- 正常结束的聊天回复按原顺序保存全文，供「对话」页、历史同步和后续聊天使用。旧服务的文字事件没有 `spoken` 时仍然全念。兜底的「细节在对话框里」由桌面端加在摘要后，只进气泡和语音队列。
+- 服务发出 `done` 后的聊天回复按原顺序保存全文，供「对话」页、历史同步和后续聊天使用；摘要仍在播放时被打断也保留全文。旧服务的文字事件没有 `spoken` 时仍然全念。兜底的「细节在对话框里」由桌面端加在摘要后，只进气泡和语音队列。
 
 ## 变更文件
 
@@ -20,7 +20,7 @@
 | `aila-ai/tests/test_chat.py` | 验证对话 SSE 文本事件的 `spoken` 字段及断流错误顺序 |
 | `aila-desktop/src/shared/chat.ts` | 对话文字事件类型增加可选的 `spoken` 和 `hint` |
 | `aila-desktop/src/renderer/src/chat/Conversation.ts` | 分开处理全文记录、语音和气泡文字，保留打断、确认和进度流程 |
-| `aila-desktop/src/renderer/src/chat/Conversation.test.ts` | 验证只合成摘要、静音气泡、固定提示、旧协议和打断 |
+| `aila-desktop/src/renderer/src/chat/Conversation.test.ts` | 验证只合成摘要、静音气泡、固定提示、旧协议、收齐前后打断和下一轮状态重置 |
 | `aila-desktop/src/renderer/src/persona/lines.ts` | 增加一句本地的全文提示 |
 | `aila-desktop/src/renderer/src/components/SpeechBubble.vue` | 在现有气泡上提供可聚焦的全文开关及滚动区 |
 | `aila-desktop/src/renderer/src/App.vue` | 将全文状态连到当前气泡，展开期间暂停自动收起 |
@@ -36,14 +36,16 @@
 | `.venv\Scripts\python -X utf8 -m pytest -q -p no:cacheprovider` | 486 项通过，10 项既有跳过 |
 | `.venv\Scripts\python -X utf8 -m pytest -q -p no:cacheprovider tests/test_tags.py tests/test_agent.py tests/test_chat.py` | 42 项通过 |
 | `npm.cmd run typecheck` | 通过 |
-| `npx.cmd vitest run` | 248 项通过，1 项既有跳过 |
+| `npx.cmd vitest run` | 251 项通过，1 项既有跳过 |
 | `npm.cmd run build` | 主进程、预加载、渲染层均通过 |
 | `.\mvnw.cmd test` | 26 项通过，无失败、错误或跳过 |
 | `git diff --check` | 通过 |
 
 Python 测试将 `AILA_ENV_FILE` 指到不存在的测试路径，只在进程中为既有测试设置 `LLM_MODEL=deepseek-chat`，本机请求绕过代理。Python 既有的 10 项跳过是向量和语音模型资源用例。Vitest 的既有云同步端到端用例在未配置专用服务器时跳过。
 
+最后补充了收到 `done` 后打断仍保留全文的处理，并重跑桌面端 typecheck、完整 Vitest 和构建，均通过。补充改动没有涉及 Python 或 Java，沿用上表已通过的结果。
+
 ## 验证边界
 
-- 用户打断和服务报错保留原来的历史规则，只存气泡已经呈现的回复片段。服务端已发 `done` 但桌面仍在播报时打断，也按这条规则处理。
+- 服务端尚未发出 `done` 时，用户打断或服务报错仍只存气泡已经呈现的回复片段。收到 `done` 后全文已收齐，即使摘要仍在播报时被打断，也保存完整回复；固定的全文提示仍不进历史。
 - 逐块解析、合成请求内容、静音气泡与历史分流已用假模型或假音频验证。真实模型的口播标记、实际扬声器效果和气泡里的点击、滚动观感留给第 3.8 项手动检查。人格提示词由单独任务接入。

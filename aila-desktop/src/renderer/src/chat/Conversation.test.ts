@@ -231,15 +231,56 @@ describe('Conversation 的口播和全文', () => {
     expect(saved.at(-1)?.content).toBe('查到了。\n1. 全文细节')
   })
 
-  it('打断时只记已经显示的摘要片段，不记已收到但没展示的文字', () => {
+  it.each([true, false])('打断时按服务是否收完保存全文或已显示片段（done=%s）', (done) => {
     const { conv, transport, saved } = setup()
     conv.send('慢慢说')
     transport.push({ type: 'text', text: '会先说一段。', spoken: true })
     transport.push({ type: 'text', text: '\n剩下的是全文。', spoken: false })
-    transport.push({ type: 'done' })
+    if (done) transport.push({ type: 'done' })
     conv.tick(1 / 18)
     conv.interrupt()
-    expect(saved.at(-1)?.content).toBe('会')
+    expect(saved.at(-1)?.content).toBe(done ? '会先说一段。\n剩下的是全文。' : '会')
+  })
+
+  it('服务已收完但摘要仍在播放时打断，停止语音并保留全文一次', async () => {
+    let playing = false
+    const voice: Voice = {
+      ...fakeVoice().voice,
+      synthesize: async () => ({ duration: 10 }) as AudioBuffer,
+      play: () => (playing = true),
+      stop: () => { playing = false },
+      get playing() { return playing }
+    }
+    const { conv, transport, saved, bubbles, talk } = setup(voice)
+    conv.send('慢慢说')
+    transport.push({ type: 'text', text: '会先说一段。', spoken: true })
+    transport.push({ type: 'text', text: '\n剩下的是全文。', spoken: false })
+    transport.push({ type: 'done' })
+    await Promise.resolve()
+    conv.tick(0.1)
+    expect(conv.audible).toBe(true)
+    expect(bubbles.at(-1)).toBe('会')
+
+    conv.interrupt()
+    talk()
+    expect(conv.audible).toBe(false)
+    expect(saved.filter((message) => message.role === 'assistant').map((message) => message.content))
+      .toEqual(['会先说一段。\n剩下的是全文。'])
+  })
+
+  it('新回复不沿用上一轮的 done，中途打断仍只记录已显示片段', () => {
+    const { conv, transport, saved } = setup()
+    conv.send('第一轮')
+    transport.push({ type: 'text', text: '第一轮全文。', spoken: false })
+    transport.push({ type: 'done' })
+    conv.send('第二轮')
+    transport.push({ type: 'text', text: '会先说一段。', spoken: true })
+    transport.push({ type: 'text', text: '\n还没收完的详情。', spoken: false })
+    conv.tick(1 / 18)
+    conv.interrupt()
+
+    expect(saved.filter((message) => message.role === 'assistant').map((message) => message.content))
+      .toEqual(['第一轮全文。', '会'])
   })
 })
 
