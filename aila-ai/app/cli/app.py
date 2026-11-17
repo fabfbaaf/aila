@@ -15,7 +15,7 @@ import asyncio
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +36,7 @@ from ..runtime.permissions import MODE_LABELS, MODES
 from ..runtime.pricing import validate_budget
 from ..runtime.session import SESSION_ID, latest_turn, same_project, turn_edits
 from .backend import Backend, BackendError, connect
+from ..runtime.planning import plan_state
 from .commands import COMMANDS, INIT_PROMPT, KEYS, changed_files, latest_todos, next_mode, parse, usage_lines
 from .render import Renderer
 from .views import build_trace, ledger_view, trace_view
@@ -180,8 +181,9 @@ class Terminal:
                 continue
             await self.turn(text)
 
-    async def turn(self, text: str, review: bool = False) -> str:
-        """做一轮，返回结束的原因"""
+    async def turn(self, text: str, review: bool = False, plan: bool = False,
+                   stream: AsyncIterator[dict[str, Any]] | None = None) -> str:
+        """做一轮（按计划做时是连着好几轮），返回最后一轮结束的原因"""
         interrupted = False
 
         def interrupt() -> None:
@@ -194,17 +196,46 @@ class Terminal:
 
         try:
             with self.watcher.watching(interrupt):
-                async for e in self.backend.run(self.sid, text, review):
+                async for e in stream if stream is not None else self.backend.run(self.sid, text, review, plan):
                     self.renderer.event(e)
                     if e["type"] == "confirm":
                         await self._confirm(e)
                     elif e["type"] == "mode":
                         self.info["mode"] = e["mode"]
+                    elif e["type"] == "plan_pause":
+                        self.console.print(Text(f"计划停在第 {int(e.get('stage', 0)) + 1} 阶段：{e.get('text', '')}。/plan continue 接着做", style="yellow"))
+                    elif e["type"] == "plan_end":
+                        self.console.print(Text("计划全部做完了。", style="green"))
+                    elif e["type"] == "tool" and e.get("name") == "propose_plan" and e.get("plan"):
+                        self.console.print(Text("/plan go 照这个做（/plan go 每段停：每阶段做完停一下），/plan no 不要，或者直接说要怎么改", style="yellow"))
         except BackendError as err:
             self.renderer.stop_waiting()
             self.console.print(Text(str(err), style="red"))
             return "error"
         return self.renderer.reason
+
+    async def _plan(self, arg: str) -> None:
+        """/plan 目标 · /plan go [每段停] · /plan no · /plan continue · /plan（看进度）"""
+        verb, _, rest = arg.strip().partition(" ")
+        if verb == "go":
+            await self.turn("", stream=self.backend.plan_approve(self.sid, pause_each=rest.strip() in ("每段停", "--pause")))
+        elif verb == "continue":
+            await self.turn("", stream=self.backend.plan_continue(self.sid))
+        elif verb == "no":
+            await self.backend.plan_reject(self.sid)
+            self.console.print(Text("不要这份计划了。直接说要做什么，或者 /plan 新的目标。", style="dim"))
+        elif arg.strip():
+            await self.turn(arg.strip(), plan=True)
+        else:
+            state = plan_state((await self.backend.session(self.sid))["events"])
+            if state is None:
+                self.console.print(Text("还没有计划。/plan 目标：她先只读地看一遍，交一份分阶段的计划给你批准。", style="dim"))
+                return
+            marks = {"done": "[x]", "running": "[→]", "blocked": "[!]", "pending": "[ ]"}
+            head = {"proposed": "等你决定", "rejected": "没要", "approved": "全部做完了" if state.finished else "进行中"}[state.decision]
+            self.console.print(Text(f"计划：{state.goal}（{head}）", style="bold"))
+            for i, s in enumerate(state.stages, 1):
+                self.console.print(Text(f"  {marks.get(s.status, '[ ]')} {i}. {s.title}", style="dim" if s.status == "done" else ""))
 
     async def _memory(self, arg: str) -> None:
         """/memory：看、加、删这个项目的记忆（新记的从下一个会话起带上）"""
@@ -361,6 +392,8 @@ class Terminal:
                 await self.turn(INIT_PROMPT)
             elif name == "/review":
                 await self.turn(arg, review=True)
+            elif name == "/plan":
+                await self._plan(arg)
             elif name == "/merge":
                 no_tests = arg in ("直接", "--no-tests", "no-tests")
                 self.renderer.waiting("正在合并…" if no_tests else "正在跑测试…")

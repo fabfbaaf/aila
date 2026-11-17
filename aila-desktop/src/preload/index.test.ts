@@ -60,14 +60,23 @@ describe('会话管理的预加载桥', () => {
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:mcp:forget', 'db', 'query')
   })
 
+  it('长任务只走固定通道', async () => {
+    const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
+    const api = exposed?.[1] as AilaApi
+    api.agentSend('s1', '加打折', false, true)
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith('agent:send', 's1', '加打折', false, true)
+    await api.agentPlan('s1', 'approve', true)
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:plan', 's1', 'approve', true)
+  })
+
   it('搜索和审查改动只多传固定的参数', async () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi
     await api.agentList('购物车')
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:list', '购物车')
     api.agentSend('s1', '登录', true)
-    expect(ipcRenderer.send).toHaveBeenLastCalledWith('agent:send', 's1', '登录', true)
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith('agent:send', 's1', '登录', true, false)
     api.agentSend('s1', '改 README')
-    expect(ipcRenderer.send).toHaveBeenLastCalledWith('agent:send', 's1', '改 README', false)
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith('agent:send', 's1', '改 README', false, false)
   })
 })

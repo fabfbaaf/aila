@@ -33,7 +33,10 @@ class Backend(Protocol):
     async def search_sessions(self, query: str, cwd: str) -> list[dict[str, Any]]: ...
     async def sessions(self) -> list[dict[str, Any]]: ...
     async def session(self, sid: str) -> dict[str, Any]: ...
-    def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]: ...
+    def run(self, sid: str, text: str, review: bool = False, plan: bool = False) -> AsyncIterator[Event]: ...
+    def plan_approve(self, sid: str, pause_each: bool = False) -> AsyncIterator[Event]: ...
+    def plan_continue(self, sid: str) -> AsyncIterator[Event]: ...
+    async def plan_reject(self, sid: str) -> Event: ...
     async def interrupt(self, sid: str) -> None: ...
     async def set_mode(self, sid: str, mode: str) -> None: ...
     async def compact(self, sid: str) -> None: ...
@@ -108,13 +111,36 @@ class EmbeddedBackend:
             raise BackendError(str(err)) from err
         return {**session.summary(), "running": self.rt.running(sid), "shell": self.rt.shell.label, "events": session.events}
 
-    async def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]:
+    async def run(self, sid: str, text: str, review: bool = False, plan: bool = False) -> AsyncIterator[Event]:
         try:
-            stream = self.rt.run(sid, text, review=review)
+            stream = self.rt.run(sid, text, review=review, plan=plan)
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
         async for event in stream:
             yield event
+
+    async def plan_approve(self, sid: str, pause_each: bool = False) -> AsyncIterator[Event]:
+        try:
+            decision = self.rt.decide_plan(sid, True, pause_each)
+            stream = self.rt.drive_plan(sid, after=decision["seq"] - 1)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
+        async for event in stream:
+            yield event
+
+    async def plan_continue(self, sid: str) -> AsyncIterator[Event]:
+        try:
+            stream = self.rt.drive_plan(sid)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
+        async for event in stream:
+            yield event
+
+    async def plan_reject(self, sid: str) -> Event:
+        try:
+            return self.rt.decide_plan(sid, False)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
 
     async def interrupt(self, sid: str) -> None:
         self.rt.interrupt(sid)
@@ -229,10 +255,27 @@ class HttpBackend:
     async def session(self, sid: str) -> dict[str, Any]:
         return await self._call("GET", f"/agent/sessions/{sid}")
 
-    async def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]:
-        body: dict[str, Any] = {"text": text, "review": True} if review else {"text": text}
+    async def run(self, sid: str, text: str, review: bool = False, plan: bool = False) -> AsyncIterator[Event]:
+        body: dict[str, Any] = {"text": text}
+        if review:
+            body["review"] = True
+        if plan:
+            body["plan"] = True
+        async for event in self._stream(f"/agent/sessions/{sid}/messages", body):
+            yield event
+
+    def plan_approve(self, sid: str, pause_each: bool = False) -> AsyncIterator[Event]:
+        return self._stream(f"/agent/sessions/{sid}/plan/approve", {"pause_each": pause_each})
+
+    def plan_continue(self, sid: str) -> AsyncIterator[Event]:
+        return self._stream(f"/agent/sessions/{sid}/plan/continue", {})
+
+    async def plan_reject(self, sid: str) -> Event:
+        return await self._call("POST", f"/agent/sessions/{sid}/plan/reject")
+
+    async def _stream(self, path: str, body: dict[str, Any]) -> AsyncIterator[Event]:
         try:
-            async with self.client.stream("POST", f"/agent/sessions/{sid}/messages", json=body) as res:
+            async with self.client.stream("POST", path, json=body) as res:
                 if res.status_code >= 400:
                     await res.aread()
                     raise BackendError(_detail(res))

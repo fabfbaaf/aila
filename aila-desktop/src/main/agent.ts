@@ -43,6 +43,10 @@ export class AgentRelay {
   private cwds = new Map<string, string>()
   /** 工具调用 → 它碰的文件 */
   private callFiles = new Map<string, string>()
+  /** 正在按计划做的会话（这一轮是某个阶段） */
+  private planTurns = new Set<string>()
+  /** 正在做的阶段叫什么（阶段做完时她说一句用） */
+  private stageTitles = new Map<string, string>()
   private pendingConfirm: { sid: string; id: string } | null = null
 
   constructor(
@@ -180,10 +184,23 @@ export class AgentRelay {
   }
 
   /** 说一句话，开始一轮；事件陆续发给工作窗口 */
-  /** review：/review，只读地审没提交的改动（text 是可选的「特别注意什么」） */
-  send(sid: string, text: string, review = false): void {
-    const body = review ? { text, review: true } : { text }
+  /** review：/review，只读地审没提交的改动（text 是可选的「特别注意什么」）；plan：先出方案（这一轮只读，text 是目标） */
+  send(sid: string, text: string, review = false, plan = false): void {
+    const body = review ? { text, review: true } : plan ? { text, plan: true } : { text }
     void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/messages`, { method: 'POST', body: JSON.stringify(body) })
+  }
+
+  /** 长任务：批准计划并开始按阶段做 / 停下以后接着做（事件流一直到计划停下）/ 不要这份计划 */
+  planApprove(sid: string, pauseEach: boolean): void {
+    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/approve`, { method: 'POST', body: JSON.stringify({ pause_each: pauseEach }) })
+  }
+
+  planContinue(sid: string): void {
+    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/continue`, { method: 'POST', body: '{}' })
+  }
+
+  planReject(sid: string): Promise<AiResult<AgentEvent>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/plan/reject`)
   }
 
   /** 接上一个会话：补发 after 之后的事件，正在做的话接着推（之后的进展她也会汇报） */
@@ -247,7 +264,12 @@ export class AgentRelay {
     switch (e.type) {
       case 'user':
         this.turnFiles.set(sid, new Set())
-        this.hooks.progress({ kind: 'start', title: String((e.review ? e.title : e.text) ?? '').slice(0, 40) })
+        // 按计划做的那几轮：做完一轮不说「做完了」，等阶段做完、整个计划做完再说
+        if (typeof e.plan_stage === 'number') {
+          this.planTurns.add(sid)
+          this.stageTitles.set(sid, String(e.title ?? '').replace(/^.*?阶段：/, ''))
+        } else this.planTurns.delete(sid)
+        this.hooks.progress({ kind: 'start', title: String((e.title ?? e.text) ?? '').slice(0, 40) })
         break
       case 'assistant':
         for (const c of (e.tool_calls as { id: string; name: string; arguments: string }[]) ?? []) {
@@ -281,12 +303,22 @@ export class AgentRelay {
           this.turnFiles.get(sid)?.add(e.file)
           this.hooks.activity({ sid, cwd, file: e.file, kind: 'edit' })
         }
+        if (e.name === 'stage_done' && e.status === 'ok') this.hooks.progress({ kind: 'stage', title: this.stageTitles.get(sid) ?? '' })
+        break
+      case 'plan_end':
+        this.planTurns.delete(sid)
+        this.hooks.progress({ kind: 'plan_end' })
+        break
+      case 'plan_pause':
+        this.planTurns.delete(sid)
+        this.hooks.progress({ kind: 'plan_pause', text: String(e.text ?? '') })
         break
       case 'turn_end': {
         if (this.pendingConfirm?.sid === sid) this.clearPending()
         const files = this.turnFiles.get(sid)?.size ?? 0
         this.turnFiles.delete(sid)
-        if (e.reason === 'done') this.hooks.progress({ kind: 'done', files })
+        if (e.reason === 'done' && this.planTurns.has(sid)) this.hooks.progress({ kind: 'stopped', reason: 'plan' })
+        else if (e.reason === 'done') this.hooks.progress({ kind: 'done', files })
         else if (e.reason === 'budget') this.hooks.progress({ kind: 'budget' })
         else if (e.reason === 'error') this.hooks.progress({ kind: 'error', message: String(e.error ?? '') })
         else this.hooks.progress({ kind: 'stopped', reason: String(e.reason ?? '') })

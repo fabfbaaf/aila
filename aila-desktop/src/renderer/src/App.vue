@@ -545,6 +545,20 @@ function onAgentProgress(p: AgentProgress): void {
       behavior.gesture('tilt')
       if (!quiet) behavior.say(lines.agentBudget, 5000)
       break
+    case 'stage':
+      behavior.gesture('nod')
+      if (!quiet) behavior.say(lines.agentStage(p.title), 3000)
+      break
+    case 'plan_end':
+      behavior.setWorking(false)
+      behavior.react('happy')
+      if (!quiet) conversation.announce(lines.agentPlanEnd)
+      break
+    case 'plan_pause':
+      behavior.setWorking(false)
+      behavior.gesture('tilt')
+      if (!quiet) behavior.say(lines.agentPlanPause(p.text), 5000)
+      break
   }
 }
 

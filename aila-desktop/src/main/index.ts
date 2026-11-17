@@ -628,11 +628,20 @@ function registerIpc(): void {
   ipcMain.handle('agent:memory-forget', (e, cwd: unknown, id: unknown) =>
     fromAgent(e) && cwdOk(cwd) && typeof id === 'string' && /^[\w-]{1,64}$/.test(id) ? agentRelay.forgetMemory(cwd, id) : notAllowed
   )
-  ipcMain.on('agent:send', (e, sid: unknown, text: unknown, review: unknown) => {
+  ipcMain.on('agent:send', (e, sid: unknown, text: unknown, review: unknown, plan: unknown) => {
     if (!fromAgent(e) || !sidOk(sid) || typeof text !== 'string') return
-    // /review 可以不带话；普通的一句话不能是空的
+    // /review 可以不带话；普通的一句话、出方案的目标不能是空的
     if (review === true) agentRelay.send(sid, text.slice(0, 20000), true)
-    else if (text.trim()) agentRelay.send(sid, text.slice(0, 20000))
+    else if (text.trim()) agentRelay.send(sid, text.slice(0, 20000), false, plan === true)
+  })
+  // 长任务：批准并开始做、停下以后接着做、不要这份计划
+  ipcMain.handle('agent:plan', (e, sid: unknown, action: unknown, pauseEach: unknown) => {
+    if (!fromAgent(e) || !sidOk(sid)) return notAllowed
+    if (action === 'approve') agentRelay.planApprove(sid, pauseEach === true)
+    else if (action === 'continue') agentRelay.planContinue(sid)
+    else if (action === 'reject') return agentRelay.planReject(sid)
+    else return notAllowed
+    return { ok: true }
   })
   ipcMain.on('agent:watch', (e, sid: unknown, after: unknown) => {
     if (fromAgent(e) && sidOk(sid)) agentRelay.watch(sid, Number.isInteger(after) ? (after as number) : -1)

@@ -34,6 +34,8 @@ export interface AgentSessionSummary {
   /** null 或旧服务缺失字段表示当前无法完整计价。 */
   cost?: number | null
   budget?: number | null
+  /** 长任务的计划做到哪了（没有计划是 null）：列表里显示「第 2/4 阶段」 */
+  plan?: { decision: 'proposed' | 'approved' | 'rejected'; stages: number; done: number; finished: boolean } | null
   running?: boolean
   shell?: string
   /** 在新分支上做时的分支名（放弃了或者不在分支上是 null） */
@@ -111,4 +113,8 @@ export type AgentProgress =
   | { kind: 'done'; files: number }
   | { kind: 'stopped'; reason: string }
   | { kind: 'budget' }
+  /** 长任务：一个阶段做完了、整个计划做完了、计划停下了（text 是原因） */
+  | { kind: 'stage'; title: string }
+  | { kind: 'plan_end' }
+  | { kind: 'plan_pause'; text: string }
   | { kind: 'error'; message: string }

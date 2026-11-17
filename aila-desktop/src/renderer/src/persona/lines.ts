@@ -60,6 +60,9 @@ export const lines = {
   } as Record<string, string>,
   agentError: '……出错了，没做完。原因写在任务页里。',
   agentBudget: '……花到上限了，我先停在这里。调高或取消上限后，说「继续」我再接着做。',
+  agentStage: (title: string): string => (title ? `「${title}」这一段做完了，接着下一段。` : '这一段做完了，接着下一段。'),
+  agentPlanEnd: '……计划全部做完了。请过目。',
+  agentPlanPause: (why: string): string => `……计划先停在这里${why ? `：${why}` : ''}。任务页里可以接着做。`,
   agentTaskStarted: ['好，我去任务页里修。', '……交给我。改之前会先问你。'],
   agentTaskFailed: (why: string): string => `……没开成。${why}`,
   /** 交给编程 Agent 的修报错任务（报错原文附在后面） */
