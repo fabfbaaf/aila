@@ -1,10 +1,14 @@
 <script setup lang="ts">
 /** 一个工具调用：一行「做什么」+ 结果。要确认的操作，确认按钮就在卡片里 */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
 
-const props = defineProps<{ item: ToolItem }>()
+const props = defineProps<{
+  item: ToolItem
+  sessionId?: string
+  loadScreenshot?: (sid: string, name: string) => Promise<string>
+}>()
 const emit = defineEmits<{ answer: [approved: boolean, remember: boolean] }>()
 
 const DIFF_LINES = 80
@@ -22,6 +26,33 @@ const asking = computed(() => !!props.item.confirm && !props.item.confirm.result
 /** 默认展开：改文件（看 diff）、命令（看输出）、出错、待办、助手的报告；读文件、搜索这些只看一行 */
 const open = computed(
   () => manual.value ?? (isEdit.value || isCommand.value || isExplore.value || failed.value || props.item.name === 'todo_write')
+)
+const screenshot = ref('')
+const screenshotStatus = ref('')
+watch(
+  () => [done.value && open.value, props.item.screenshot, props.sessionId, props.loadScreenshot] as const,
+  async ([visible, name, sid, load], _previous, cleanup) => {
+    let current = true
+    cleanup(() => { current = false })
+    screenshot.value = ''
+    screenshotStatus.value = ''
+    if (!visible || !name || !sid) return
+    if (!load) {
+      screenshotStatus.value = '在艾拉桌面端查看截图。'
+      return
+    }
+    screenshotStatus.value = '正在读截图…'
+    try {
+      const url = await load(sid, name)
+      if (current) {
+        screenshot.value = url
+        screenshotStatus.value = ''
+      }
+    } catch (err) {
+      if (current) screenshotStatus.value = err instanceof Error ? err.message : '截图读不到了。'
+    }
+  },
+  { immediate: true }
 )
 
 const summary = computed(() => {
@@ -54,6 +85,8 @@ const confirmIsDiff = computed(() => props.item.confirm?.kind === 'edit' && conf
 const rememberLabel = computed(() =>
   props.item.confirm?.kind === 'edit'
     ? '可以，这个会话里改文件不用再问'
+    : props.item.confirm?.kind === 'browser_local'
+      ? '可以，这个项目里这个端口以后都不用问'
     : props.item.confirm?.kind === 'mcp'
       ? '可以，这个外部工具以后都不用问'
       : '可以，这条命令在这个项目里不用再问'
@@ -80,12 +113,14 @@ function lineClass(line: string): string {
 
 <template>
   <div class="card" :class="[item.status, { asking }]">
-    <div class="head" @click="manual = !open">
+    <button type="button" class="head" :aria-expanded="open" @click="manual = !open">
       <span class="dot" :class="item.status"></span>
       <span class="action">{{ item.action }}</span>
       <span class="summary" :class="{ bad: failed }">{{ summary }}</span>
-      <span v-if="done && (item.content || item.diff)" class="chev">{{ open ? '收起' : '展开' }}</span>
-    </div>
+      <span v-if="done && (item.content || item.diff || item.screenshot)" class="chev">
+        {{ open ? '收起' : item.screenshot ? '看截图' : '展开' }}
+      </span>
+    </button>
 
     <!-- 等你确认 -->
     <div v-if="asking && item.confirm" class="confirm">
@@ -106,7 +141,11 @@ function lineClass(line: string): string {
     <div v-else-if="answered" class="answered">{{ answered }}</div>
 
     <template v-if="done && open">
-      <template v-if="isEdit && item.diff">
+      <div v-if="item.screenshot" class="screenshot">
+        <img v-if="screenshot" :src="screenshot" alt="编程任务截取的网页" @error="screenshot = ''; screenshotStatus = '截图显示不了。'" />
+        <div v-else role="status">{{ screenshotStatus }}</div>
+      </div>
+      <template v-else-if="isEdit && item.diff">
         <pre class="diff"><span v-for="(line, i) in diffLines" :key="i" :class="lineClass(line)">{{ line || ' ' }}
 </span></pre>
         <button v-if="diffMore > 0 && !showAll" class="more" @click="showAll = true">还有 {{ diffMore }} 行，展开全部</button>
@@ -155,6 +194,28 @@ function lineClass(line: string): string {
   cursor: pointer;
   user-select: none;
   font-size: 13px;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+
+.head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.screenshot {
+  padding: 8px 12px;
+  color: var(--dim);
+  border-top: 1px solid var(--line);
+}
+
+.screenshot img {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .head:hover {

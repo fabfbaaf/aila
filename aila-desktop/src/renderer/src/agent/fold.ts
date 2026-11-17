@@ -8,6 +8,7 @@
  * - 整个会话：最新的待办清单、改过的文件、累计用量、权限模式、是不是正在做
  */
 import type { AgentEvent, AgentMode, AgentUndoEvent } from '../../../shared/agent'
+import { isAgentScreenshotName } from '../../../shared/agent'
 import { validBudget, yuan } from '../../../shared/budget'
 
 export interface TodoItem {
@@ -38,6 +39,7 @@ export interface ToolItem {
   file?: string
   todos?: TodoItem[]
   exitCode?: number | null
+  screenshot?: string
   confirm?: ConfirmState
   /** explore：派出去的助手用的模型、查了几步（报告在 content 里） */
   sub?: { model: string; steps: number }
@@ -291,6 +293,9 @@ export class Transcript {
         const tool = this.tool(String(e.id), String(e.name ?? ''))
         tool.status = String(e.status ?? 'ok')
         tool.content = String(e.content ?? '')
+        if (tool.name === 'browser_screenshot' && tool.status === 'ok' && isAgentScreenshotName(e.screenshot)) {
+          tool.screenshot = e.screenshot
+        }
         if (typeof e.diff === 'string') tool.diff = e.diff
         if (typeof e.file === 'string') {
           tool.file = e.file

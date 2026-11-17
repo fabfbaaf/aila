@@ -11,6 +11,9 @@
 - 记项目记忆（以后每个会话都会带上）：只读不让记，先问再改要问，自动模式直接记
 - MCP 外部工具（mcp.py）：服务标了只读的不用问；其他的只读模式不让用，另外两种模式都要问
   （它们在项目以外做事），可以选「这个工具以后都不用问」
+- 浏览器：browser_read 是打开公网网页和查看类操作；browser_get 是普通链接、GET 表单或管理标签页，只读模式不执行。
+  browser_local 首次访问本机端口要问，可以按项目记。browser_interact 在本机页面上按权限模式，
+  browser_external 在公网页面上做可能产生副作用的操作，任何非只读模式都要问。
 - 问的时候可以选「以后都允许」：改文件 → 这个会话里改文件不再问；命令 → 这个项目里这条命令（一字不差）以后不再问，
   记在 data/agent_rules.json
 
@@ -142,6 +145,7 @@ class Policy:
     def __init__(self, project: Path, rules: Rules, mode: Mode = "ask", mcp: McpRules | None = None) -> None:
         self.project = project
         self.rules = rules
+        self.browser_rules = Rules(rules.path.with_name("browser_rules.json"))
         self.mode: Mode = mode
         self.mcp = mcp
         self.edits_allowed = False  # 这个会话里选过「改文件以后都允许」
@@ -149,6 +153,19 @@ class Policy:
     def decide(self, kind: str, command: str = "") -> Decision:
         if kind in ("read", "meta"):
             return Decision("allow")
+        if kind == "browser_local":
+            if command in self.browser_rules.commands(self.project):
+                return Decision("allow")
+            return Decision("ask", f"访问本机的 {command} 端口", can_remember=True)
+        if kind == "browser_read":
+            return Decision("allow")
+        if kind in ("browser_get", "browser_interact", "browser_external"):
+            if self.mode == "read_only":
+                return Decision("deny", "现在是只读模式，只能打开和查看网页、截图、翻页。")
+            if kind == "browser_get" or (kind == "browser_interact" and self.mode == "auto"):
+                return Decision("allow")
+            reason = "这个网页操作可能会在公网网站上产生变化" if kind == "browser_external" else "要操作本机开发页面"
+            return Decision("ask", reason)
         if kind == "secret":
             return Decision("ask", "这个文件可能存着密码或密钥")
         if kind == "edit":
@@ -201,3 +218,5 @@ class Policy:
             self.rules.allow(self.project, command.strip())
         elif kind == "mcp" and self.mcp:
             self.mcp.allow(command)
+        elif kind == "browser_local" and command.isascii() and command.isdecimal() and 0 < int(command) <= 65535:
+            self.browser_rules.allow(self.project, command)

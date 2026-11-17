@@ -89,7 +89,8 @@ beforeEach(async () => {
   fixture.source = {
     list: vi.fn(async () => [summary()]),
     get: vi.fn(async () => ({ ...summary(), events: [{ type: 'start', seq: 0, budget: 0.01 }, { type: 'user', seq: 1, t: 1, text: '做任务' }] })),
-    setBudget: vi.fn(), watch: vi.fn(), projects: vi.fn(async () => []), models: vi.fn(async () => null),
+    setBudget: vi.fn(), screenshot: vi.fn(async () => 'data:image/png;base64,preview'),
+    watch: vi.fn(), projects: vi.fn(async () => []), models: vi.fn(async () => null),
     takeFocus: vi.fn(async () => null), confirm: vi.fn(async () => true), interrupt: vi.fn(async () => {}),
     onEvent: (cb: (sid: string, e: AgentEvent) => void) => { event = cb }, onStreamEnd: vi.fn(), onFocus: vi.fn()
   } as unknown as AgentSource
@@ -100,6 +101,25 @@ beforeEach(async () => {
   debug = (host as unknown as { __agent: typeof debug }).__agent
 })
 afterEach(() => { app?.unmount(); app = undefined; vi.useRealTimers(); vi.unstubAllGlobals() })
+
+describe('任务页网页截图', () => {
+  it('成功的截图事件可以在原工具卡片里展开预览', async () => {
+    const screenshot = '1234567890abcdef1234567890abcdef.png'
+    event('s1', { type: 'tool', seq: 2, id: 'shot', name: 'browser_screenshot', status: 'ok', content: '截图已保存', screenshot })
+    await settle()
+    expect(fixture.source.screenshot).not.toHaveBeenCalled()
+    const header = byClass(root, 'head')
+    expect(header.tag).toBe('button')
+    expect(header.props['aria-expanded']).toBe(false)
+    header.props.onClick()
+    await settle()
+    expect(fixture.source.screenshot).toHaveBeenCalledWith('s1', screenshot)
+    expect(find(root, (item) => item.tag === 'img')?.props).toMatchObject({
+      src: 'data:image/png;base64,preview',
+      alt: '编程任务截取的网页'
+    })
+  })
+})
 
 describe('任务页预算', () => {
   it('保存先返回较大 seq 时补齐日志，晚到的流不会丢掉工具、用量或结束记录', async () => {

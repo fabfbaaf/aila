@@ -664,7 +664,8 @@ onBeforeUnmount(() => {
             <div v-else-if="item.kind === 'user'" class="user">{{ item.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
             <div v-else-if="item.kind === 'text'" class="md" :class="{ live: item.live }" v-html="renderMarkdown(item.text)"></div>
-            <ToolCard v-else-if="item.kind === 'tool'" :item="item" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
+            <ToolCard v-else-if="item.kind === 'tool'" :item="item" :session-id="current.id"
+              :load-screenshot="source.screenshot" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
             <div v-else-if="item.kind === 'merge'" class="merge" :class="{ ok: item.merged }">
               <div class="merge-head">{{ item.merged ? '✓ 合并了' : '■ 没有合并' }}</div>
               <div>{{ item.reason }}</div>

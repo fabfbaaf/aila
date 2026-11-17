@@ -171,6 +171,7 @@ const api = {
   agentMcpRemove: (name: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:remove', name),
   agentMcpForget: (name: string, tool: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:forget', name, tool),
   agentForgetRule: (project: string, command: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:rules:forget', project, command),
+  agentScreenshot: (sid: string, name: string): Promise<AiResult<string>> => ipcRenderer.invoke('agent:screenshot', sid, name),
   onAgentEvent: (cb: (sid: string, event: AgentEvent) => void): Unsubscribe => listen('agent:event', cb),
   onAgentStreamEnd: (cb: (sid: string, error?: string) => void): Unsubscribe => listen('agent:stream-end', cb),
   onAgentFocus: (cb: (sid: string) => void): Unsubscribe => listen('agent:focus', cb),

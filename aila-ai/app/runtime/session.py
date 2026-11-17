@@ -323,10 +323,12 @@ class SessionStore:
         session = self.get(sid)
         if session is None:
             return False
-        for suffix in (".sub", ".snap"):
+        for suffix in (".sub", ".snap", ".shots"):
             folder = session.path.with_suffix(suffix)
             if folder.is_symlink():
                 folder.unlink()
+            elif suffix == ".shots" and folder.is_junction():
+                folder.rmdir()
             elif folder.is_dir():
                 shutil.rmtree(folder)
         session.path.unlink(missing_ok=True)

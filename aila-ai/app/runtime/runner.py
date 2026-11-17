@@ -131,13 +131,16 @@ class Runtime:
         extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
         explorer = Explorer(session, workspace.root, self.shell, extra, self.rules, self.fast_factory,
                             self.config.context_window)
+        from .browsertools import BrowserAccess
+
+        browser = BrowserAccess(workspace, session.path)
         agent = Agent(
             session,
             self.model_factory(),
             # 记忆按你原来的项目记（在新分支上做时也是）
-            CodingTools(workspace, self.shell, [*extra, explorer.tool(), remember_tool(self.memory, session.cwd, session.id),
-                                                *bridge_tools(self.mcp)],
-                        snapshots=Snapshots(session.path.with_suffix(".snap"))),
+            CodingTools(workspace, self.shell, [*extra, explorer.tool(), *browser.tools(),
+                                                remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp)],
+                        snapshots=Snapshots(session.path.with_suffix(".snap")), on_close=browser.close),
             Policy(session.cwd, self.rules, mode, self.mcp),  # type: ignore[arg-type]
             self.confirms,
             self.config,

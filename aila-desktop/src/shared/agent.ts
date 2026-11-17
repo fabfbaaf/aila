@@ -112,3 +112,7 @@ export type AgentProgress =
   | { kind: 'stopped'; reason: string }
   | { kind: 'budget' }
   | { kind: 'error'; message: string }
+/** 浏览器生成的截屏只用文件名在事件里引用，不携带本机路径。 */
+export function isAgentScreenshotName(value: unknown): value is string {
+  return typeof value === 'string' && value.length === 36 && /^[0-9a-f]{32}\.png$/.test(value)
+}

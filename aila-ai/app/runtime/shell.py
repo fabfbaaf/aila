@@ -18,6 +18,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections.abc import Awaitable, Callable
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -316,11 +317,12 @@ class Job:
 class BackgroundJobs:
     """每个会话一份：编号递增、同时最多三个，关闭时停止全部后台进程。"""
 
-    def __init__(self) -> None:
+    def __init__(self, on_close: Callable[[], Awaitable[None]] | None = None) -> None:
         self.jobs: dict[str, Job] = {}
         self._next = 1
         self._lock = asyncio.Lock()
         self._closed = False
+        self._on_close = on_close
 
     async def start(self, shell: Shell, command: str, cwd: Path) -> Job:
         async with self._lock:
@@ -373,9 +375,11 @@ class BackgroundJobs:
         return job
 
     async def stop_all(self) -> None:
-        """停掉当前进程，保留任务记录和后续启动能力。"""
+        """会话删除或运行时关闭时停掉进程，并释放挂在会话上的资源。"""
         async with self._lock:
             await asyncio.gather(*(job.stop() for job in self.jobs.values()))
+            if self._on_close is not None:
+                await self._on_close()
 
     async def shutdown(self) -> None:
         self._closed = True
