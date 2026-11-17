@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue'
 import { compact } from './fold'
 import { slowest, type TraceRow, type TraceTurn } from './trace'
+import UndoResult from './UndoResult.vue'
 
 const props = defineProps<{ turns: TraceTurn[] }>()
 const showAll = ref(false)
@@ -70,6 +71,7 @@ function ticks(turn: TraceTurn): number[] {
       <footer v-if="!turn.running && turn.rows.length > 2">
         最慢：<span v-for="(r, i) in slowest(turn)" :key="i">{{ i ? '、' : '' }}{{ r.label }} {{ secs(r.end - r.start) }}</span>
       </footer>
+      <UndoResult v-if="turn.undo" :result="turn.undo" />
     </section>
     <button v-if="turns.length > 3 && !showAll" class="more" @click="showAll = true">还有 {{ turns.length - 3 }} 轮更早的</button>
     <div class="legend">

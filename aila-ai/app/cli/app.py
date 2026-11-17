@@ -33,7 +33,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..runtime.permissions import MODE_LABELS, MODES
-from ..runtime.session import SESSION_ID, same_project
+from ..runtime.session import SESSION_ID, latest_turn, same_project, turn_edits
 from .backend import Backend, BackendError, connect
 from .commands import COMMANDS, INIT_PROMPT, KEYS, changed_files, latest_todos, next_mode, parse, usage_lines
 from .render import Renderer
@@ -330,12 +330,51 @@ class Terminal:
                         command = commands[int(parts[1]) - 1]
                         await self.backend.forget_rule(mine["project"], command)
                         self.console.print(Text(f"删掉了记住的命令：{command}；下次执行时重新按权限模式确认。", style="dim"))
+            elif name == "/undo":
+                await self._undo()
             else:
                 self.console.print(Text(f"没有 {name} 这个命令，/help 看所有命令", style="dim"))
         except BackendError as err:
             self.renderer.stop_waiting()
             self.console.print(Text(str(err), style="red"))
         return ""
+
+    async def _undo(self) -> None:
+        session = await self.backend.session(self.sid)
+        if session.get("running"):
+            raise BackendError("她还在做事，等这一轮结束再撤销。")
+        events = session["events"]
+        turn = latest_turn(events)
+        files = sorted({edit["file"] for edit in turn_edits(turn)})
+        if not files:
+            raise BackendError("最近一轮没有改文件。")
+        seq = turn[0]["seq"]
+        if any(e["type"] == "undo" and e.get("turn_seq") == seq for e in events):
+            raise BackendError("最近一轮已经撤销过了。")
+
+        self.console.print(Text("准备撤销最近一轮对这些文件的改动："))
+        for path in files:
+            self.console.print(Text(f"  {path}"))
+        self.console.print(Text("之后又被改过的文件会跳过。", style="dim"))
+        if any(e["type"] == "tool" and e.get("name") == "run_command" and e.get("status") == "ok" for e in turn):
+            self.console.print(Text("这一轮还跑过命令，命令做的事不会撤销。", style="yellow"))
+        try:
+            answer = await self.prompt.prompt_async("撤销这一轮？[y/n] ")
+        except (KeyboardInterrupt, EOFError):
+            answer = "n"
+        if answer.strip().lower() not in ("y", "yes"):
+            self.console.print(Text("没撤销。", style="dim"))
+            return
+
+        event = await self.backend.undo(self.sid, seq)
+        restored, skipped = event["restored"], event["skipped"]
+        self.console.print(Text(f"退回了 {len(restored)} 个文件。"))
+        for path in restored:
+            self.console.print(Text(f"  退回 {path}"))
+        for path, reason in skipped.items():
+            self.console.print(Text(f"  跳过 {path}：{reason}", style="yellow"))
+        if event.get("commands"):
+            self.console.print(Text("这一轮还跑过命令，命令做的事没有撤销。", style="yellow"))
 
     def _help(self) -> None:
         table = Table(show_header=False, box=None, padding=(0, 2))

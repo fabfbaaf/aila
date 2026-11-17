@@ -24,7 +24,7 @@ import type {
   VoicePrefs
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
-import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary } from '../shared/agent'
+import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
@@ -139,6 +139,7 @@ const api = {
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
   agentMerge: (sid: string, runTests: boolean): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:merge', sid, runTests),
   agentDiscard: (sid: string): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:discard', sid),
+  agentUndo: (sid: string, turnSeq: number): Promise<AiResult<AgentUndoEvent>> => ipcRenderer.invoke('agent:undo', sid, turnSeq),
   /** 仅主窗口：改会话标题、删除会话 */
   agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
   agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),

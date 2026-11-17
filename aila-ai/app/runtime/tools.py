@@ -12,13 +12,15 @@
 import difflib
 import re
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ..llm import Usage
 from .shell import BackgroundJobs, DEFAULT_TIMEOUT, Job, JobLimitError, MAX_TIMEOUT, Shell, run
-from .workspace import Workspace, WorkspaceError, glob_match, read_text, write_text
+from .snapshots import Snapshots
+from .workspace import Workspace, WorkspaceError, decode_text, glob_match, read_text
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -38,6 +40,18 @@ class Outcome:
     extra: dict[str, Any] = field(default_factory=dict)  # 只给界面看（比如完整的 diff），不发给模型
     # 工具自己调了模型（子 Agent）：用了多少，记进会话的用量
     usage: Usage | None = None
+
+
+@dataclass(frozen=True)
+class _EditPlan:
+    """预览只需要文本，实际写入用同一版原始字节留底。"""
+
+    path: Path
+    before: str
+    after: str
+    encoding: str
+    original: bytes | None
+    secret: bool
 
 
 @dataclass
@@ -71,9 +85,11 @@ def _int(desc: str) -> dict[str, str]:
 
 
 class CodingTools:
-    def __init__(self, workspace: Workspace, shell: Shell, extra: list[CodingTool] | None = None) -> None:
+    def __init__(self, workspace: Workspace, shell: Shell, extra: list[CodingTool] | None = None,
+                 snapshots: Snapshots | None = None) -> None:
         self.ws = workspace
         self.shell = shell
+        self.snapshots = snapshots
         self.jobs = BackgroundJobs()
         self.todos: list[dict[str, str]] = []
         # 基本工具在前、额外的（代码库）在后，顺序固定
@@ -267,15 +283,16 @@ class CodingTools:
 
     # ---------- 改 ----------
 
-    def _plan_edit(self, args: dict[str, Any]) -> tuple[Path, str, str, str]:
-        path = self.ws.resolve(str(args.get("path", "")), for_write=True)
+    def _plan_edit(self, args: dict[str, Any]) -> _EditPlan:
+        raw = str(args.get("path", ""))
+        path = self.ws.resolve(raw, for_write=True)
         old, new = str(args.get("old_string", "")), str(args.get("new_string", ""))
         if not path.is_file():
             raise WorkspaceError(f"{self.ws.rel(path)} 不存在；新建文件用 write_file。")
         if not old:
             raise WorkspaceError("old_string 不能为空；要整个重写用 write_file。")
-        self.ws.check_fresh(path)
-        text, encoding = read_text(path)
+        original = self.ws.check_fresh(path)
+        text, encoding = decode_text(original, path.name)
         crlf = "\r\n" in text
         old_n, new_n = _eol(old, crlf), _eol(new, crlf)
         count = text.count(old_n)
@@ -286,49 +303,77 @@ class CodingTools:
         after = text.replace(old_n, new_n) if args.get("replace_all") else text.replace(old_n, new_n, 1)
         if after == text:
             raise WorkspaceError("改完和原来一样，没有要改的。")
-        return path, text, after, encoding
+        secret = self.ws.is_secret(path) or self.ws.is_secret(Path(raw.strip()))
+        return _EditPlan(path, text, after, encoding, original, secret)
 
     def _edit_preview(self, args: dict[str, Any]) -> str:
         try:
-            path, before, after, _ = self._plan_edit(args)
+            plan = self._plan_edit(args)
         except WorkspaceError as err:
             return str(err)
-        return _cap(make_diff(self.ws.rel(path), before, after), DIFF_CHARS)
+        return _cap(make_diff(self.ws.rel(plan.path), plan.before, plan.after), DIFF_CHARS)
 
     async def _edit(self, args: dict[str, Any]) -> Outcome:
-        path, before, after, encoding = self._plan_edit(args)
-        write_text(path, after, encoding)
-        self.ws.remember(path)
-        return self._changed(path, before, after)
+        return self._apply_edit(self._plan_edit(args))
 
-    def _plan_write(self, args: dict[str, Any]) -> tuple[Path, str, str, str]:
-        path = self.ws.resolve(str(args.get("path", "")), for_write=True)
+    def _plan_write(self, args: dict[str, Any]) -> _EditPlan:
+        raw = str(args.get("path", ""))
+        path = self.ws.resolve(raw, for_write=True)
+        secret = self.ws.is_secret(path) or self.ws.is_secret(Path(raw.strip()))
         content = str(args.get("content", ""))
         if path.is_dir():
             raise WorkspaceError(f"{self.ws.rel(path)} 是目录。")
         if path.exists():
-            self.ws.check_fresh(path)
-            before, encoding = read_text(path)
+            original = self.ws.check_fresh(path)
+            before, encoding = decode_text(original, path.name)
             if "\r\n" in before:
                 content = _eol(content, True)
-            return path, before, content, encoding
-        return path, "", content, "utf-8"
+            return _EditPlan(path, before, content, encoding, original, secret)
+        return _EditPlan(path, "", content, "utf-8", None, secret)
 
     def _write_preview(self, args: dict[str, Any]) -> str:
         try:
-            path, before, after, _ = self._plan_write(args)
+            plan = self._plan_write(args)
         except WorkspaceError as err:
             return str(err)
-        return _cap(make_diff(self.ws.rel(path), before, after), DIFF_CHARS)
+        return _cap(make_diff(self.ws.rel(plan.path), plan.before, plan.after), DIFF_CHARS)
 
     async def _write(self, args: dict[str, Any]) -> Outcome:
-        path, before, after, encoding = self._plan_write(args)
-        write_text(path, after, encoding)
-        self.ws.remember(path)
-        return self._changed(path, before, after, created=not before)
+        return self._apply_edit(self._plan_write(args))
+
+    def _apply_edit(self, plan: _EditPlan) -> Outcome:
+        path = plan.path
+        data = plan.after.encode(plan.encoding)
+        created = plan.original is None
+        snapshots = None if plan.secret else self.snapshots
+        metadata = snapshots.capture(plan.original, data) if snapshots is not None else {}
+        writing = False
+        try:
+            if self.ws.resolve(str(path), for_write=True) != path:
+                raise WorkspaceError("文件指向的位置变了，先重新读一下再改。")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # 文件恰好被用户新建时不能覆盖。已有文件用同一个句柄再检查和写，保留原来的权限。
+            with path.open("xb" if created else "r+b") as stream:
+                if not created and snapshots is not None:
+                    if stream.read() != plan.original:
+                        raise WorkspaceError("文件在准备写入时被改过，先重新读一下再改。")
+                    stream.seek(0)
+                writing = True
+                stream.write(data)
+                stream.truncate()
+        except (OSError, WorkspaceError):
+            index = metadata.get("snap")
+            if not writing and snapshots is not None and type(index) is int:
+                with suppress(OSError, WorkspaceError):
+                    snapshots.discard(index)
+            raise
+        self.ws.remember(path, data)
+        result = self._changed(path, plan.before, plan.after, created=created)
+        result.extra.update(metadata)
+        return result
 
     def _changed(self, path: Path, before: str, after: str, created: bool = False) -> Outcome:
-        rel = self.ws.rel(path)
+        rel = path.relative_to(self.ws.root).as_posix()
         diff = make_diff(rel, before, after)
         added = sum(1 for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
         removed = sum(1 for line in diff.splitlines() if line.startswith("-") and not line.startswith("---"))

@@ -22,6 +22,7 @@ COMMANDS: dict[str, str] = {
     "/discard": "在新分支上做时：放弃分支，你的代码保持原样",
     "/rules": "看这个项目记住的命令；/rules forget 编号 删掉一条，下次执行时重新按权限模式确认",
     "/exit": "退出（Ctrl+D 也行）",
+    "/undo": "撤销最近一轮用文件工具做的改动（先问 y/n）",
 }
 ALIASES = {"/quit": "/exit", "/sessions": "/resume", "/cost": "/usage", "/clear": "/new", "/?": "/help"}
 

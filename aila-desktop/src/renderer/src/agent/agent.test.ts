@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import type { AgentEvent } from '../../../shared/agent'
 import { Transcript, endStats, endText, type EndItem, type MergeItem, type ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
+import { buildTrace } from './trace'
 
 const ev = (type: string, extra: Record<string, unknown> = {}): AgentEvent => ({ type, ...extra })
 
@@ -25,6 +26,53 @@ function turn(): AgentEvent[] {
 }
 
 describe('工作窗口：事件折叠', () => {
+  it('只给最近一轮撤销入口，预览去重并区分新建、修改、未留底和命令', () => {
+    const t = reactive(new Transcript())
+    const target = computed(() => t.undoTarget)
+    t.apply(ev('user', { seq: 1, t: 10 }))
+    t.apply(ev('tool', { seq: 2, id: 'a', name: 'write_file', status: 'ok', file: '新建.txt', created: true, after: 'a' }))
+    t.apply(ev('tool', { seq: 3, id: 'b', name: 'edit_file', status: 'ok', file: '新建.txt', created: false, snap: 0, after: 'b' }))
+    t.apply(ev('tool', { seq: 4, id: 'c', name: 'edit_file', status: 'ok', file: '修改.txt', created: false, snap: 1, after: 'c' }))
+    t.apply(ev('tool', { seq: 5, id: 'd', name: 'edit_file', status: 'ok', file: '旧记录.txt' }))
+    t.apply(ev('tool', { seq: 6, id: 'e', name: 'edit_file', status: 'error', file: '没写到.txt', created: false, snap: 2, after: 'd' }))
+    t.apply(ev('tool', { seq: 7, id: 'f', name: 'run_command', status: 'ok', exit_code: 0 }))
+    expect(target.value).toBeUndefined()
+    t.apply(ev('turn_end', { seq: 8, t: 12, reason: 'interrupted' }))
+    expect(target.value?.undo).toEqual({
+      turnSeq: 1,
+      files: [{ path: '新建.txt', created: true }, { path: '修改.txt', created: false }],
+      missing: ['旧记录.txt'],
+      commands: true
+    })
+    t.apply(ev('user', { seq: 9 }))
+    expect(target.value).toBeUndefined()
+    t.apply(ev('turn_end', { seq: 10, reason: 'done' }))
+    expect(target.value).toBeUndefined()
+  })
+
+  it('回放撤销结果后收起入口，下一轮仍能撤销，旧日志、关闭的分支没有入口', () => {
+    const t = new Transcript()
+    const edits = (seq: number, created: boolean) => [
+      ev('user', { seq, t: 10 + seq }),
+      ev('tool', { seq: seq + 1, id: 'a', name: 'write_file', status: 'ok', file: 'file.txt', ...(created && { created, after: 'a' }) }),
+      ev('turn_end', { seq: seq + 2, t: 11 + seq })
+    ]
+    edits(1, false).forEach((e) => t.apply(e))
+    expect(t.undoTarget).toBeUndefined()
+    edits(4, true).forEach((e) => t.apply(e))
+    expect(t.undoTarget?.undo?.turnSeq).toBe(4)
+    const result = ev('undo', { seq: 7, t: 210, turn_seq: 4, restored: ['file.txt'], skipped: { 'b.py': '后来被修改' }, commands: true })
+    t.apply(result)
+    t.apply(result)
+    expect(t.undoTarget).toBeUndefined()
+    expect(t.items.filter((item) => item.kind === 'undo')).toMatchObject([{ result }])
+    expect(buildTrace(t.events)[1]).toMatchObject({ duration: 1, undo: result })
+    edits(8, true).forEach((e) => t.apply(e))
+    expect(t.undoTarget?.undo?.turnSeq).toBe(8)
+    t.apply(ev('branch_closed', { seq: 11 }))
+    expect(t.undoTarget).toBeUndefined()
+  })
+
   it('重放后台命令和任务工具时显示对应的操作标题', () => {
     const t = new Transcript()
     t.apply(ev('assistant', { seq: 1, text: '', tool_calls: [

@@ -9,8 +9,8 @@
  * 时间都来自会话日志：事件的 t（写进日志的时刻），加上 assistant 事件里的 timing（这一步多久、多久出第一个字）、
  * tool 事件里的 seconds（工具跑了多久）。重新打开会话也能画出来。
  */
-import type { AgentEvent } from '../../../shared/agent'
-import { actionOf } from './fold'
+import type { AgentEvent, AgentUndoEvent } from '../../../shared/agent'
+import { actionOf, readUndo } from './fold'
 
 export interface TraceRow {
   kind: 'model' | 'tool' | 'wait'
@@ -35,6 +35,7 @@ export interface TraceTurn {
   prompt: number
   hit: number
   completion: number
+  undo?: AgentUndoEvent
 }
 
 function parseArgs(raw: unknown): Record<string, unknown> {
@@ -65,6 +66,12 @@ export function buildTrace(events: AgentEvent[], now?: number): TraceTurn[] {
         running: true, steps: 0, prompt: 0, hit: 0, completion: 0 }
       turns.push(turn)
       continue
+    }
+    if (e.type === 'undo') {
+      const result = readUndo(e)
+      const target = result && turns.find((item) => item.key === `turn-${result.turn_seq}`)
+      if (target) target.undo = result
+      continue // 用户随后做的撤销不算在执行用时里
     }
     if (!turn || t === null) continue
     const rel = (x: number): number => Math.max(0, x - origin)
