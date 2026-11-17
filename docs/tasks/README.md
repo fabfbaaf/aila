@@ -12,6 +12,9 @@
 | [06 安装包](06-installer.md) | Windows 安装包，AI 服务打包在里面，不用装 Python、Node | `aila-ai/scripts/build_service.py`、`aila-desktop/electron-builder.yml` | 暂停：等一个干净的 Windows 测试用户或虚拟机（草稿在 `codex/06-installer`） |
 | [07 撤销一轮](07-undo-turn.md) | 把她最近一轮改的文件退回去（用户之后改过的不碰） | 新的 `runtime/snapshots.py`、`tools.py`、`runner.py`、任务页、终端 | 已合并（cd108de） |
 | [08 花费和上限](08-budget.md) | 按价格表算钱；给任务设上限，花到了就停 | 新的 `runtime/pricing.py`、`loop.py`、`session.py`、任务页、终端 | 已合并（0c2254d）；DeepSeek 价格要在 `aila-ai/data/prices.json` 填 |
+| [09 嘴上只说总结](09-spoken-summary.md) | 回答照样写全，语音只念开头一两句总结，气泡也只显示总结 | `aila-ai/app/tags.py`、桌面端 `chat/Conversation.ts`、气泡 | 可以开始 |
+| [10 编程任务里的浏览器](10-agent-browser.md) | 编程任务也能用浏览器，能开项目自己的本机开发服务器、按键、多标签、上传、截图 | 新的 `runtime/browsertools.py`、`permissions.py`、`browser/session.py`、任务页卡片 | 可以开始 |
+| [11 电脑任务](11-computer-tasks.md) | 不选项目，用命令行操作这台电脑；对话里一两步的小事直接做 | `runner.py`、`permissions.py`、`prompt.py`、任务页、对话的新技能包 | 等 Claude 的「长任务和整体规划」合并 |
 
 ## 先后顺序
 
@@ -19,9 +22,19 @@
 
 ```
 已合并：         01   02   03   04   05   07   08
-现在可以开：     （等写新说明）
+现在可以开：     09   10
+等 Claude 的 B： 11
 暂停：           06（等测试环境）
 ```
+
+Claude 自己做的两件（不交给 Codex，做完同样在自己的分支上、写结果说明）：
+
+- A 人格和说话方式：把她这个人写具体，回答精简，定下 09 用的 `[say]` 格式（改 `aila-ai/app/persona.py`，09 不碰这个文件）
+- B 长任务和整体规划：先出分阶段的计划、你批准后按阶段推进、不受一轮步数限制、能断点接着做（改 `runner.py`、`loop.py`、`session.py`、任务页）
+
+- 09 只改对话那条路（AI 服务的标签解析和桌面端的语音、气泡），和谁都不冲突
+- 10 只在 `runner.py` 组装工具列表那一处加东西，可以和 B 同时做
+- 11 和 B 改同一批文件，排在 B 后面
 
 - 05、06 只改桌面端主进程和打包，和编程 Agent 的任务不冲突
 - 04、07、08 都要改 `runner.py`、`routes/agent.py`、终端命令、任务页，所以排成一串
@@ -34,8 +47,6 @@
 |---|---|---|
 | 「等你」收件箱 | 所有会话里等你确认的事汇到一处：主窗口图标栏的角标、她头上的气泡（小改动能直接点「可以」）、终端 | 桔梗定：气泡里能不能直接同意 |
 | 快速输入框 | 点她或 `Alt+Shift+A` 弹出一个输入框，按规则分流成聊天或编程任务；拖文件给她开任务 | 收件箱合并以后 |
-| `/review` | 让她只读地审一遍没提交的改动，按严重程度列出问题 | 07 合并以后 |
-| 项目记忆 | 她在任务里学到的项目约定记下来，下次开会话自动带上 | 可以写说明了 |
 | 语音派任务 | 「你好艾拉，把刚才挂掉的测试修一下」直接开任务 | 快速输入框合并以后 |
 
 ## 规矩
