@@ -86,6 +86,8 @@ export type CharacterEvent =
   | { kind: 'reminder-failed'; why: string }
   /** 连续用电脑满 N 分钟了 */
   | { kind: 'sit-break'; minutes: number }
+  /** 每天第一次见面说说昨天和今天（morning）、晚上的日报（evening）。detail：有具体的事可说（会给「看看任务」） */
+  | { kind: 'briefing'; when: 'morning' | 'evening'; text: string; detail: boolean }
 
 /** AI 服务的设置（GET /settings）。密钥只告诉设没设 */
 export interface AiSettings {

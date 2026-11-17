@@ -1,7 +1,8 @@
 // 主进程和渲染层共用：对话消息、AI 服务推过来的事件，以及 SSE 解析
 
 export type Emotion = 'happy' | 'sad' | 'surprised' | 'relaxed' | 'neutral'
-export type Gesture = 'nod' | 'shake' | 'tilt' | 'think' | 'bow'
+/** wave 挥手（大模型也能用）；stretch 伸懒腰（只在本地用：久坐提醒、睡醒） */
+export type Gesture = 'nod' | 'shake' | 'tilt' | 'think' | 'bow' | 'wave' | 'stretch'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'

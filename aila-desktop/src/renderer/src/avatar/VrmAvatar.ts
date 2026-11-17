@@ -22,6 +22,41 @@ export async function loadVrmAvatar(data: ArrayBuffer): Promise<VrmAvatar> {
   return new VrmAvatar(vrm)
 }
 
+const mix = (a: number, b: number, t: number): number => a + (b - a) * t
+
+type Rot = { x: number; y: number; z: number }
+
+/**
+ * 手臂的角度（VRM 1.0 的标准骨骼坐标，0.x 的模型在外面乘 flip）。
+ * 骨骼的旋转顺序是先 z 再 y 再 x（three.js 的 XYZ）：
+ * - 大臂：z 从 T 字往下放（左手负、右手正是放下）；放下以后 x 往身前抬（负数朝前）
+ * - 小臂：沿着手臂的方向是 x（绕它转只是拧手腕，不弯手肘）；手肘往前弯是 y（右手正、左手负），往上弯是 z
+ * 几个动作按权重叠：放下的姿势 → 敲键盘 → 挥手（只动右手）→ 伸懒腰（两只手）。
+ */
+export function armAngles(p: Pick<PoseState, 'armRaise' | 'forearmSwing' | 'armsUp' | 'typing' | 'typingBob'>): {
+  leftUpper: Rot
+  rightUpper: Rot
+  leftLower: Rot
+  rightLower: Rot
+} {
+  const bob = p.typingBob * 0.08 * p.typing
+  // 放下 → 敲键盘：大臂贴着身体稍微朝前，小臂往前、往中间收，两只手在肚子前面。
+  // 角度是在示例模型上量出来的：手在手肘下面一点、身前约 23 厘米、离中线约 9 厘米
+  let lu: Rot = { x: mix(0, -0.2, p.typing), y: 0, z: mix(-1.2, -1.3, p.typing) }
+  let ru: Rot = { x: mix(0, -0.2, p.typing), y: 0, z: mix(1.2, 1.3, p.typing) }
+  let ll: Rot = { x: 0, y: mix(0, -1.0, p.typing) + bob, z: mix(-0.15, -0.5, p.typing) }
+  let rl: Rot = { x: 0, y: mix(0, 1.0, p.typing) - bob, z: mix(0.15, 0.5, p.typing) }
+  // 挥手：右大臂抬到肩膀高度附近，小臂往上弯，左右摆
+  ru = { x: mix(ru.x, -0.2, p.armRaise), y: ru.y, z: mix(ru.z, 0.2, p.armRaise) }
+  rl = { x: rl.x, y: mix(rl.y, 0, p.armRaise), z: mix(rl.z, -1.5 + p.forearmSwing * 0.35, p.armRaise) }
+  // 伸懒腰：两只手举过头，小臂稍微弯
+  lu = { x: mix(lu.x, -0.15, p.armsUp), y: lu.y, z: mix(lu.z, 1.25, p.armsUp) }
+  ru = { x: mix(ru.x, -0.15, p.armsUp), y: ru.y, z: mix(ru.z, -1.25, p.armsUp) }
+  ll = { x: ll.x, y: mix(ll.y, 0, p.armsUp), z: mix(ll.z, 0.35, p.armsUp) }
+  rl = { x: rl.x, y: mix(rl.y, 0, p.armsUp), z: mix(rl.z, -0.35, p.armsUp) }
+  return { leftUpper: lu, rightUpper: ru, leftLower: ll, rightLower: rl }
+}
+
 export class VrmAvatar implements Avatar {
   readonly root: Object3D
   private lookObject = new Object3D()
@@ -49,11 +84,12 @@ export class VrmAvatar implements Avatar {
   update(dt: number, pose: PoseState, expr: Expressions): void {
     const f = this.flip
 
-    // 手臂从 T 字姿势放下来（待验证：不同模型可能要微调角度）
-    this.rotate('leftUpperArm', 0, 0, -1.2 * f)
-    this.rotate('rightUpperArm', 0, 0, 1.2 * f)
-    this.rotate('leftLowerArm', 0, 0, -0.15 * f)
-    this.rotate('rightLowerArm', 0, 0, 0.15 * f)
+    // 手臂从 T 字姿势放下来（待验证：不同模型可能要微调角度），再叠上挥手、伸懒腰、敲键盘
+    const arms = armAngles(pose)
+    this.rotate('leftUpperArm', arms.leftUpper.x * f, arms.leftUpper.y, arms.leftUpper.z * f)
+    this.rotate('rightUpperArm', arms.rightUpper.x * f, arms.rightUpper.y, arms.rightUpper.z * f)
+    this.rotate('leftLowerArm', arms.leftLower.x * f, arms.leftLower.y, arms.leftLower.z * f)
+    this.rotate('rightLowerArm', arms.rightLower.x * f, arms.rightLower.y, arms.rightLower.z * f)
 
     // 呼吸、后仰、摇晃
     this.rotate('spine', -pose.bodyLean * f, 0, pose.bodySway * f)

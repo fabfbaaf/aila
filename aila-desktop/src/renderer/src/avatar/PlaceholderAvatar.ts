@@ -110,8 +110,10 @@ export class PlaceholderAvatar implements Avatar {
     // 身体
     this.body.rotation.x = -pose.bodyLean
     this.body.rotation.z = pose.bodySway
-    this.arms[0].rotation.z = -0.12 - pose.bodySway * 1.5
-    this.arms[1].rotation.z = 0.12 - pose.bodySway * 1.5
+    // arms[0] 是她的右手（画面左边）：往外抬是 z 变小；伸懒腰两只手都举起来；敲键盘时手往前伸
+    this.arms[0].rotation.z = -0.12 - pose.bodySway * 1.5 - pose.armRaise * (2.3 + pose.forearmSwing * 0.25) - pose.armsUp * 2.6
+    this.arms[1].rotation.z = 0.12 - pose.bodySway * 1.5 + pose.armsUp * 2.6
+    for (const arm of this.arms) arm.rotation.x = -pose.typing * (0.9 + pose.typingBob * 0.06)
 
     // 头跟着视线转
     const head = this.getHeadWorldPosition(this.tmp)

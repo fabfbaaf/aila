@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   globalShortcut,
   ipcMain,
@@ -43,7 +44,8 @@ import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
 import { routeForSection, toHash, type ShellRoute } from '../shared/shell'
 import { trayIcon } from './trayIcon'
-import { DesktopKeeper } from './desktopKeeper'
+import { DesktopKeeper, type BriefingState } from './desktopKeeper'
+import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
@@ -87,6 +89,8 @@ let agentFocus: string | null = null
 let tray: Tray | null = null
 /** 全屏时躲开、免打扰、省电、提醒（见 desktopKeeper.ts） */
 let desktop: DesktopKeeper | null = null
+/** 拖到她身上的文件（只能读刚拖进来的） */
+const drops = new Drops()
 const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto']
 const agentRelay = new AgentRelay(AI_URL, {
   emit: (sid, e) => mainWin?.webContents.send('agent:event', sid, e),
@@ -123,6 +127,8 @@ interface Settings {
   modelPath?: string
   /** 桌面上的她的偏好（DesktopPrefs，读的时候再检查） */
   desktop?: unknown
+  /** 今天见过面、说过日报没有 */
+  briefing?: BriefingState
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -381,7 +387,10 @@ function createAccount(): Account {
     openSocket: (url, token) =>
       new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } }) as unknown as SocketLike,
     onStatus: (status) => broadcast('account:status', status),
-    onRemote: (changes) => win?.webContents.send('history:remote', changes),
+    onRemote: (changes) => {
+      win?.webContents.send('history:remote', changes)
+      mainWin?.webContents.send('history:changed')
+    },
     onMemories: (list) => broadcast('memory:changed', list),
     extractMemories: async (req) => {
       const res = await fetch(`${AI_URL}/memory/extract`, {
@@ -483,6 +492,10 @@ function registerIpc(): void {
 
   ipcMain.on('chat:start', (_e, id: number, messages: ChatMessage[]) => void relayChat(id, messages))
   ipcMain.on('chat:cancel', (_e, id: number) => chats.get(id)?.abort())
+  // 主窗口的对话记录页点「和她说话」：在桌面上打开对话框（只是打开，不代替用户说什么）
+  ipcMain.on('chat:open-request', (e) => {
+    if (mainWin && e.sender === mainWin.webContents) openChat()
+  })
   // 「好 / 不要」只认角色窗口发来的（设置窗口和别的页面不能替用户点头）
   ipcMain.handle('chat:confirm', (e, id: unknown, approved: unknown) => {
     if (e.sender !== win?.webContents || typeof id !== 'string' || id.length > 64 || typeof approved !== 'boolean') {
@@ -494,7 +507,10 @@ function registerIpc(): void {
 
   ipcMain.handle('history:load', () => account?.history.visible() ?? [])
   ipcMain.on('history:append', (_e, m: unknown) => {
-    if (isStoredMessage(m)) account?.append({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })
+    if (isStoredMessage(m)) {
+      account?.append({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })
+      mainWin?.webContents.send('history:changed')
+    }
   })
   ipcMain.on('settings:put', (_e, key: string, value: unknown) => account?.putSetting(key, value))
   ipcMain.handle('account:status', () => account?.status())
@@ -673,6 +689,13 @@ function registerIpc(): void {
   ipcMain.on('skills:set', (_e, id: string, on: boolean) => account?.setSkill(String(id), Boolean(on)))
   ipcMain.handle('model:path', () => loadSettings().modelPath ?? null)
   ipcMain.on('model:choose', (e) => void chooseModel(BrowserWindow.fromWebContents(e.sender)))
+  // 换回她自己的原创形象：忘掉选过的模型文件，角色窗口加载自带的那个
+  ipcMain.on('model:builtin', () => {
+    const { modelPath: _, ...rest } = loadSettings()
+    saveSettings(rest)
+    win?.webContents.send('model:builtin')
+    broadcast('model:path', null)
+  })
   ipcMain.on('win:reset-position', resetPosition)
   ipcMain.on('ai:reveal', async (_e, key: string) => {
     // 路径从 AI 服务的设置里取，渲染层只能说「哪一个」，不能指定任意路径
@@ -705,6 +728,15 @@ function registerIpc(): void {
     toggleDnd(on)
     return true
   })
+  // 拖给她的文件、剪贴板：只认角色窗口（她身上才能拖、对她说才会去看）
+  const fromCharacter = (e: { sender: Electron.WebContents }): boolean => !!win && e.sender === win.webContents
+  ipcMain.handle('drop:inspect', (e, paths: unknown) => {
+    if (!fromCharacter(e) || !Array.isArray(paths)) return []
+    return drops.inspect(paths.filter((p): p is string => typeof p === 'string' && p.length > 0 && p.length <= 1000))
+  })
+  ipcMain.handle('drop:read', (e, path: unknown) => (fromCharacter(e) && typeof path === 'string' ? drops.read(path) : null))
+  ipcMain.handle('clipboard:text', (e) => (fromCharacter(e) ? clipboard.readText().slice(0, 20000) : ''))
+  ipcMain.handle('desktop:report-now', (e) => (fromMain(e) ? (desktop?.reportNow() ?? false) : false))
   ipcMain.handle('reminder:delete', (e, id: unknown) =>
     fromMain(e) && typeof id === 'string' && id.length <= 64 ? (desktop?.removeReminder(id) ?? false) : false
   )
@@ -749,6 +781,8 @@ function registerIpc(): void {
       { label: '资料库…', click: () => openMain({ page: 'knowledge' }) },
       { label: '她记得的事…', click: () => openMain({ page: 'memory' }) },
       { type: 'separator' },
+      { label: '今天做了什么', click: () => void desktop?.reportNow() },
+      { label: '看看剪贴板里的报错', click: () => win?.webContents.send('clipboard:ask') },
       { label: '提醒…', click: () => openSettings('desktop') },
       { label: '免打扰（先藏起来）', accelerator: HIDE_SHORTCUT, click: () => toggleDnd(true) },
       { label: '设置…', click: () => openSettings('model') },
@@ -809,7 +843,15 @@ app.whenReady().then(() => {
       updateTray()
     },
     loadPrefs: () => loadSettings().desktop,
-    savePrefs: (prefs: DesktopPrefs) => saveSettings({ ...loadSettings(), desktop: prefs })
+    savePrefs: (prefs: DesktopPrefs) => saveSettings({ ...loadSettings(), desktop: prefs }),
+    // 每天见面、日报的材料：编程任务（AI 服务）、她记得的事、聊天记录。AI 服务没开时这次先不说
+    gather: async () => {
+      const r = await agentRelay.list()
+      if (!r.ok || !r.data) return null
+      return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [] }
+    },
+    loadBriefing: () => loadSettings().briefing ?? {},
+    saveBriefing: (state) => saveSettings({ ...loadSettings(), briefing: state })
   })
   void serviceKeeper.start()
   createWindow()
@@ -834,7 +876,12 @@ app.on('will-quit', (event) => {
     event.preventDefault()
     if (!serviceClosing) {
       serviceClosing = true
-      void serviceKeeper.shutdown().finally(() => { serviceClosed = true; app.quit() })
+      // 再退一次要等这次退出的事件处理完：服务不是我们开的（或者没找到）时 shutdown 立刻就好了，
+      // 这时马上 app.quit() 会被 Electron 当成「已经在退出」忽略掉，窗口都关了进程却一直在
+      void serviceKeeper.shutdown().finally(() => {
+        serviceClosed = true
+        setTimeout(() => app.quit(), 0)
+      })
     }
     return
   }

@@ -12,11 +12,22 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { cleanPrefs, type DesktopPrefs, type DesktopStatus, type FocusState, type Presence, type Reminder } from '../shared/desktop'
 import type { CharacterEvent } from '../shared/settings'
+import { dailyReport, due, morningBriefing, workday, type BriefingInput } from './briefing'
 import { decidePresence, FocusWatch } from './presence'
 import { ReminderBook, SitTimer } from './reminders'
 
 /** 最长隔多久重新排一次闹钟（电脑睡眠后 setTimeout 会不准） */
 const MAX_TIMER_MS = 60 * 60 * 1000
+/** 程序启动后多久内算「刚启动」：她已经打过招呼，每天见面的话不再说早上好 */
+const FRESH_MS = 2 * 60 * 1000
+/** 系统空闲超过这么久就当人不在电脑前：先不说，回来再说 */
+const AWAY_SECONDS = 120
+
+/** 今天说过没有（存在 settings.json 的 briefing 字段） */
+export interface BriefingState {
+  morning?: string
+  evening?: string
+}
 
 export interface DesktopKeeperOptions {
   dataDir: string
@@ -25,6 +36,10 @@ export interface DesktopKeeperOptions {
   onChange: (status: DesktopStatus) => void
   loadPrefs: () => unknown
   savePrefs: (prefs: DesktopPrefs) => void
+  /** 每天见面、日报要用的材料；AI 服务没开时返回 null（过一分钟再试） */
+  gather: () => Promise<Omit<BriefingInput, 'now' | 'reminders'> | null>
+  loadBriefing: () => BriefingState
+  saveBriefing: (state: BriefingState) => void
 }
 
 export class DesktopKeeper {
@@ -37,6 +52,8 @@ export class DesktopKeeper {
   private readonly startedAt = Date.now()
   private alarm: NodeJS.Timeout | undefined
   private minute: NodeJS.Timeout | undefined
+  private briefing: BriefingState
+  private briefingBusy = false
   private watch = new FocusWatch((f) => {
     this.focus = f
     this.applyPresence()
@@ -46,6 +63,7 @@ export class DesktopKeeper {
     this.prefs = cleanPrefs(o.loadPrefs())
     this.book = new ReminderBook(this.readReminders())
     this.sit = new SitTimer(this.prefs.sitBreakMinutes)
+    this.briefing = o.loadBriefing() ?? {}
   }
 
   get file(): string {
@@ -61,10 +79,16 @@ export class DesktopKeeper {
     const changed = (): void => this.publish()
     powerMonitor.on('on-battery', changed)
     powerMonitor.on('on-ac', changed)
-    // 睡眠醒来、解锁：闹钟可能错过了，马上看一遍
-    powerMonitor.on('resume', () => this.ring())
-    powerMonitor.on('unlock-screen', () => this.ring())
-    this.minute = setInterval(() => this.checkSitting(), 60_000)
+    // 睡眠醒来、解锁：闹钟可能错过了，马上看一遍；人回来了，过几秒看看今天见过面没有
+    const back = (): void => {
+      this.ring()
+      setTimeout(() => void this.everyMinute(), 5_000)
+    }
+    powerMonitor.on('resume', back)
+    powerMonitor.on('unlock-screen', back)
+    this.minute = setInterval(() => void this.everyMinute(), 60_000)
+    // 启动后先等 AI 服务起来（05 会自己开它），再看今天见过面没有
+    setTimeout(() => void this.everyMinute(), 20_000)
     this.applyLogin()
     this.ring() // 程序没开时过了点的，现在补上
   }
@@ -153,11 +177,47 @@ export class DesktopKeeper {
     }
   }
 
-  private checkSitting(): void {
-    if (!this.sit.tick(Date.now(), powerMonitor.getSystemIdleTime())) return
+  private async everyMinute(): Promise<void> {
+    const idle = powerMonitor.getSystemIdleTime()
+    const canTalk = this.presence.visible && !this.presence.quiet
     // 全屏、演示、免打扰时不打扰（打游戏、开会时不需要她来催）
-    if (this.presence.visible && !this.presence.quiet) {
+    if (this.sit.tick(Date.now(), idle) && canTalk) {
       this.o.characterEvent({ kind: 'sit-break', minutes: this.prefs.sitBreakMinutes })
+    }
+    // 每天第一次见面、晚上的日报：人在电脑前、她能说话时才说；没说成的下一分钟再试
+    if (!canTalk || idle >= AWAY_SECONDS || this.briefingBusy) return
+    const now = new Date()
+    if (due(this.briefing.morning, now)) await this.brief('morning', now)
+    else if (this.prefs.reportAt && due(this.briefing.evening, now, this.prefs.reportAt)) await this.brief('evening', now)
+  }
+
+  /** 右键菜单「今天做了什么」：马上说今天的日报（不算晚上那一次） */
+  async reportNow(): Promise<boolean> {
+    return this.brief('evening', new Date(), false)
+  }
+
+  private async brief(when: 'morning' | 'evening', now: Date, record = true): Promise<boolean> {
+    this.briefingBusy = true
+    try {
+      const got = await this.o.gather()
+      if (!got) return false
+      const input: BriefingInput = { ...got, now, reminders: this.book.list() }
+      if (record) {
+        this.briefing = { ...this.briefing, [when]: workday(now) }
+        this.o.saveBriefing(this.briefing)
+      }
+      if (when === 'evening') {
+        this.o.characterEvent({ kind: 'briefing', when, text: dailyReport(input), detail: true })
+        return true
+      }
+      const fresh = Date.now() - this.startedAt < FRESH_MS
+      const m = morningBriefing(input, !fresh)
+      // 刚启动、又没什么可说的：她已经打过招呼了，不用再说一遍
+      if (fresh && !m.detail) return true
+      this.o.characterEvent({ kind: 'briefing', when, text: m.text, detail: m.detail })
+      return true
+    } finally {
+      this.briefingBusy = false
     }
   }
 

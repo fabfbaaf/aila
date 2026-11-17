@@ -66,6 +66,17 @@ export const lines = {
   reminder: (text: string, lateAt: string | null): string =>
     lateAt ? `……刚才 ${lateAt} 该提醒你的：${text}` : `……到时间了：${text}`,
   reminderSnoozed: '好，过 10 分钟再叫你。',
+  briefingOpen: '好，我把任务页打开。',
+  // 拖给她的文件、剪贴板
+  dropAsk: (name: string): string => `……「${name}」？要我看看吗？`,
+  dropDirAsk: (name: string): string => `……「${name}」这个文件夹？要我去看看吗？`,
+  dropSecret: '……这个文件可能存着密码或密钥，我不看。',
+  dropBinary: '……这个我看不了。图片、压缩包这类我还读不懂。',
+  dropTooBig: '……这个文件太大了，我看不完。挑一段贴给我吧。',
+  dropMissing: '……没找到这个文件。',
+  dropMany: (n: number): string => `……一共 ${n} 个，我先看第一个。`,
+  clipboardReading: '……我看一下剪贴板。',
+  clipboardEmpty: '……剪贴板里没有文字。先复制一下再叫我？',
   reminderFailed: (why: string): string => `……那个提醒没记上：${why}。`,
   sitBreak: (minutes: number): string[] => [
     `……已经坐了 ${minutes} 分钟了。起来走走吧。`,

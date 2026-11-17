@@ -3,7 +3,7 @@ import type { Emotion, Gesture } from '../../../shared/chat'
 import { emptyExpressions, VOWELS, type Expressions, type Mouth, type PoseState } from '../avatar/types'
 import { greeting, lines, pick } from '../persona/lines'
 
-type Offsets = Pick<PoseState, 'headPitch' | 'headYaw' | 'headRoll' | 'bodyLean' | 'bodySway'>
+type Offsets = Pick<PoseState, 'headPitch' | 'headYaw' | 'headRoll' | 'bodyLean' | 'bodySway' | 'armRaise' | 'forearmSwing' | 'armsUp'>
 
 /** 一个反应 = 几段按顺序播放的表情和姿态 */
 interface Phase {
@@ -55,6 +55,21 @@ const GESTURES: Record<Gesture, Phase[]> = {
   bow: [
     { dur: 0.5, pose: { headPitch: 0.35, bodyLean: -0.16 } },
     { dur: 0.5, pose: { headPitch: 0.12, bodyLean: -0.05 } }
+  ],
+  // 抬右手，小臂左右摆两下，放下
+  wave: [
+    { dur: 0.3, expr: { happy: 0.35 }, pose: { armRaise: 1, headRoll: 0.08 } },
+    { dur: 0.22, expr: { happy: 0.35 }, pose: { armRaise: 1, forearmSwing: 1, headRoll: 0.08 } },
+    { dur: 0.22, expr: { happy: 0.35 }, pose: { armRaise: 1, forearmSwing: -1, headRoll: 0.08 } },
+    { dur: 0.22, expr: { happy: 0.35 }, pose: { armRaise: 1, forearmSwing: 1, headRoll: 0.08 } },
+    { dur: 0.22, expr: { happy: 0.35 }, pose: { armRaise: 1, forearmSwing: -1, headRoll: 0.08 } },
+    { dur: 0.4, expr: { happy: 0.25 } }
+  ],
+  // 两手举过头、仰一下头、眯眼，再慢慢放下
+  stretch: [
+    { dur: 0.6, expr: { relaxed: 0.5 }, pose: { armsUp: 1, headPitch: -0.12, bodyLean: 0.06 } },
+    { dur: 1.0, expr: { relaxed: 0.8, blink: 0.6 }, pose: { armsUp: 1, headPitch: -0.18, bodyLean: 0.08 } },
+    { dur: 0.7, expr: { relaxed: 0.4 }, pose: { armsUp: 0, headPitch: 0.04 } }
   ]
 }
 
@@ -70,7 +85,12 @@ export class Behavior {
     headRoll: 0,
     bodyLean: 0,
     bodySway: 0,
-    breath: 0
+    breath: 0,
+    armRaise: 0,
+    forearmSwing: 0,
+    armsUp: 0,
+    typing: 0,
+    typingBob: 0
   }
   readonly expr: Expressions = emptyExpressions()
 
@@ -95,6 +115,8 @@ export class Behavior {
   private listening = false
   private talking = false
   private talkT = 0
+  /** 她在做编程任务：手在身前敲键盘 */
+  private working = false
   /** 出声说话时由声音算出的口型；没有声音时用 talking 的假口型 */
   private mouth: Mouth | null = null
 
@@ -123,6 +145,15 @@ export class Behavior {
     this.thinking = on
     if (on) this.lookGoal.set(-0.7, 2.0, 2)
     else this.lookAtUser()
+  }
+
+  /** 她在做编程任务（任务页里）：双手放到身前敲键盘，做完放下 */
+  setWorking(on: boolean): void {
+    this.working = on
+  }
+
+  get isWorking(): boolean {
+    return this.working
   }
 
   /** 正在说话（没有声音时）：嘴巴一张一合 */
@@ -272,7 +303,7 @@ export class Behavior {
 
     // 目标表情和姿态：先取基础状态，再叠加反应
     const exprTarget = emptyExpressions()
-    const offsetTarget: Offsets = { headPitch: 0, headYaw: 0, headRoll: 0, bodyLean: 0, bodySway: 0 }
+    const offsetTarget: Offsets = { headPitch: 0, headYaw: 0, headRoll: 0, bodyLean: 0, bodySway: 0, armRaise: 0, forearmSwing: 0, armsUp: 0 }
     if (this.sleepy) {
       exprTarget.relaxed = 0.6
       exprTarget.blink = 0.55
@@ -313,6 +344,11 @@ export class Behavior {
       offsetTarget.bodySway = clamp(-this.dragVel * 0.02, -0.35, 0.35)
       this.dragVel *= Math.exp(-6 * dt)
     }
+
+    // 敲键盘：挥手、伸懒腰时让开（手只有两只）；手指那点起伏用两个频率叠，不像机器
+    const busyArms = offsetTarget.armRaise > 0 || offsetTarget.armsUp > 0
+    this.pose.typing = approach(this.pose.typing, this.working && !busyArms && !this.dragging ? 1 : 0, 5, dt)
+    this.pose.typingBob = Math.sin(this.time * 17) * 0.6 + Math.sin(this.time * 7.3) * 0.4
 
     // 说话的口型：出声时由声音驱动五个元音；只打字时用两个不同频率的波叠起来，开合不规律，看起来更自然
     if (this.mouth) {

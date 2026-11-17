@@ -51,6 +51,8 @@ export class VoiceController {
   readonly latencies: LatencySample[] = []
   /** 她藏起来时为 true：听到唤醒词也不应声（快捷键「听我说」不受影响，那是你明确叫她） */
   muted = false
+  /** 听到一句话、交给对话之前：返回 true 表示外面接手了（比如提到剪贴板，要先把剪贴板的内容带上） */
+  onHeard: (text: string) => boolean = () => false
 
   private prefs: Prefs
   private session: 'idle' | 'awaiting' | 'conversing' = 'idle'
@@ -209,7 +211,7 @@ export class VoiceController {
     // 她在等确认时说「好」「不要」就是回答，这一轮回复接着往下走；说别的就当新话题（操作不执行）
     if (this.conversation.answerText(text)) return
     this.pending = { at: performance.now(), asr: asrMs }
-    this.conversation.send(text, true) // 她正在说的话会被打断
+    if (!this.onHeard(text)) this.conversation.send(text, true) // 她正在说的话会被打断
   }
 
   private onFirstWords(): void {

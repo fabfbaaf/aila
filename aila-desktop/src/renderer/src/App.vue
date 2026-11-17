@@ -25,6 +25,7 @@ import { MIC_SAMPLE_RATE } from './voice/Microphone'
 import type { VoiceMenuAction, VoiceMenuState } from '../../shared/voice'
 import type { DesktopStatus, Reminder } from '../../shared/desktop'
 import { targetFps } from './scene/frameBudget'
+import { clipboardMessage, fileMessage, fileTask, mentionsClipboard, type DropInfo } from '../../shared/drop'
 
 const stageEl = ref<HTMLDivElement>()
 const fileInput = ref<HTMLInputElement>()
@@ -43,10 +44,38 @@ const screenLocated = ref<LocatedError | null>(null)
 const watching = ref(false)
 /** 到点的提醒（气泡里「知道了 / 10 分钟后再提醒」） */
 const reminderAsk = ref<{ reminder: Reminder; late: boolean } | null>(null)
+/** 拖到她身上的文件：「讲讲它 / 交给任务页 / 算了」 */
+const dropAsk = ref<DropInfo | null>(null)
+/** 每天见面、日报：说完气泡里给「好 / 看看任务」（有具体的事可说时） */
+const briefingAsk = ref<{ text: string; detail: boolean } | null>(null)
 /** 桌面状态：藏没藏、能不能说话、省不省电、拔没拔电（主进程推过来） */
 const desk = ref<DesktopStatus | null>(null)
 
 const bubbleAsk = computed<BubbleAsk | null>(() => {
+  if (dropAsk.value && !convAsk.value) {
+    const d = dropAsk.value
+    return {
+      tag: d.kind === 'dir' ? '文件夹' : '文件',
+      detail: d.rel ?? d.name,
+      buttons: [
+        ...(d.kind === 'text' ? [{ label: '讲讲它', value: 'chat', primary: true }] : []),
+        ...(d.project ? [{ label: '交给任务页', value: 'task', primary: d.kind === 'dir' }] : []),
+        { label: '算了', value: 'no' }
+      ]
+    }
+  }
+  if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
+    return {
+      tag: '今天',
+      detail: '',
+      buttons: briefingAsk.value.detail
+        ? [
+            { label: '好', value: 'ok', primary: true },
+            { label: '看看任务', value: 'tasks' }
+          ]
+        : [{ label: '好', value: 'ok', primary: true }]
+    }
+  }
   if (reminderAsk.value && !convAsk.value) {
     return {
       tag: '提醒',
@@ -122,7 +151,7 @@ function showBubble(text: string, holdMs: number | null): void {
   bubbleText.value = text
   bubbleVisible.value = true
   clearTimeout(bubbleTimer)
-  if (holdMs !== null && !screenAsk.value && !reminderAsk.value) bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
+  if (holdMs !== null && !screenAsk.value && !reminderAsk.value && !briefingAsk.value && !dropAsk.value) bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
 }
 
 behavior.onSay = showBubble
@@ -234,7 +263,9 @@ async function startFix(project: string, snippet: string): Promise<void> {
 }
 
 function onAnswer(value: string): void {
-  if (reminderAsk.value && !convAsk.value) answerReminder(value)
+  if (dropAsk.value && !convAsk.value) void answerDrop(value)
+  else if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerBriefing(value)
+  else if (reminderAsk.value && !convAsk.value) answerReminder(value)
   else if (convAsk.value) conversation.answer(value === 'yes')
   else answerScreen(value)
 }
@@ -275,6 +306,100 @@ function answerReminder(value: string): void {
     behavior.say(lines.reminderSnoozed, 2500)
   } else {
     behavior.gesture('nod')
+    bubbleVisible.value = false
+  }
+}
+
+// ---------- 拖给她的文件、剪贴板 ----------
+
+function onDragOver(e: DragEvent): void {
+  if (e.dataTransfer?.types.includes('Files')) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  const files = [...(e.dataTransfer?.files ?? [])]
+  if (!bridge || !files.length) return
+  lastInteraction = performance.now()
+  const paths = files.map((f) => bridge!.pathForFile(f)).filter(Boolean)
+  const [first] = await bridge.dropInspect(paths)
+  if (!first) return
+  behavior.gesture('tilt')
+  if (files.length > 1) behavior.say(lines.dropMany(files.length), 1800)
+  const reasons: Partial<Record<DropInfo['kind'], string>> = {
+    secret: lines.dropSecret,
+    binary: lines.dropBinary,
+    'too-big': lines.dropTooBig,
+    missing: lines.dropMissing
+  }
+  const why = reasons[first.kind]
+  if (why) {
+    behavior.react('sad')
+    behavior.say(why, 3500)
+    return
+  }
+  dropAsk.value = first
+  conversation.announce(first.kind === 'dir' ? lines.dropDirAsk(first.name) : lines.dropAsk(first.name))
+}
+
+async function answerDrop(value: string): Promise<void> {
+  const d = dropAsk.value
+  dropAsk.value = null
+  if (!d || !bridge) return
+  if (value === 'chat') {
+    const content = await bridge.dropRead(d.path)
+    if (content === null) {
+      behavior.say(lines.dropMissing, 2500)
+      return
+    }
+    conversation.send(fileMessage(d.name, content))
+  } else if (value === 'task' && d.project) {
+    behavior.gesture('nod')
+    const r = await bridge.agentTask({ cwd: d.project, text: fileTask(d.rel ?? d.name) })
+    if (r.ok) behavior.say(pick(lines.agentTaskStarted), 3000)
+    else conversation.announce(lines.agentTaskFailed(r.error ?? ''))
+  } else {
+    bubbleVisible.value = false
+  }
+}
+
+/** 说的话提到剪贴板：把剪贴板里的文字（打码后）带上再发 */
+async function sendWithClipboard(text: string): Promise<void> {
+  if (!bridge) return conversation.send(text)
+  behavior.say(lines.clipboardReading, 1500)
+  const msg = clipboardMessage(text, await bridge.clipboardText())
+  if (msg) conversation.send(msg)
+  else behavior.say(lines.clipboardEmpty, 3500)
+}
+
+// ---------- 每天见面、日报 ----------
+
+const BRIEFING_ASK_MS = 60_000
+let briefingTimer = 0
+
+function showBriefing(b: { text: string; detail: boolean }): void {
+  // 正在聊、在问别的事：这次先不说（主进程已经记成说过了，免得一会儿又冒出来打断你）
+  if (conversation.chatting || convAsk.value || screenAsk.value || reminderAsk.value) return
+  briefingAsk.value = b
+  behavior.gesture('wave')
+  conversation.announce(b.text)
+  clearTimeout(briefingTimer)
+  briefingTimer = window.setTimeout(() => {
+    briefingAsk.value = null
+    bubbleVisible.value = false
+  }, BRIEFING_ASK_MS)
+}
+
+function answerBriefing(value: string): void {
+  clearTimeout(briefingTimer)
+  briefingAsk.value = null
+  behavior.gesture('nod')
+  if (value === 'tasks') {
+    bridge?.openAgent()
+    behavior.say(lines.briefingOpen, 2000)
+  } else {
     bubbleVisible.value = false
   }
 }
@@ -343,7 +468,8 @@ function onSend(text: string): void {
     }
     clearScreenAsk() // 说起别的事了：这次就不问了
   }
-  conversation.send(text)
+  if (mentionsClipboard(text)) void sendWithClipboard(text)
+  else conversation.send(text)
 }
 
 // ---------- 设置窗口里做的事，她在桌面上有点反应 ----------
@@ -374,9 +500,12 @@ function onCharacterEvent(ev: CharacterEvent): void {
       behavior.react('sad')
       behavior.say(lines.reminderFailed(ev.why), 4000)
       break
+    case 'briefing':
+      showBriefing({ text: ev.text, detail: ev.detail })
+      break
     case 'sit-break':
       if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
-        behavior.gesture('tilt')
+        behavior.gesture('stretch') // 她先伸个懒腰
         conversation.announce(pick(lines.sitBreak(ev.minutes)))
       }
       break
@@ -390,6 +519,7 @@ function onAgentProgress(p: AgentProgress): void {
   switch (p.kind) {
     case 'start':
       behavior.gesture('nod')
+      behavior.setWorking(true) // 在桌面上「敲键盘」，做完放下
       if (!quiet) behavior.say(pick(lines.agentStart), 2200)
       break
     case 'confirm':
@@ -397,13 +527,16 @@ function onAgentProgress(p: AgentProgress): void {
       if (!quiet) conversation.announce(lines.agentConfirm(p.action))
       break
     case 'done':
+      behavior.setWorking(false)
       behavior.react('happy')
       if (!quiet) conversation.announce(lines.agentDone(p.files))
       break
     case 'stopped':
+      behavior.setWorking(false)
       if (!quiet && lines.agentStopped[p.reason]) behavior.say(lines.agentStopped[p.reason], 3500)
       break
     case 'error':
+      behavior.setWorking(false)
       behavior.react('sad')
       if (!quiet) behavior.say(lines.agentError, 3500)
       break
@@ -434,11 +567,13 @@ const subscriptions: (() => void)[] = []
 
 // ---------- 模型 ----------
 
-async function useModel(data: ArrayBuffer): Promise<void> {
+/** quiet：启动时加载上次的模型，不用说「换好了」 */
+async function useModel(data: ArrayBuffer, quiet = false): Promise<void> {
   try {
     const avatar = await loadVrmAvatar(data)
     stage?.setAvatar(avatar)
     usingPlaceholder = false
+    if (quiet) return
     behavior.react('happy')
     behavior.say(lines.modelLoaded)
   } catch (err) {
@@ -446,6 +581,19 @@ async function useModel(data: ArrayBuffer): Promise<void> {
     behavior.react('sad')
     behavior.say(lines.modelFailed)
   }
+}
+
+/** 自带的原创形象（public/avatar/aila.vrm）。用 XHR 读：打包后页面是 file:// 地址，fetch 读不了本地文件 */
+async function loadBuiltin(announce = false): Promise<void> {
+  const data = await new Promise<ArrayBuffer | null>((resolve) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', new URL('./avatar/aila.vrm', location.href).href)
+    xhr.responseType = 'arraybuffer'
+    xhr.onload = () => resolve(xhr.status === 200 || (xhr.status === 0 && xhr.response) ? (xhr.response as ArrayBuffer) : null)
+    xhr.onerror = () => resolve(null)
+    xhr.send()
+  })
+  if (data) await useModel(data, !announce)
 }
 
 async function onFile(e: Event): Promise<void> {
@@ -568,6 +716,7 @@ onMounted(async () => {
       screen: screenWatch,
       speaker,
       hear,
+      loadBuiltin,
       openSettings: (section?: Parameters<NonNullable<typeof bridge>['openSettings']>[0]) => bridge?.openSettings(section)
     }
     console.log(`[aila] 舞台已启动，渲染器：${stage.rendererInfo()}`)
@@ -576,8 +725,13 @@ onMounted(async () => {
   document.addEventListener('mousemove', onMouseMove)
   if (bridge) {
     subscriptions.push(
-      bridge.onCursor((p) => lookAt(p.x, p.y)),
+      bridge.onCursor((p) => {
+        lookAt(p.x, p.y)
+        // 拖着文件时系统不发鼠标移动：靠主进程推的光标位置判断是不是在她身上，在的话窗口才接得住拖进来的文件
+        if (p.x >= 0 && p.y >= 0 && p.x < window.innerWidth && p.y < window.innerHeight) updateHover(p.x, p.y)
+      }),
       bridge.onModelLoaded((data) => void useModel(data)),
+      bridge.onModelBuiltin(() => void loadBuiltin(true)),
       bridge.onChatOpen(() => void openChat()),
       bridge.onVoiceMenu(onVoiceMenu),
       // 星图里点了「问她」「让她修」：当成用户说的一句话
@@ -589,16 +743,25 @@ onMounted(async () => {
       bridge.onGestureApprove((id) => {
         if (convAsk.value?.id === id) conversation.answer(true)
       }),
-      bridge.onDesktopStatus(applyDesktop)
+      bridge.onDesktopStatus(applyDesktop),
+      bridge.onClipboardAsk(() => void sendWithClipboard('帮我看看剪贴板里的这段报错'))
     )
+    // 说出来的话提到剪贴板，也先带上剪贴板的内容
+    voiceControl.onHeard = (text) => {
+      if (!mentionsClipboard(text)) return false
+      void sendWithClipboard(text)
+      return true
+    }
     void bridge.desktopStatus().then(applyDesktop)
   }
   void voiceControl.init()
   screenWatch.init()
   await connectHistory()
 
+  // 用户自己选过模型就用那个；没选过就用自带的原创形象（public/avatar/aila.vrm，scripts/avatar 生成的）
   const last = await bridge?.getLastModel()
-  if (last) await useModel(last)
+  if (last) await useModel(last, true)
+  else await loadBuiltin()
 
   setTimeout(() => behavior.greet(), 600)
   setTimeout(() => {
@@ -611,6 +774,7 @@ onBeforeUnmount(() => {
   // 开发时改了 preload 没重启，旧的订阅函数不返回退订函数：跳过，别让卸载出错
   for (const off of subscriptions.splice(0)) if (typeof off === 'function') off()
   clearTimeout(reminderTimer)
+  clearTimeout(briefingTimer)
   conversation.interrupt()
   voiceControl.dispose()
   screenWatch.dispose()
@@ -619,7 +783,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="root" :class="{ grab: overAvatar }" @contextmenu.prevent="onContextMenu">
+  <div class="root" :class="{ grab: overAvatar }" @contextmenu.prevent="onContextMenu" @dragover="onDragOver" @drop.prevent="onDrop">
     <div
       ref="stageEl"
       class="stage"

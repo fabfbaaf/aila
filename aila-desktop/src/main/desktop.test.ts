@@ -39,7 +39,8 @@ describe('她什么时候躲开', () => {
       hideOnFullscreen: false,
       sitBreakMinutes: 45
     })
-    expect(cleanPrefs({ sitBreakMinutes: 7, powerSaver: 'yes' })).toEqual(DEFAULT_DESKTOP_PREFS)
+    expect(cleanPrefs({ sitBreakMinutes: 7, powerSaver: 'yes', reportAt: '25:00' })).toEqual(DEFAULT_DESKTOP_PREFS)
+    expect(cleanPrefs({ reportAt: '18:00' }).reportAt).toBe('18:00')
     expect(cleanPrefs(null)).toEqual(DEFAULT_DESKTOP_PREFS)
   })
 })

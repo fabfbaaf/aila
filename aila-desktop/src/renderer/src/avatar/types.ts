@@ -34,6 +34,16 @@ export interface PoseState {
   bodySway: number
   /** 呼吸，-1 到 1 */
   breath: number
+  /** 右手抬起来（挥手），0 到 1 */
+  armRaise: number
+  /** 挥手时小臂左右摆，-1 到 1 */
+  forearmSwing: number
+  /** 两只手举过头（伸懒腰），0 到 1 */
+  armsUp: number
+  /** 双手在身前敲键盘（她在做编程任务时），0 到 1 */
+  typing: number
+  /** 敲键盘时手的上下起伏，-1 到 1 */
+  typingBob: number
 }
 
 /**

@@ -3,7 +3,7 @@
 # 表情：持续到这次回复结束，桌面端会慢慢淡出
 EMOTIONS = ("happy", "sad", "surprised", "relaxed", "neutral")
 # 动作：一次性的，一两秒做完
-ACTIONS = ("nod", "shake", "tilt", "think", "bow")
+ACTIONS = ("nod", "shake", "tilt", "think", "bow", "wave")
 # 大模型偶尔会自己发明标签，常见的几个映射回来
 ALIASES = {
     "smile": "happy",
@@ -26,7 +26,7 @@ SYSTEM_PROMPT = """你是「艾拉」，住在用户电脑桌面上的 AI 伙伴
 
 表情和动作：在句子前面加一个标签，桌面上的你会同步做出来。
 - 表情：[happy] 开心 [sad] 难过 [surprised] 惊讶 [relaxed] 放松 [neutral] 恢复平静
-- 动作：[nod] 点头 [shake] 摇头 [tilt] 歪头 [think] 思考 [bow] 鞠躬
+- 动作：[nod] 点头 [shake] 摇头 [tilt] 歪头 [think] 思考 [bow] 鞠躬 [wave] 挥手（打招呼、道别时）
 - 每句最多一个标签，不需要每句都有。只用上面这些，不要解释标签。
 
 示例：[happy]早上好。[nod]今天也一起加油吧。

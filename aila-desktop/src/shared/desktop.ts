@@ -15,16 +15,21 @@ export interface DesktopPrefs {
   openAtLogin: boolean
   /** 连续用电脑多少分钟提醒起来活动；0 = 不提醒 */
   sitBreakMinutes: number
+  /** 晚上几点说今天的日报（HH:MM）；'' = 不说 */
+  reportAt: string
 }
 
 export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
   hideOnFullscreen: true,
   powerSaver: true,
   openAtLogin: false,
-  sitBreakMinutes: 0
+  sitBreakMinutes: 0,
+  reportAt: ''
 }
 
 export const SIT_BREAK_CHOICES = [0, 30, 45, 60, 90] as const
+/** 晚上几点说日报；'' = 不说 */
+export const REPORT_TIMES = ['', '17:30', '18:00', '19:00', '21:00'] as const
 
 /** 系统说的「现在适不适合打扰」：normal 可以；fullscreen 全屏应用（游戏、视频、全屏的浏览器）；presentation 演示模式；away 锁屏或屏保 */
 export type FocusState = 'normal' | 'fullscreen' | 'presentation' | 'away'
@@ -62,10 +67,12 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
   const minutes = SIT_BREAK_CHOICES.includes(r.sitBreakMinutes as (typeof SIT_BREAK_CHOICES)[number])
     ? (r.sitBreakMinutes as number)
     : base.sitBreakMinutes
+  const reportAt = REPORT_TIMES.includes(r.reportAt as (typeof REPORT_TIMES)[number]) ? (r.reportAt as string) : base.reportAt
   return {
     hideOnFullscreen: bool('hideOnFullscreen'),
     powerSaver: bool('powerSaver'),
     openAtLogin: bool('openAtLogin'),
-    sitBreakMinutes: minutes
+    sitBreakMinutes: minutes,
+    reportAt
   }
 }

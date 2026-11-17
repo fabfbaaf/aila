@@ -8,7 +8,7 @@
 
 import type { SettingsSection } from './settings'
 
-export type Page = 'tasks' | 'projects' | 'knowledge' | 'memory' | 'settings'
+export type Page = 'tasks' | 'chat' | 'projects' | 'knowledge' | 'memory' | 'settings'
 /** 项目页里的两块：项目列表（索引状态）、地图（原来的代码星图） */
 export type ProjectsTab = 'list' | 'map'
 
@@ -22,10 +22,11 @@ export interface ShellRoute {
 
 export const PAGES: { id: Page; name: string; icon: string; key: string }[] = [
   { id: 'tasks', name: '任务', icon: '▤', key: '1' },
-  { id: 'projects', name: '项目', icon: '◇', key: '2' },
-  { id: 'knowledge', name: '资料', icon: '▦', key: '3' },
-  { id: 'memory', name: '记忆', icon: '✎', key: '4' },
-  { id: 'settings', name: '设置', icon: '⚙', key: '5' }
+  { id: 'chat', name: '对话', icon: '◌', key: '2' },
+  { id: 'projects', name: '项目', icon: '◇', key: '3' },
+  { id: 'knowledge', name: '资料', icon: '▦', key: '4' },
+  { id: 'memory', name: '记忆', icon: '✎', key: '5' },
+  { id: 'settings', name: '设置', icon: '⚙', key: '6' }
 ]
 
 /** 设置页里剩下的分区（资料库、记忆、代码库各自成了一页） */

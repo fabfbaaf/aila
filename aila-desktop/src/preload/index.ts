@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage } from '../shared/chat'
 import type {
   AccountStatus,
@@ -28,6 +28,7 @@ import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, A
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
+import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 
 /** 取消订阅 */
@@ -81,6 +82,10 @@ const api = {
   historyLoad: (): Promise<StoredMessage[]> => ipcRenderer.invoke('history:load'),
   historyAppend: (m: StoredMessage): void => ipcRenderer.send('history:append', m),
   onHistoryRemote: (cb: (changes: RemoteChanges) => void): Unsubscribe => listen('history:remote', cb),
+  /** 主窗口的对话记录页：记录变了（说了新的话、别的设备同步过来）就重新读 */
+  onHistoryChanged: (cb: () => void): Unsubscribe => listen('history:changed', cb),
+  /** 从主窗口叫她：在桌面上打开对话框 */
+  openChat: (): void => ipcRenderer.send('chat:open-request'),
   settingPut: (key: string, value: unknown): void => ipcRenderer.send('settings:put', key, value),
 
   // 账号
@@ -177,6 +182,16 @@ const api = {
   desktopSetPrefs: (prefs: Partial<DesktopPrefs>): Promise<DesktopStatus | null> => ipcRenderer.invoke('desktop:prefs', prefs),
   desktopSetDnd: (on: boolean): Promise<boolean> => ipcRenderer.invoke('desktop:dnd', on),
   reminderDelete: (id: string): Promise<boolean> => ipcRenderer.invoke('reminder:delete', id),
+  // 拖给她的文件、剪贴板（只认角色窗口）：路径由 Electron 从拖进来的文件取，读文件只能读刚拖进来、看过一眼的
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
+  dropInspect: (paths: string[]): Promise<DropInfo[]> => ipcRenderer.invoke('drop:inspect', paths),
+  dropRead: (path: string): Promise<string | null> => ipcRenderer.invoke('drop:read', path),
+  clipboardText: (): Promise<string> => ipcRenderer.invoke('clipboard:text'),
+  /** 右键菜单「看看剪贴板里的报错」 */
+  onClipboardAsk: (cb: () => void): Unsubscribe => listen('clipboard:ask', cb),
+
+  /** 让她现在说说今天做了什么（主窗口） */
+  desktopReportNow: (): Promise<boolean> => ipcRenderer.invoke('desktop:report-now'),
   reminderSnooze: (text: string, minutes: number): Promise<boolean> => ipcRenderer.invoke('reminder:snooze', text, minutes),
   onDesktopStatus: (cb: (status: DesktopStatus) => void): Unsubscribe => listen('desktop:status', cb),
 
@@ -193,7 +208,10 @@ const api = {
   skillsSet: (id: string, on: boolean): void => ipcRenderer.send('skills:set', id, on),
   modelPath: (): Promise<string | null> => ipcRenderer.invoke('model:path'),
   modelChoose: (): void => ipcRenderer.send('model:choose'),
-  onModelPath: (cb: (path: string) => void): Unsubscribe => listen('model:path', cb),
+  /** 换回自带的原创形象 */
+  modelBuiltin: (): void => ipcRenderer.send('model:builtin'),
+  onModelBuiltin: (cb: () => void): Unsubscribe => listen('model:builtin', cb),
+  onModelPath: (cb: (path: string | null) => void): Unsubscribe => listen('model:path', cb),
   resetPosition: (): void => ipcRenderer.send('win:reset-position'),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),

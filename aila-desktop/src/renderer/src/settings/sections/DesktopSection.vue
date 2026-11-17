@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 设置 → 桌面：她什么时候躲开、免打扰、省电、开机启动，以及记下的提醒 */
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
-import { SIT_BREAK_CHOICES, type DesktopPrefs, type DesktopStatus } from '../../../../shared/desktop'
+import { REPORT_TIMES, SIT_BREAK_CHOICES, type DesktopPrefs, type DesktopStatus } from '../../../../shared/desktop'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
 
@@ -38,6 +38,12 @@ async function set(patch: Partial<DesktopPrefs>): Promise<void> {
 
 async function setDnd(on: boolean): Promise<void> {
   await api.desktopSetDnd(on)
+}
+
+const reported = ref('')
+
+async function reportNow(): Promise<void> {
+  reported.value = (await api.desktopReportNow()) ? '她在桌面上说了。' : '现在说不了：AI 服务没开，或者她藏起来了。'
 }
 
 async function remove(id: string): Promise<void> {
@@ -109,6 +115,28 @@ onActivated(load)
             @update:model-value="(v) => set({ openAtLogin: v })"
           />
           <span class="hint">{{ status.loginSupported ? '登录 Windows 后她自己出来。' : '从源码跑（npm run dev）时设不了，装了安装包以后才能用。' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>每天</h3>
+      <div class="row">
+        <span class="label">见面时说说</span>
+        <div>
+          <span class="hint" style="margin-top: 0">
+            每天第一次见面（早上开机、解锁回来）她说说昨天一起做了哪些任务、哪个分支还没合并、今天有什么日程和提醒。人不在电脑前、全屏或免打扰时等你回来再说。
+          </span>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">晚上的日报</span>
+        <div>
+          <select :value="status.prefs.reportAt" style="width: 160px" @change="(e) => set({ reportAt: (e.target as HTMLSelectElement).value })">
+            <option v-for="t in REPORT_TIMES" :key="t" :value="t">{{ t ? `${t} 说` : '不说' }}</option>
+          </select>
+          <button class="btn" style="margin-left: 8px" @click="reportNow">现在说说今天</button>
+          <span class="hint">今天一起做了几个任务、几个还在分支上、用了多少 token、命中多少缓存、聊了几句。右键她「今天做了什么」也行。{{ reported }}</span>
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ import AgentApp from '../agent/AgentApp.vue'
 import ProjectsPage from './ProjectsPage.vue'
 import SectionPage from './SectionPage.vue'
 import SettingsPage from './SettingsPage.vue'
+import ChatHistoryPage from './ChatHistoryPage.vue'
 
 const KnowledgeSection = defineAsyncComponent(() => import('../settings/sections/KnowledgeSection.vue'))
 const MemorySection = defineAsyncComponent(() => import('../settings/sections/MemorySection.vue'))
@@ -24,6 +25,8 @@ const offs: (() => void)[] = []
 
 const page = computed<{ component: Component; props: Record<string, unknown> }>(() => {
   switch (route.value.page) {
+    case 'chat':
+      return { component: ChatHistoryPage, props: {} }
     case 'projects':
       return { component: ProjectsPage, props: { tab: route.value.tab ?? 'list' } }
     case 'knowledge':
@@ -44,7 +47,7 @@ function go(next: ShellRoute): void {
   document.title = name && next.page !== 'tasks' ? `艾拉 · ${name}` : '艾拉'
 }
 
-/** Ctrl+1…5 切页面（和图标栏的顺序一样） */
+/** Ctrl+1…6 切页面（和图标栏的顺序一样） */
 function onKey(e: KeyboardEvent): void {
   if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
   const target = PAGES.find((p) => p.key === e.key)

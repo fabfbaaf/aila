@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest'
+import type { AgentSessionSummary } from '../shared/agent'
+import type { StoredMemory, StoredMessage } from '../shared/cloud'
+import { dailyReport, due, morningBriefing, workday, type BriefingInput } from './briefing'
+
+const at = (y: number, mo: number, d: number, h: number, mi = 0): Date => new Date(y, mo - 1, d, h, mi)
+const NOW = at(2026, 11, 17, 9, 30)
+
+function session(id: string, title: string, updated: Date, extra: Partial<AgentSessionSummary> = {}): AgentSessionSummary {
+  return {
+    id,
+    cwd: 'D:/work/shop',
+    title,
+    mode: 'ask',
+    model: 'deepseek-chat',
+    events: 10,
+    updated: updated.getTime() / 1000,
+    usage: { prompt: 10000, completion: 500, cache_hit: 8000, cache_miss: 2000 },
+    ...extra
+  }
+}
+
+function memory(content: string, expiresAt: Date | null, kind: StoredMemory['kind'] = 'event'): StoredMemory {
+  return { id: content, content, kind, expiresAt: expiresAt?.toISOString() ?? null, createdAt: '', updatedAt: '' }
+}
+
+const input = (over: Partial<BriefingInput> = {}): BriefingInput => ({
+  now: NOW,
+  sessions: [],
+  memories: [],
+  reminders: [],
+  messages: [],
+  ...over
+})
+
+describe('每天第一次见面', () => {
+  it('说昨天的任务、没合并的分支、今天的日程和提醒', () => {
+    const r = morningBriefing(
+      input({
+        sessions: [
+          session('a', '修购物车总价', at(2026, 11, 16, 15)),
+          session('b', '加打折函数', at(2026, 11, 16, 17), { branch: 'aila/task-1' }),
+          session('c', '很久以前的', at(2026, 11, 10, 9))
+        ],
+        memories: [memory('用户今天下午三点面试', at(2026, 11, 17, 23)), memory('用户喜欢美式', null, 'preference')],
+        reminders: [{ id: 'r', at: at(2026, 11, 17, 14).toISOString(), text: '交周报', createdAt: '' }]
+      })
+    )
+    expect(r.detail).toBe(true)
+    expect(r.text).toBe(
+      '早上好。昨天一起做了 2 个任务：「修购物车总价」、「加打折函数」。「加打折函数」还在分支上，没合并。今天：你今天下午三点面试；1 个提醒。'
+    )
+  })
+
+  it('什么都没有就只打招呼；刚启动时（已经打过招呼）不再说早上好', () => {
+    expect(morningBriefing(input())).toEqual({ text: '早上好。', detail: false })
+    const s = [session('a', '修购物车总价', at(2026, 11, 16, 15))]
+    expect(morningBriefing(input({ sessions: s }), false).text).toBe('昨天一起做了 1 个任务：「修购物车总价」。')
+  })
+
+  it('凌晨 5 点前还算前一天', () => {
+    expect(workday(at(2026, 11, 17, 2))).toBe('2026-11-16')
+    expect(workday(at(2026, 11, 17, 6))).toBe('2026-11-17')
+  })
+})
+
+describe('晚上的日报', () => {
+  it('今天的任务数、没合并的、token、命中率、聊了几句', () => {
+    const night = at(2026, 11, 17, 18, 5)
+    const msgs: StoredMessage[] = [
+      { id: '1', role: 'user', content: '在吗', createdAt: at(2026, 11, 17, 10).toISOString() },
+      { id: '2', role: 'assistant', content: '在', createdAt: at(2026, 11, 17, 10).toISOString() },
+      { id: '3', role: 'user', content: '昨天的', createdAt: at(2026, 11, 16, 10).toISOString() }
+    ]
+    const text = dailyReport(
+      input({
+        now: night,
+        sessions: [
+          session('a', '一', at(2026, 11, 17, 11)),
+          session('b', '二', at(2026, 11, 17, 15), { branch: 'aila/task-2' }),
+          session('c', '昨天', at(2026, 11, 16, 15))
+        ],
+        messages: msgs
+      })
+    )
+    expect(text).toBe('今天一起做了 2 个任务（1 个还在分支上没合并）。用了 2.1 万个 token，输入里 80% 命中了缓存。和我聊了 1 句。……今天辛苦了。')
+  })
+
+  it('今天什么都没做', () => {
+    expect(dailyReport(input({ now: at(2026, 11, 17, 18) }))).toBe('今天还没一起做什么……明天见。')
+  })
+})
+
+describe('什么时候说', () => {
+  it('今天说过就不说；日报过了点才说', () => {
+    expect(due(null, NOW)).toBe(true)
+    expect(due('2026-11-17', NOW)).toBe(false)
+    expect(due('2026-11-16', NOW)).toBe(true)
+    expect(due(null, at(2026, 11, 17, 17, 59), '18:00')).toBe(false)
+    expect(due(null, at(2026, 11, 17, 18, 0), '18:00')).toBe(true)
+    expect(due('2026-11-17', at(2026, 11, 17, 19), '18:00')).toBe(false)
+  })
+})

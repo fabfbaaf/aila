@@ -89,6 +89,19 @@ describe('VoiceController', () => {
     expect(behavior.hearWake).toHaveBeenCalled()
   })
 
+  it('听到的话外面接手了（比如提到剪贴板）就不直接交给对话', () => {
+    const { vc, ear, conversation } = setup()
+    const heard: string[] = []
+    vc.onHeard = (t) => {
+      heard.push(t)
+      return t.includes('剪贴板')
+    }
+    ear.onEvent({ type: 'wake', keyword: '你好艾拉' })
+    ear.onEvent({ type: 'transcript', text: '看看我剪贴板里的报错', emotion: 'neutral', asr_ms: 100 })
+    expect(heard).toEqual(['看看我剪贴板里的报错'])
+    expect(conversation.send).not.toHaveBeenCalled()
+  })
+
   it('记录说完到开口的延迟', () => {
     const { vc, ear, conversation } = setup()
     ear.onEvent({ type: 'wake', keyword: '你好艾拉' })
