@@ -50,10 +50,11 @@ async def run_agent(
                 text += item
                 for event in parser.feed(item):
                     yield event
-        for event in parser.flush():
+        final = not calls or tools is None
+        for event in parser.flush(final=final):
             yield event
 
-        if not calls or tools is None:
+        if final:
             return  # 最后一轮没给工具，个别模型还是会要，不再执行
 
         convo.append(_assistant_tool_message(text, calls))

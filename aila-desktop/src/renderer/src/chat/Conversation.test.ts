@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ChatEvent, ConfirmAsk } from '../../../shared/chat'
 import type { StoredMessage } from '../../../shared/cloud'
 import type { Behavior } from '../behavior/Behavior'
-import { Conversation, trimHistory } from './Conversation'
+import { Conversation, trimHistory, type Voice } from './Conversation'
 import type { ChatTransport } from './transport'
 
 /** 行为全部是空操作，只记录调用过的方法名 */
@@ -44,21 +44,41 @@ class FakeTransport implements ChatTransport {
 
 const OPEN: ConfirmAsk = { id: 'c1', skill: '浏览器', action: '在浏览器里打开这个网页', detail: 'https://github.com' }
 
-function setup() {
+function setup(voice: Voice | null = null) {
   const { behavior, calls } = fakeBehavior()
   const transport = new FakeTransport()
-  const conv = new Conversation(behavior, transport)
+  const conv = new Conversation(behavior, transport, voice)
   const asks: (ConfirmAsk | null)[] = []
   const bubbles: string[] = []
+  const fullTexts: (string | undefined)[] = []
   const saved: StoredMessage[] = []
   conv.onAsk = (a) => asks.push(a)
-  conv.onBubble = (t) => bubbles.push(t)
+  conv.onBubble = (t, _hold, fullText) => {
+    bubbles.push(t)
+    fullTexts.push(fullText)
+  }
   conv.onCommit = (m) => saved.push(m)
   /** 按打字节奏把收到的内容都说完（最多 20 秒） */
   const talk = (): void => {
     for (let i = 0; i < 400; i++) conv.tick(0.05)
   }
-  return { conv, transport, calls, asks, bubbles, saved, talk }
+  return { conv, transport, calls, asks, bubbles, fullTexts, saved, talk }
+}
+
+function fakeVoice() {
+  const synthesized: string[] = []
+  const voice: Voice = {
+    enabled: true,
+    async synthesize(text) {
+      synthesized.push(text)
+      return null
+    },
+    play: () => false,
+    stop: () => {},
+    playing: false,
+    mouth: () => ({ aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 })
+  }
+  return { voice, synthesized }
 }
 
 describe('Conversation 的操作确认', () => {
@@ -154,6 +174,72 @@ describe('Conversation 是不是正在和你对话', () => {
     conv.send('你好')
     transport.push({ type: 'text', text: '你好。' })
     expect(conv.chatting).toBe(true)
+  })
+})
+
+describe('Conversation 的口播和全文', () => {
+  it('只把摘要交给合成和气泡，全文和标签顺序保留在历史里', async () => {
+    const { voice, synthesized } = fakeVoice()
+    const { conv, transport, calls, saved, bubbles, fullTexts, talk } = setup(voice)
+    conv.send('帮我查一下价格')
+    transport.push({ type: 'emotion', name: 'happy' })
+    transport.push({ type: 'text', text: '查到了。', spoken: true })
+    transport.push({ type: 'action', name: 'wave' })
+    transport.push({ type: 'text', text: '\n1. 京东：320 元', spoken: false })
+    transport.push({ type: 'done' })
+    await Promise.resolve()
+    talk()
+
+    expect(synthesized).toEqual(['查到了。'])
+    expect(bubbles.at(-1)).toBe('查到了。')
+    expect(fullTexts.at(-1)).toBe('查到了。\n1. 京东：320 元')
+    expect(saved.at(-1)?.content).toBe('[happy]查到了。[wave]\n1. 京东：320 元')
+    expect(calls).toContain('emote(happy)')
+    expect(calls).not.toContain('gesture(wave)')
+  })
+
+  it('旧服务的事件没有 spoken，完整文字仍然念出且不增加全文入口', async () => {
+    const { voice, synthesized } = fakeVoice()
+    const { conv, transport, saved, bubbles, fullTexts, talk } = setup(voice)
+    conv.send('你好')
+    transport.push({ type: 'text', text: '你好。今天过得怎么样？' })
+    transport.push({ type: 'done' })
+    await Promise.resolve()
+    talk()
+
+    expect(synthesized.join('')).toBe('你好。今天过得怎么样？')
+    expect(bubbles.at(-1)).toBe('你好。今天过得怎么样？')
+    expect(fullTexts.at(-1)).toBeUndefined()
+    expect(saved.at(-1)?.content).toBe('你好。今天过得怎么样？')
+  })
+
+  it.each([true, false])('按 hint 提示看全文，提示不进入记录（语音=%s）', async (enabled) => {
+    const { voice, synthesized } = fakeVoice()
+    const { conv, transport, saved, bubbles, fullTexts, talk } = setup(enabled ? voice : null)
+    conv.send('列一下')
+    transport.push({ type: 'text', text: '查到了。', spoken: true })
+    transport.push({ type: 'text', text: '\n1. 全文细节', spoken: false })
+    transport.push({ type: 'text', text: '', spoken: true, hint: 'more' })
+    transport.push({ type: 'text', text: '', spoken: true, hint: 'more' })
+    transport.push({ type: 'done' })
+    await Promise.resolve()
+    talk()
+
+    expect(synthesized.map((text) => text.trim())).toEqual(enabled ? ['查到了。', '细节在对话框里。'] : [])
+    expect(bubbles.at(-1)).toBe('查到了。\n细节在对话框里。')
+    expect(fullTexts.at(-1)).toBe('查到了。\n1. 全文细节')
+    expect(saved.at(-1)?.content).toBe('查到了。\n1. 全文细节')
+  })
+
+  it('打断时只记已经显示的摘要片段，不记已收到但没展示的文字', () => {
+    const { conv, transport, saved } = setup()
+    conv.send('慢慢说')
+    transport.push({ type: 'text', text: '会先说一段。', spoken: true })
+    transport.push({ type: 'text', text: '\n剩下的是全文。', spoken: false })
+    transport.push({ type: 'done' })
+    conv.tick(1 / 18)
+    conv.interrupt()
+    expect(saved.at(-1)?.content).toBe('会')
   })
 })
 

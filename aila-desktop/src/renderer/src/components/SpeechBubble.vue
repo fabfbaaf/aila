@@ -2,8 +2,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { diffLines, type BubbleAsk } from './bubble'
 
-const props = defineProps<{ text: string; visible: boolean; ask?: BubbleAsk | null }>()
-const emit = defineEmits<{ answer: [value: string] }>()
+const props = defineProps<{ text: string; visible: boolean; ask?: BubbleAsk | null; fullText?: string; expanded?: boolean }>()
+const emit = defineEmits<{ answer: [value: string]; toggleFullText: [] }>()
 const body = ref<HTMLDivElement>()
 
 /** 具体内容按行显示；是代码改动（diff）时，加的行标绿、删的行标红 */
@@ -23,7 +23,7 @@ watch(
 <template>
   <Transition name="bubble">
     <div v-if="visible" class="bubble">
-      <div ref="body" class="body">{{ text }}</div>
+      <div v-show="!expanded || !fullText || ask" ref="body" class="body">{{ text }}</div>
       <!-- 等用户回答：要确认的操作（具体内容由 AI 服务从参数生成，照原样显示）、屏幕上看到的报错 -->
       <div v-if="ask" class="ask" data-interactive>
         <div class="detail" :class="{ diff: isDiff }">
@@ -44,6 +44,12 @@ watch(
             {{ b.label }}
           </button>
         </div>
+      </div>
+      <div v-if="fullText && !ask" class="read-reply" data-interactive>
+        <button type="button" :aria-expanded="expanded" aria-controls="bubble-full-reply" @click="emit('toggleFullText')">
+          {{ expanded ? '收起全文' : '看全文' }}
+        </button>
+        <div v-show="expanded" id="bubble-full-reply" class="full-reply" role="region" aria-label="回复全文" tabindex="0">{{ fullText }}</div>
       </div>
     </div>
   </Transition>
@@ -76,6 +82,29 @@ watch(
 .ask {
   margin-top: 6px;
   pointer-events: auto;
+}
+
+.read-reply {
+  margin-top: 6px;
+  text-align: right;
+  pointer-events: auto;
+}
+
+.read-reply :focus-visible {
+  outline: 2px solid #5b6cc4;
+  outline-offset: 2px;
+}
+
+.full-reply {
+  max-height: min(13em, 55vh);
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  background: #eef1f7;
+  text-align: left;
+  user-select: text;
 }
 
 /* 网址、参数可能很长：任意位置换行，最多 5 行，多了可以滚动查看 */

@@ -25,7 +25,8 @@ export interface ConfirmAsk {
 export type ConfirmResult = 'approved' | 'rejected' | 'timeout'
 
 export type ChatEvent =
-  | { type: 'text'; text: string }
+  /** spoken 省略时按旧版服务的行为，把文字照常念出来。more 是桌面端自己的提示。 */
+  | { type: 'text'; text: string; spoken?: boolean; hint?: 'more' }
   | { type: 'emotion'; name: Emotion }
   | { type: 'action'; name: Gesture }
   /** 她在用工具（搜索、读网页），text 是给用户看的进度，比如「正在搜索「xxx」」 */
