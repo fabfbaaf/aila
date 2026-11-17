@@ -5,12 +5,12 @@
 | 任务 | 做什么 | 主要改哪里 | 状态 |
 |---|---|---|---|
 | [01 后台命令](01-background-commands.md) | 开发服务器这类不会自己退出的命令：放后台跑、看输出、停掉 | `aila-ai/app/runtime/shell.py`、`tools.py` | 已合并（0079ab6） |
-| [02 编程 Agent 评测](02-agent-eval.md) | 任务集、跑任务、自动判定做没做成、出报告（第 5 周要用） | 新的 `aila-ai/scripts/eval_agent.py`、`aila-ai/eval/` | |
-| [03 管理记住的命令](03-permission-rules.md) | 「以后都允许」的命令：能看、能删（接口、设置页、终端） | `permissions.py`、`routes/agent.py`、新的设置分区 | |
-| [04 会话管理](04-session-management.md) | 会话改名、删除、搜索（接口、终端；任务页的按钮之后另做） | `session.py`、`runner.py`、`routes/agent.py`、终端版 | |
-| [05 看管 AI 服务](05-service-keeper.md) | 桌面端自己启动 AI 服务、崩了重启、关程序时一起关 | 新的 `aila-desktop/src/main/service.ts`、设置页「运行状态」 | |
-| [06 安装包](06-installer.md) | Windows 安装包，AI 服务打包在里面，不用装 Python、Node | `aila-ai/scripts/build_service.py`、`aila-desktop/electron-builder.yml` | 等 05 |
-| [07 撤销一轮](07-undo-turn.md) | 把她最近一轮改的文件退回去（用户之后改过的不碰） | 新的 `runtime/snapshots.py`、`tools.py`、`runner.py`、任务页、终端 | 等 04 |
+| [02 编程 Agent 评测](02-agent-eval.md) | 任务集、跑任务、自动判定做没做成、出报告（第 5 周要用） | 新的 `aila-ai/scripts/eval_agent.py`、`aila-ai/eval/` | 已合并（c656df3） |
+| [03 管理记住的命令](03-permission-rules.md) | 「以后都允许」的命令：能看、能删（接口、设置页、终端） | `permissions.py`、`routes/agent.py`、新的设置分区 | 已合并（b965c6d） |
+| [04 会话管理](04-session-management.md) | 会话改名、删除、搜索（接口、终端；任务页的按钮之后另做） | `session.py`、`runner.py`、`routes/agent.py`、终端版 | 已合并（b77dc8d） |
+| [05 看管 AI 服务](05-service-keeper.md) | 桌面端自己启动 AI 服务、崩了重启、关程序时一起关 | 新的 `aila-desktop/src/main/service.ts`、设置页「运行状态」 | 已合并（6304d61） |
+| [06 安装包](06-installer.md) | Windows 安装包，AI 服务打包在里面，不用装 Python、Node | `aila-ai/scripts/build_service.py`、`aila-desktop/electron-builder.yml` | 可以开始 |
+| [07 撤销一轮](07-undo-turn.md) | 把她最近一轮改的文件退回去（用户之后改过的不碰） | 新的 `runtime/snapshots.py`、`tools.py`、`runner.py`、任务页、终端 | 可以开始 |
 | [08 花费和上限](08-budget.md) | 按价格表算钱；给任务设上限，花到了就停 | 新的 `runtime/pricing.py`、`loop.py`、`session.py`、任务页、终端 | 等 07 |
 
 ## 先后顺序
@@ -18,9 +18,8 @@
 改同一批文件的任务一个接一个做，不同的可以同时做。每个分支合并以后再开下一个依赖它的：
 
 ```
-现在可以同时开： 02   03   04   05
-04 合并以后：    07
-05 合并以后：    06
+已合并：         01   02   03   04   05
+现在可以同时开： 06   07
 07 合并以后：    08
 ```
 
