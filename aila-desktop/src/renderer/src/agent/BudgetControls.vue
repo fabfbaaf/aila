@@ -93,31 +93,50 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
-.budget-controls { min-width: 0; }
+/* 在任务页顶栏里：平时是一颗小胶囊「已花 / 上限」，点开在下面浮出编辑框 */
+.budget-controls { position: relative; min-width: 0; }
 .budget-button {
-  max-width: 270px;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-family: var(--ui-mono, Consolas, monospace);
+  font-size: 12px;
+  color: var(--text-2, var(--text));
 }
 button, input {
   box-sizing: border-box;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--ui-r-s, 6px);
   padding: 6px 10px;
   background: var(--card);
   color: var(--text);
   font: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 button { cursor: pointer; font-size: 12.5px; }
 button:disabled, input:disabled { opacity: 0.5; cursor: default; }
 button:hover:enabled { border-color: var(--accent); }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.budget-editor { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--side); }
-.budget-editor label { display: block; font-size: 13px; margin-bottom: 6px; }
+button:focus-visible, input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.budget-editor {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 320px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--ui-r-l, 12px);
+  background: var(--raised, var(--side));
+  box-shadow: var(--ui-shadow, 0 10px 30px rgba(0, 0, 0, 0.4));
+}
+.budget-editor label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .budget-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.budget-row input { width: 160px; min-width: 0; }
-p { margin: 6px 0 0; max-width: 60ch; color: var(--dim); font-size: 12.5px; line-height: 1.5; }
+.budget-row input { flex: 1; width: 120px; min-width: 0; font-family: var(--ui-mono, Consolas, monospace); }
+.budget-row button[type='submit'] { border-color: var(--accent-line, var(--accent)); background: var(--accent-bg); }
+p { margin: 8px 0 0; color: var(--dim); font-size: 12px; line-height: 1.55; }
 .unknown { color: var(--warn); }
 .error { color: var(--bad); }
 </style>

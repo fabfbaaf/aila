@@ -30,7 +30,7 @@ class Backend(Protocol):
     async def search_sessions(self, query: str, cwd: str) -> list[dict[str, Any]]: ...
     async def sessions(self) -> list[dict[str, Any]]: ...
     async def session(self, sid: str) -> dict[str, Any]: ...
-    def run(self, sid: str, text: str) -> AsyncIterator[Event]: ...
+    def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]: ...
     async def interrupt(self, sid: str) -> None: ...
     async def set_mode(self, sid: str, mode: str) -> None: ...
     async def compact(self, sid: str) -> None: ...
@@ -100,9 +100,9 @@ class EmbeddedBackend:
             raise BackendError(str(err)) from err
         return {**session.summary(), "running": self.rt.running(sid), "shell": self.rt.shell.label, "events": session.events}
 
-    async def run(self, sid: str, text: str) -> AsyncIterator[Event]:
+    async def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]:
         try:
-            stream = self.rt.run(sid, text)
+            stream = self.rt.run(sid, text, review=review)
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
         async for event in stream:
@@ -196,9 +196,10 @@ class HttpBackend:
     async def session(self, sid: str) -> dict[str, Any]:
         return await self._call("GET", f"/agent/sessions/{sid}")
 
-    async def run(self, sid: str, text: str) -> AsyncIterator[Event]:
+    async def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]:
+        body: dict[str, Any] = {"text": text, "review": True} if review else {"text": text}
         try:
-            async with self.client.stream("POST", f"/agent/sessions/{sid}/messages", json={"text": text}) as res:
+            async with self.client.stream("POST", f"/agent/sessions/{sid}/messages", json=body) as res:
                 if res.status_code >= 400:
                     await res.aread()
                     raise BackendError(_detail(res))

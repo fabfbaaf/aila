@@ -1,0 +1,142 @@
+/* 主窗口「艾拉」的界面风格：所有页面共用这一份颜色、字体、圆角、阴影。
+
+   风格来自她自己的形象：
+   - 底色是偏蓝的墨色，一层层抬亮（底 → 侧栏 → 卡片 → 浮层），不用纯黑
+   - 主色是她头发的淡紫（按钮、选中、她在做事）
+   - 第二色是发夹「▍」光标的青色（分支、链接、提示），少量用
+   - 成功 / 提醒 / 出错用绿 / 琥珀 / 红，只表示状态，不拿来装饰
+   - 文字是界面字体，代码、路径、数字用等宽字体
+
+   只在主窗口里加载（ShellApp 引入）；桌面上的她是透明窗口，不受影响。
+   各页面原来的变量名（--bg、--card、--dim……）都指到这里，改这一份就能统一换。 */
+
+:root {
+  /* 底色：从深到浅 */
+  --ui-bg: #0d0f15;
+  --ui-sunken: #0a0c11;
+  --ui-panel: #11141b;
+  --ui-surface: #161a23;
+  --ui-raised: #1c2130;
+  --ui-code: #0b0d13;
+  --ui-overlay: rgba(5, 6, 10, 0.62);
+
+  /* 线 */
+  --ui-line: #222735;
+  --ui-line-strong: #2f3547;
+  --ui-field: #2b3142;
+
+  /* 文字 */
+  --ui-text: #dfe3ec;
+  --ui-text-2: #b3bacb;
+  --ui-muted: #828b9e;
+  --ui-faint: #596075;
+
+  /* 主色：淡紫 */
+  --ui-accent: #a78bfa;
+  --ui-accent-hi: #c4b5fd;
+  --ui-accent-lo: #7c6cf0;
+  --ui-accent-soft: rgba(167, 139, 250, 0.13);
+  --ui-accent-line: rgba(167, 139, 250, 0.4);
+
+  /* 第二色：光标青 */
+  --ui-cyan: #67e8f9;
+  --ui-cyan-soft: rgba(103, 232, 249, 0.1);
+  --ui-cyan-line: rgba(103, 232, 249, 0.38);
+
+  /* 状态 */
+  --ui-ok: #4ade80;
+  --ui-ok-soft: rgba(74, 222, 128, 0.1);
+  --ui-ok-line: rgba(74, 222, 128, 0.4);
+  --ui-warn: #fbbf24;
+  --ui-warn-soft: rgba(251, 191, 36, 0.1);
+  --ui-warn-line: rgba(251, 191, 36, 0.42);
+  --ui-bad: #f87171;
+  --ui-bad-soft: rgba(248, 113, 113, 0.1);
+  --ui-bad-line: rgba(248, 113, 113, 0.42);
+  --ui-bad-text: #fecaca;
+
+  /* 代码里的颜色 */
+  --ui-code-text: #e2e6ef;
+  --ui-code-inline: #e9b8ff;
+  --ui-diff-add: #86efac;
+  --ui-diff-add-bg: rgba(74, 222, 128, 0.09);
+  --ui-diff-del: #fca5a5;
+  --ui-diff-del-bg: rgba(248, 113, 113, 0.09);
+  --ui-diff-hunk: #7dd3fc;
+
+  /* 品牌渐变：标志、主按钮 */
+  --ui-brand: linear-gradient(135deg, #c4b5fd 0%, #a78bfa 48%, #67e8f9 120%);
+  --ui-brand-soft: linear-gradient(135deg, rgba(196, 181, 253, 0.2), rgba(103, 232, 249, 0.08));
+
+  /* 形状 */
+  --ui-r-xs: 4px;
+  --ui-r-s: 6px;
+  --ui-r: 9px;
+  --ui-r-l: 13px;
+  --ui-shadow: 0 10px 30px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --ui-shadow-s: 0 2px 10px rgba(0, 0, 0, 0.25);
+  --ui-ring: 0 0 0 2px var(--ui-bg), 0 0 0 4px var(--ui-accent-line);
+
+  /* 字 */
+  --ui-font: 'HarmonyOS Sans SC', 'MiSans', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --ui-mono: 'Cascadia Code', 'JetBrains Mono', 'Sarasa Mono SC', Consolas, monospace;
+
+  /* 动效 */
+  --ui-fast: 120ms ease;
+  --ui-mid: 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  color-scheme: dark;
+}
+
+/* ---------- 主窗口的基础样式 ---------- */
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(167, 139, 250, 0.35);
+}
+
+/* 细滚动条：不抢内容 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background: var(--ui-line-strong) padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #424a60 padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

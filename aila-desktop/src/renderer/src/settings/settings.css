@@ -1,27 +1,27 @@
 /* 设置类页面（主窗口里的项目、资料、记忆、设置）的样式。
    都套在 .settings-scope 里：主窗口里还有任务页，全局的 .card、.row、.btn 会把那边的卡片也改掉。
-   配色和任务页（工作窗口）一样是深色 */
+   颜色来自 theme/tokens.css（和任务页同一套）；后面的值是没加载那份时的退路 */
 .settings-scope {
-  --accent: #a78bfa;
-  --accent-soft: rgba(167, 139, 250, 0.16);
-  --text: #d7dce5;
-  --muted: #8a92a3;
-  --label: #aab2c2;
-  --line: #262b37;
-  --field-line: #343a4c;
-  --focus: #8b7cf0;
-  --bg: #0f1117;
-  --surface: #161a23;
-  --hover: #1c212c;
-  --danger: #f87171;
-  --danger-bg: rgba(248, 113, 113, 0.12);
-  --danger-line: rgba(248, 113, 113, 0.4);
-  --ok: #4ade80;
-  --good-bg: rgba(74, 222, 128, 0.12);
-  --warn: #facc15;
-  --warn-bg: rgba(250, 204, 21, 0.12);
-  --tag-bg: #222838;
-  --x: #5b6275;
+  --accent: var(--ui-accent, #a78bfa);
+  --accent-soft: var(--ui-accent-soft, rgba(167, 139, 250, 0.16));
+  --text: var(--ui-text, #d7dce5);
+  --muted: var(--ui-muted, #8a92a3);
+  --label: var(--ui-text-2, #aab2c2);
+  --line: var(--ui-line, #262b37);
+  --field-line: var(--ui-field, #343a4c);
+  --focus: var(--ui-accent, #8b7cf0);
+  --bg: var(--ui-sunken, #0f1117);
+  --surface: var(--ui-surface, #161a23);
+  --hover: var(--ui-raised, #1c212c);
+  --danger: var(--ui-bad, #f87171);
+  --danger-bg: var(--ui-bad-soft, rgba(248, 113, 113, 0.12));
+  --danger-line: var(--ui-bad-line, rgba(248, 113, 113, 0.4));
+  --ok: var(--ui-ok, #4ade80);
+  --good-bg: var(--ui-ok-soft, rgba(74, 222, 128, 0.12));
+  --warn: var(--ui-warn, #facc15);
+  --warn-bg: var(--ui-warn-soft, rgba(250, 204, 21, 0.12));
+  --tag-bg: var(--ui-raised, #222838);
+  --x: var(--ui-faint, #5b6275);
   color: var(--text);
   font-size: 13px;
 }
@@ -31,9 +31,10 @@
 }
 
 .settings-scope h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 600;
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
 }
 
 .settings-scope .lead {
@@ -43,15 +44,16 @@
 
 .settings-scope .card {
   margin-bottom: 14px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--ui-r-l, 12px);
   background: var(--surface);
+  box-shadow: var(--ui-shadow-s, none);
 }
 
 .settings-scope .card h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0 0 12px;
+  font-size: 14.5px;
   font-weight: 600;
 }
 
@@ -64,7 +66,7 @@
 }
 
 .settings-scope .row + .row {
-  border-top: 1px dashed var(--line);
+  border-top: 1px solid var(--line);
 }
 
 .settings-scope .row > .label {
@@ -89,16 +91,18 @@
   max-width: 380px;
   padding: 6px 9px;
   border: 1px solid var(--field-line);
-  border-radius: 8px;
+  border-radius: var(--ui-r-s, 8px);
   outline: none;
   background: var(--bg);
   color: inherit;
   font: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .settings-scope input:focus,
 .settings-scope select:focus {
   border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .settings-scope input[type='range'] {
@@ -118,21 +122,34 @@
 .settings-scope .btn {
   padding: 6px 14px;
   border: 1px solid var(--field-line);
-  border-radius: 8px;
+  border-radius: var(--ui-r-s, 8px);
   background: var(--surface);
   color: var(--text);
   font: inherit;
   cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, filter 120ms ease;
 }
 
 .settings-scope .btn:hover {
   border-color: var(--focus);
+  background: var(--hover);
 }
 
+.settings-scope .btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-ring, 0 0 0 2px var(--accent));
+}
+
+/* 主按钮和任务页的「新任务」「发送」一样用品牌渐变 */
 .settings-scope .btn.primary {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--text);
+  border-color: transparent;
+  background: var(--ui-brand, var(--accent-soft));
+  color: #160f2a;
+  font-weight: 600;
+}
+
+.settings-scope .btn.primary:hover {
+  filter: brightness(1.08);
 }
 
 .settings-scope .btn.danger {

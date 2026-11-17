@@ -26,6 +26,17 @@ function turn(): AgentEvent[] {
 }
 
 describe('工作窗口：事件折叠', () => {
+  it('/review 那一轮只显示一句标题，不把整段请求摆出来', () => {
+    const t = new Transcript()
+    t.apply(ev('start', { seq: 0, mode: 'ask' }))
+    t.apply(ev('user', { seq: 1, t: 1, text: '请审查……<改动清单>很长</改动清单>', review: true, title: '审查没提交的改动：登录' }))
+    t.apply(ev('user', { seq: 2, t: 2, text: '普通的一句话' }))
+    expect(t.items.map((i) => (i.kind === 'user' ? [i.text, !!i.review] : i.kind))).toEqual([
+      ['审查没提交的改动：登录', true],
+      ['普通的一句话', false]
+    ])
+  })
+
   it('回放预算变更和每轮费用，未知价格和旧事件不伪装成零费用', () => {
     const t = new Transcript()
     t.apply(ev('start', { seq: 0, budget: 0 }))

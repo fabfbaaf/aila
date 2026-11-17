@@ -101,8 +101,9 @@ class Agent:
 
     # ---------- 一轮 ----------
 
-    async def turn(self, text: str) -> AsyncIterator[Event]:
-        yield self.session.append({"type": "user", "text": text})
+    async def turn(self, text: str, extra: dict[str, Any] | None = None) -> AsyncIterator[Event]:
+        # extra：界面用的标记（比如 /review 的 review、focus），不进模型消息
+        yield self.session.append({"type": "user", "text": text, **(extra or {})})
         await self.hooks.emit("turn_start", session=self.session, text=text)
         reason, error = "done", ""
         try:

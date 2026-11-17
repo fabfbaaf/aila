@@ -37,6 +37,7 @@ from typing import Any
 
 from ..llm import Message, Usage
 from .pricing import PriceTable, validate_budget
+from .review import review_title
 
 Event = dict[str, Any]
 
@@ -105,7 +106,10 @@ class Session:
         for e in reversed(self.events):
             if e["type"] == "title":
                 return str(e["title"])
-        first = next((e["text"] for e in self.events if e["type"] == "user"), "")
+        event = next((e for e in self.events if e["type"] == "user"), None)
+        if event and event.get("review"):
+            return review_title(str(event.get("focus", "")))[:60]
+        first = event["text"] if event else ""
         line = first.strip().splitlines()[0] if first.strip() else "（还没开始）"
         return line[:60]
 

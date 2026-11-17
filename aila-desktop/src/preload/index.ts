@@ -132,7 +132,7 @@ const api = {
   onGestureApprove: (cb: (id: string) => void): Unsubscribe => listen('gesture:approve', cb),
 
   // 工作窗口（编程 Agent）：主进程只认工作窗口发来的
-  agentList: (): Promise<AiResult<AgentSessionSummary[]>> => ipcRenderer.invoke('agent:list'),
+  agentList: (q = ''): Promise<AiResult<AgentSessionSummary[]>> => ipcRenderer.invoke('agent:list', q),
   agentGet: (sid: string): Promise<AiResult<AgentSession>> => ipcRenderer.invoke('agent:get', sid),
   agentCreate: (cwd: string, mode: AgentMode, isolate = false, budget: number | null = null): Promise<AiResult<AgentSessionSummary>> =>
     ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget),
@@ -145,7 +145,7 @@ const api = {
   agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
   agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),
   /** 说一句话开始一轮；事件从 onAgentEvent 来 */
-  agentSend: (sid: string, text: string): void => ipcRenderer.send('agent:send', sid, text),
+  agentSend: (sid: string, text: string, review = false): void => ipcRenderer.send('agent:send', sid, text, review),
   /** 接上一个会话：补发 after 之后的事件，正在做的话接着推 */
   agentWatch: (sid: string, after: number): void => ipcRenderer.send('agent:watch', sid, after),
   agentInterrupt: (sid: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:interrupt', sid),

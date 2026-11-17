@@ -7,6 +7,7 @@
   GET    /agent/sessions                   会话列表（最近的在前）
   GET    /agent/sessions/{id}              会话的全部日志事件（界面据此重建）
   POST   /agent/sessions/{id}/messages     说一句话，开始一轮；返回这一轮的事件流（SSE）。连接断了她照样做完
+                                            {text, review}：review=true 是 /review，只读地审没提交的改动，text 可以空着（要特别注意什么）
   GET    /agent/sessions/{id}/events       订阅：补发 after 之后的事件，正在做的话接着推实时事件（SSE）
   POST   /agent/sessions/{id}/interrupt    打断
   PUT    /agent/sessions/{id}/mode         换权限模式 {mode}
@@ -23,7 +24,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..deps import get_runtime
 from ..runtime.permissions import MODE_LABELS
@@ -66,7 +67,14 @@ class NewTask(BaseModel):
 
 
 class Say(BaseModel):
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(default="", max_length=20000)
+    review: bool = False
+
+    @model_validator(mode="after")
+    def _needs_text(self) -> "Say":
+        if not self.review and not self.text:
+            raise ValueError("要做什么？")
+        return self
 
 
 class SetMode(BaseModel):
@@ -131,7 +139,7 @@ async def get_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
 async def say(sid: str, req: Say, rt: Runtime = Depends(get_runtime)) -> StreamingResponse:
     _session_or_404(rt, sid)
     try:
-        stream = rt.run(sid, req.text)
+        stream = rt.run(sid, req.text, review=req.review)
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
     return _sse(stream)

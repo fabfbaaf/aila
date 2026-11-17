@@ -588,7 +588,9 @@ function registerIpc(): void {
   registerServiceIpc(ipcMain, serviceKeeper, fromAgent)
   const sidOk = (sid: unknown): sid is string => typeof sid === 'string' && /^[\w-]{1,64}$/.test(sid)
   const notAllowed = { ok: false, error: '只有主窗口能用' }
-  ipcMain.handle('agent:list', (e) => (fromAgent(e) ? agentRelay.list() : notAllowed))
+  ipcMain.handle('agent:list', (e, q: unknown) =>
+    fromAgent(e) ? agentRelay.list(typeof q === 'string' ? q.slice(0, 200) : '') : notAllowed
+  )
   ipcMain.handle('agent:get', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.get(sid) : notAllowed))
   ipcMain.handle('agent:create', (e, cwd: unknown, mode: unknown, isolate: unknown, budget: unknown) => {
     if (!fromAgent(e) || typeof cwd !== 'string' || cwd.length > 1000) return notAllowed
@@ -614,8 +616,11 @@ function registerIpc(): void {
     return agentRelay.rename(sid, title)
   })
   ipcMain.handle('agent:delete', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.delete(sid) : notAllowed))
-  ipcMain.on('agent:send', (e, sid: unknown, text: unknown) => {
-    if (fromAgent(e) && sidOk(sid) && typeof text === 'string' && text.trim()) agentRelay.send(sid, text.slice(0, 20000))
+  ipcMain.on('agent:send', (e, sid: unknown, text: unknown, review: unknown) => {
+    if (!fromAgent(e) || !sidOk(sid) || typeof text !== 'string') return
+    // /review 可以不带话；普通的一句话不能是空的
+    if (review === true) agentRelay.send(sid, text.slice(0, 20000), true)
+    else if (text.trim()) agentRelay.send(sid, text.slice(0, 20000))
   })
   ipcMain.on('agent:watch', (e, sid: unknown, after: unknown) => {
     if (fromAgent(e) && sidOk(sid)) agentRelay.watch(sid, Number.isInteger(after) ? (after as number) : -1)

@@ -63,7 +63,7 @@ const view = computed(() => VIEWS[props.section] ?? ModelSection)
   width: 168px;
   padding: 18px 10px;
   border-right: 1px solid var(--line);
-  background: #12151c;
+  background: var(--ui-panel);
 }
 
 .title {

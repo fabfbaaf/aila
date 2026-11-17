@@ -48,8 +48,10 @@ export class AgentRelay {
     private hooks: RelayHooks
   ) {}
 
-  async list(): Promise<AiResult<AgentSessionSummary[]>> {
-    const r = await this.call<AgentSessionSummary[]>('GET', '/agent/sessions')
+  /** q：按标题或项目路径找（服务端先筛再限数量，能找到很早以前的会话） */
+  async list(q = ''): Promise<AiResult<AgentSessionSummary[]>> {
+    const query = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+    const r = await this.call<AgentSessionSummary[]>('GET', `/agent/sessions${query}`)
     for (const s of r.data ?? []) this.cwds.set(s.id, s.cwd)
     return r
   }
@@ -133,8 +135,10 @@ export class AgentRelay {
   }
 
   /** 说一句话，开始一轮；事件陆续发给工作窗口 */
-  send(sid: string, text: string): void {
-    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/messages`, { method: 'POST', body: JSON.stringify({ text }) })
+  /** review：/review，只读地审没提交的改动（text 是可选的「特别注意什么」） */
+  send(sid: string, text: string, review = false): void {
+    const body = review ? { text, review: true } : { text }
+    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/messages`, { method: 'POST', body: JSON.stringify(body) })
   }
 
   /** 接上一个会话：补发 after 之后的事件，正在做的话接着推（之后的进展她也会汇报） */
@@ -198,7 +202,7 @@ export class AgentRelay {
     switch (e.type) {
       case 'user':
         this.turnFiles.set(sid, new Set())
-        this.hooks.progress({ kind: 'start', title: String(e.text ?? '').slice(0, 40) })
+        this.hooks.progress({ kind: 'start', title: String((e.review ? e.title : e.text) ?? '').slice(0, 40) })
         break
       case 'assistant':
         for (const c of (e.tool_calls as { id: string; name: string; arguments: string }[]) ?? []) {

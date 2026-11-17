@@ -10,7 +10,10 @@ export interface ProjectChoice {
 }
 
 export interface AgentSource {
-  list(): Promise<AgentSessionSummary[]>
+  /** q：按标题或项目路径找；空 = 最近的 */
+  list(q?: string): Promise<AgentSessionSummary[]>
+  rename(sid: string, title: string): Promise<AgentSessionSummary>
+  remove(sid: string): Promise<void>
   get(sid: string): Promise<AgentSession>
   create(cwd: string, mode: AgentMode, isolate?: boolean, budget?: number | null): Promise<AgentSessionSummary>
   setBudget(sid: string, amount: number | null): Promise<AgentBudgetEvent>
@@ -18,7 +21,8 @@ export interface AgentSource {
   merge(sid: string, runTests: boolean): Promise<AgentEvent>
   discard(sid: string): Promise<AgentEvent>
   undo(sid: string, turnSeq: number): Promise<AgentUndoEvent>
-  send(sid: string, text: string): void
+  /** review：/review，只读地审没提交的改动 */
+  send(sid: string, text: string, review?: boolean): void
   watch(sid: string, after: number): void
   interrupt(sid: string): Promise<void>
   setMode(sid: string, mode: AgentMode): Promise<void>
@@ -45,14 +49,16 @@ function unwrap<T>(r: AiResult<T>): T {
 
 function desktop(api: NonNullable<typeof bridge>): AgentSource {
   return {
-    list: async () => unwrap(await api.agentList()),
+    list: async (q = '') => unwrap(await api.agentList(q)),
+    rename: async (sid, title) => unwrap(await api.agentRename(sid, title)),
+    remove: async (sid) => void unwrap(await api.agentDelete(sid)),
     get: async (sid) => unwrap(await api.agentGet(sid)),
     create: async (cwd, mode, isolate, budget) => unwrap(await api.agentCreate(cwd, mode, isolate, budget)),
     setBudget: async (sid, amount) => unwrap(await api.agentSetBudget(sid, amount)),
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),
     discard: async (sid) => unwrap(await api.agentDiscard(sid)),
     undo: async (sid, turnSeq) => unwrap(await api.agentUndo(sid, turnSeq)),
-    send: (sid, text) => api.agentSend(sid, text),
+    send: (sid, text, review = false) => api.agentSend(sid, text, review),
     watch: (sid, after) => api.agentWatch(sid, after),
     interrupt: async (sid) => void unwrap(await api.agentInterrupt(sid)),
     setMode: async (sid, mode) => void unwrap(await api.agentSetMode(sid, mode)),
@@ -119,14 +125,17 @@ function web(): AgentSource {
     }
   }
   return {
-    list: () => call('GET', '/agent/sessions'),
+    list: (q = '') => call('GET', `/agent/sessions${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`),
+    rename: (sid, title) => call('PATCH', `/agent/sessions/${encodeURIComponent(sid)}`, { title }),
+    remove: async (sid) => void (await call('DELETE', `/agent/sessions/${encodeURIComponent(sid)}`)),
     get: (sid) => call('GET', `/agent/sessions/${sid}`),
     create: (cwd, mode, isolate, budget = null) => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate, budget }),
     setBudget: (sid, amount) => call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/budget`, { amount }),
     merge: (sid, runTests) => call('POST', `/agent/sessions/${sid}/merge`, { run_tests: runTests }),
     discard: (sid) => call('POST', `/agent/sessions/${sid}/discard`),
     undo: (sid, turnSeq) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/undo`, { turn_seq: turnSeq }),
-    send: (sid, text) => void stream(sid, `/agent/sessions/${sid}/messages`, { method: 'POST', body: JSON.stringify({ text }) }),
+    send: (sid, text, review = false) =>
+      void stream(sid, `/agent/sessions/${sid}/messages`, { method: 'POST', body: JSON.stringify(review ? { text, review: true } : { text }) }),
     watch: (sid, after) => void stream(sid, `/agent/sessions/${sid}/events?after=${after}`, { method: 'GET' }),
     interrupt: async (sid) => void (await call('POST', `/agent/sessions/${sid}/interrupt`)),
     setMode: async (sid, mode) => void (await call('PUT', `/agent/sessions/${sid}/mode`, { mode })),

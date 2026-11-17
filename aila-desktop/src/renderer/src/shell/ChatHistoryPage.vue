@@ -65,43 +65,52 @@ onBeforeUnmount(() => off?.())
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 18px;
-  border-bottom: 1px solid #262b37;
-  background: #12151c;
+  min-height: 52px;
+  box-sizing: border-box;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-bg);
 }
 
 .bar input {
   flex: 0 1 320px;
   min-width: 0;
   padding: 5px 10px;
-  border: 1px solid #343a4c;
+  border: 1px solid var(--ui-field);
   border-radius: 8px;
   outline: none;
-  background: #0f1117;
-  color: #d7dce5;
+  background: var(--ui-sunken);
+  color: var(--ui-text);
   font: inherit;
   font-size: 13px;
 }
 
 .bar input:focus {
-  border-color: #8b7cf0;
+  border-color: var(--ui-accent);
 }
 
 .count {
   flex: 1;
-  color: #8a92a3;
+  color: var(--ui-muted);
   font-size: 12.5px;
 }
 
 .talk {
-  padding: 4px 12px;
-  border: 1px solid #a78bfa;
-  border-radius: 7px;
-  background: rgba(167, 139, 250, 0.16);
-  color: #d7dce5;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-r);
+  background: var(--ui-brand);
+  color: #160f2a;
   font: inherit;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 3px 12px rgba(167, 139, 250, 0.22);
+  transition: filter var(--ui-fast);
+}
+
+.talk:hover {
+  filter: brightness(1.08);
 }
 
 .scroll {
@@ -114,8 +123,8 @@ onBeforeUnmount(() => off?.())
   top: 0;
   margin: 14px 0 6px;
   padding: 4px 0;
-  background: #0f1117;
-  color: #8a92a3;
+  background: var(--ui-sunken);
+  color: var(--ui-muted);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -131,12 +140,12 @@ onBeforeUnmount(() => off?.())
 }
 
 .who {
-  color: #8a92a3;
+  color: var(--ui-muted);
   font-size: 12.5px;
 }
 
 .msg.assistant .who {
-  color: #a78bfa;
+  color: var(--ui-accent);
 }
 
 .text {
@@ -145,24 +154,24 @@ onBeforeUnmount(() => off?.())
 }
 
 .msg.user .text {
-  color: #e8ebf2;
+  color: var(--ui-text);
 }
 
 .time {
-  color: #5b6275;
+  color: var(--ui-faint);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
 
 .empty {
   padding: 40px 0;
-  color: #8a92a3;
+  color: var(--ui-muted);
   text-align: center;
 }
 
 kbd {
   padding: 0 4px;
-  border: 1px solid #343a4c;
+  border: 1px solid var(--ui-field);
   border-radius: 3px;
   font-size: 11px;
 }

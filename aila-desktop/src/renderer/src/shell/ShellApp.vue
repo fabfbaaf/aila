@@ -5,12 +5,15 @@
  * 以前的工作窗口、代码星图、设置三个窗口都搬进来当页面（桌面上的她还是自己的透明窗口）。
  * 页面用 KeepAlive 留着：切回任务页时她做到哪一步还在原处；地图例外，只在看的时候才挂着（3D 一直画很费电）。
  * 页面和地址的对应规则在 shared/shell.ts，主进程也用同一份。
+ * 界面风格（颜色、字体、图标）在 theme/：tokens.css、icons.ts。
  */
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import { PAGES, parseHash, toHash, type ShellRoute } from '../../../shared/shell'
 import { bridge } from '../platform/bridge'
 import { startStore } from '../settings/store'
+import '../theme/tokens.css'
 import '../settings/settings.css'
+import Icon from '../theme/Icon.vue'
 import AgentApp from '../agent/AgentApp.vue'
 import ProjectsPage from './ProjectsPage.vue'
 import SectionPage from './SectionPage.vue'
@@ -73,7 +76,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="shell">
     <nav class="rail" aria-label="页面">
-      <div class="brand" title="艾拉">艾</div>
+      <div class="brand" title="艾拉">
+        <span>艾</span><i aria-hidden="true"></i>
+      </div>
       <button
         v-for="p in PAGES"
         :key="p.id"
@@ -83,7 +88,7 @@ onBeforeUnmount(() => {
         :aria-current="route.page === p.id ? 'page' : undefined"
         @click="go(p.id === 'projects' ? { page: 'projects', tab: route.tab ?? 'list' } : { page: p.id })"
       >
-        <i aria-hidden="true">{{ p.icon }}</i>
+        <Icon :name="p.id" :size="20" />
         <span>{{ p.name }}</span>
       </button>
     </nav>
@@ -100,24 +105,10 @@ onBeforeUnmount(() => {
   </div>
 </template>
 
-<style>
-html,
-body,
-#app {
-  margin: 0;
-  height: 100%;
-  overflow: hidden;
-  background: #0f1117;
-  color: #d7dce5;
-  font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
-  font-size: 14px;
-}
-</style>
-
 <style scoped>
 .shell {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   height: 100%;
 }
 
@@ -125,59 +116,88 @@ body,
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 0;
-  background: #0b0d12;
-  border-right: 1px solid #262b37;
+  gap: 2px;
+  padding: 12px 0 10px;
+  background: var(--ui-sunken);
+  border-right: 1px solid var(--ui-line);
 }
 
+/* 标志：「艾」字在品牌渐变上，右下角一截光标（和她发夹上的「▍」一样） */
 .brand {
-  width: 32px;
-  height: 32px;
-  margin-bottom: 10px;
-  border-radius: 9px;
-  background: rgba(167, 139, 250, 0.16);
-  color: #a78bfa;
-  font-weight: 700;
-  line-height: 32px;
-  text-align: center;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 14px;
+  border-radius: 11px;
+  background: var(--ui-brand);
+  box-shadow: 0 4px 14px rgba(167, 139, 250, 0.28);
+  color: #171226;
+  font-weight: 800;
+  font-size: 17px;
+}
+
+.brand i {
+  position: absolute;
+  right: 6px;
+  bottom: 7px;
+  width: 3px;
+  height: 9px;
+  border-radius: 1px;
+  background: #171226;
+  animation: blink 1.2s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 .ic {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
-  width: 46px;
-  padding: 6px 0 5px;
+  gap: 3px;
+  width: 52px;
+  padding: 8px 0 6px;
   border: none;
-  border-radius: 9px;
+  border-radius: var(--ui-r);
   background: none;
-  color: #8a92a3;
+  color: var(--ui-muted);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
-}
-
-.ic i {
-  font-style: normal;
-  font-size: 16px;
-  line-height: 1.2;
+  transition: background var(--ui-fast), color var(--ui-fast);
 }
 
 .ic:hover {
-  background: #161a23;
-  color: #d7dce5;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .ic.on {
-  background: rgba(167, 139, 250, 0.16);
-  color: #a78bfa;
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent-hi);
+}
+
+/* 当前页左边一道竖条 */
+.ic.on::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--ui-accent);
 }
 
 .ic:focus-visible {
-  outline: 2px solid #a78bfa;
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--ui-ring);
 }
 
 .ic.end {
@@ -188,5 +208,6 @@ body,
   min-width: 0;
   height: 100%;
   overflow: hidden;
+  background: var(--ui-bg);
 }
 </style>

@@ -16,14 +16,14 @@ const props = defineProps<{
 }>()
 
 const COLORS: Record<string, string> = {
-  system: '#14b8a6',
-  tools: '#2dd4bf',
-  context: '#5eead4',
-  summary: '#a78bfa',
+  system: '#7c6cf0',
+  tools: '#a78bfa',
+  context: '#c4b5fd',
+  summary: '#fbbf24',
   user: '#94a3b8',
   assistant: '#64748b'
 }
-const TOOL_COLORS = ['#f59e0b', '#fbbf24', '#fb923c', '#fcd34d', '#f97316', '#fdba74']
+const TOOL_COLORS = ['#22d3ee', '#67e8f9', '#06b6d4', '#a5f3fc', '#0e9fb8', '#5eead4']
 
 function color(key: string, i: number): string {
   return COLORS[key] ?? TOOL_COLORS[i % TOOL_COLORS.length]
@@ -207,7 +207,7 @@ h4 {
   flex: 1;
   height: 100%;
   border-radius: 2px 2px 0 0;
-  background: rgba(245, 158, 11, 0.35);
+  background: rgba(251, 191, 36, 0.3);
 }
 
 .spark .hit {

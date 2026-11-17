@@ -25,6 +25,7 @@ from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
 from .pricing import validate_budget
 from .prompt import build_context
+from .review import ReviewError, review_request, review_title
 from .session import Event, Session, SessionStore, latest_turn, turn_edits
 from .shell import Shell, find_shell
 from .snapshots import Snapshots
@@ -76,6 +77,8 @@ class Runtime:
         self._listeners: dict[str, set[asyncio.Queue[Event | None]]] = {}
         self._deleting: set[str] = set()
         self._operations: set[str] = set()
+        # 正在 /review 的会话 → 这一轮结束后要换回的权限模式
+        self._reviewing: dict[str, Mode] = {}
 
     # ---------- 会话 ----------
 
@@ -144,7 +147,11 @@ class Runtime:
         if mode not in MODES:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         agent = self.agent(sid)
-        agent.policy.mode = mode
+        if sid in self._reviewing:
+            # /review 这一轮必须只读：先记下，这一轮结束后再换
+            self._reviewing[sid] = mode
+        else:
+            agent.policy.mode = mode
         self._publish(sid, agent.session.append({"type": "mode", "mode": mode}))
 
     def set_budget(self, sid: str, amount: float | None) -> Event:
@@ -212,28 +219,41 @@ class Runtime:
 
     # ---------- 跑一轮 ----------
 
-    def run(self, sid: str, text: str) -> AsyncIterator[Event]:
-        """开始一轮，返回这一轮的事件流（先订阅再开始，一个字都不会漏）"""
-        agent = self._ready(sid, text)
+    def run(self, sid: str, text: str, review: bool = False) -> AsyncIterator[Event]:
+        """开始一轮，返回这一轮的事件流（先订阅再开始，一个字都不会漏）。
+
+        review=True：/review，只读地审一遍没提交的改动；text 是可选的「特别注意什么」。
+        """
+        agent, request, extra = self._ready(sid, text, review)
         stream = self.subscribe(sid, len(agent.session.events) - 1)
-        self._begin(sid, agent, text)
+        self._begin(sid, agent, request, extra)
         return stream
 
     def start(self, sid: str, text: str) -> None:
         """开始一轮，不订阅（从对话、屏幕上的报错、星图交过来的任务：工作窗口打开后自己接上）"""
-        self._begin(sid, self._ready(sid, text), text)
+        agent, request, extra = self._ready(sid, text)
+        self._begin(sid, agent, request, extra)
 
-    def _ready(self, sid: str, text: str) -> Agent:
+    def _ready(self, sid: str, text: str, review: bool = False) -> tuple[Agent, str, dict]:
         agent = self.agent(sid)
         if self.running(sid):
             raise RuntimeError_("她还在做上一件事：等她做完，或者先打断。")
         if sid in self._operations:
             raise RuntimeError_("这个会话正在合并、放弃分支或压缩，等它结束再说。")
-        if not text.strip():
+        if not review and not text.strip():
             raise RuntimeError_("要做什么？")
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
-        return agent
+        if not review:
+            return agent, text, {}
+        # 在新分支上做时审的是分支临时目录里的改动
+        root = agent.session.workdir if agent.session.workdir.is_dir() else agent.session.cwd
+        try:
+            request = review_request(root, text)
+        except ReviewError as err:
+            raise RuntimeError_(str(err)) from err
+        focus = text.strip()
+        return agent, request, {"review": True, "title": review_title(focus), **({"focus": focus} if focus else {})}
 
     def undo(self, sid: str, turn_seq: int | None = None) -> Event:
         """只撤销最近完整一轮的文件工具，撤销本身记在同一份追加日志里。"""
@@ -314,9 +334,23 @@ class Runtime:
             self._publish(sid, event)
             return event
 
-    def _begin(self, sid: str, agent: Agent, text: str) -> None:
+    def _begin(self, sid: str, agent: Agent, text: str, extra: dict | None = None) -> None:
         agent.model = self.model_factory()  # 设置里换了模型或密钥：从这一轮起用新的
-        self._tasks[sid] = asyncio.create_task(self._drive(sid, agent.turn(text.strip())))
+        events = agent.turn(text.strip(), extra)
+        if extra and extra.get("review"):
+            events = self._read_only(sid, agent, events)
+        self._tasks[sid] = asyncio.create_task(self._drive(sid, events))
+
+    async def _read_only(self, sid: str, agent: Agent, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
+        """/review 这一轮按只读模式把关；结束（做完、出错、打断）后换回原来的模式，
+        中途用户换过模式就换成新的那个"""
+        self._reviewing[sid] = agent.policy.mode
+        agent.policy.mode = "read_only"
+        try:
+            async for event in events:
+                yield event
+        finally:
+            agent.policy.mode = self._reviewing.pop(sid, agent.policy.mode)
 
     def project_dir(self, project_id: str) -> str:
         """代码库里登记的项目 → 它的文件夹"""

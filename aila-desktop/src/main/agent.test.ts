@@ -109,6 +109,26 @@ describe('工作窗口的转发（主进程）', () => {
     }))
   })
 
+  it('搜索把关键词放进地址，审查改动带 review 标记，进展里用一句话的标题', async () => {
+    const fetchMock = fakeService([{ type: 'user', seq: 1, text: '很长的审查请求', review: true, title: '审查没提交的改动' }])
+    const { r, seen } = relay()
+    fetchMock.mockImplementationOnce(async () => new Response('[]')).mockImplementationOnce(async () => new Response('[]'))
+    await r.list('  购物车 ')
+    expect(fetchMock).toHaveBeenLastCalledWith(`http://ai/agent/sessions?q=${encodeURIComponent('购物车')}`, expect.anything())
+    await r.list()
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions', expect.anything())
+    r.send('s1', '', true)
+    await vi.waitFor(() => expect(seen.progress.length).toBe(1))
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s1/messages', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ text: '', review: true })
+    }))
+    expect(seen.progress[0]).toMatchObject({ kind: 'start', title: '审查没提交的改动' })
+    r.send('s1', '改 README')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s1/messages', expect.objectContaining({
+      body: JSON.stringify({ text: '改 README' })
+    }))
+  })
+
   it('删不了时保留等确认的状态，删除后清理它', async () => {
     const fetchMock = fakeService(TURN.slice(0, 5))
     const { r, seen } = relay()

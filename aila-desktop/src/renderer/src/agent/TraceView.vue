@@ -189,7 +189,7 @@ header {
 }
 
 .row.tool .bar {
-  background: #2dd4bf;
+  background: var(--ui-cyan, #67e8f9);
 }
 
 .row.tool.bad .bar {
@@ -201,7 +201,7 @@ header {
 }
 
 .row.wait .bar {
-  background: repeating-linear-gradient(45deg, #64748b 0 4px, #334155 4px 8px);
+  background: repeating-linear-gradient(45deg, #4b5368 0 4px, #2a3040 4px 8px);
 }
 
 .stat {
@@ -247,11 +247,11 @@ footer {
 }
 
 .legend .tool {
-  background: #2dd4bf;
+  background: var(--ui-cyan, #67e8f9);
 }
 
 .legend .wait {
-  background: repeating-linear-gradient(45deg, #64748b 0 3px, #334155 3px 6px);
+  background: repeating-linear-gradient(45deg, #4b5368 0 3px, #2a3040 3px 6px);
 }
 
 .legend .bad {

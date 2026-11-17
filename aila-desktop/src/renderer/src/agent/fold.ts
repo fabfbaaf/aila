@@ -78,7 +78,8 @@ export interface MergeItem {
 }
 
 export type Item =
-  | { kind: 'user'; key: string; text: string }
+  /** review：/review 那一轮，text 是一句话的标题（完整的请求不摆出来） */
+  | { kind: 'user'; key: string; text: string; review?: boolean }
   | MergeItem
   | { kind: 'text'; key: string; text: string; live: boolean }
   | ToolItem
@@ -211,7 +212,8 @@ export class Transcript {
         break
       case 'user':
         this.closeText()
-        this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
+        if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '审查没提交的改动'), review: true })
+        else this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
         this.turn = newTurn(Number(e.t ?? 0), e.seq)
         this.turnNo++
         this.running = true

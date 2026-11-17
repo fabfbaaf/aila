@@ -180,7 +180,7 @@ class Terminal:
                 continue
             await self.turn(text)
 
-    async def turn(self, text: str) -> str:
+    async def turn(self, text: str, review: bool = False) -> str:
         """做一轮，返回结束的原因"""
         interrupted = False
 
@@ -194,7 +194,7 @@ class Terminal:
 
         try:
             with self.watcher.watching(interrupt):
-                async for e in self.backend.run(self.sid, text):
+                async for e in self.backend.run(self.sid, text, review):
                     self.renderer.event(e)
                     if e["type"] == "confirm":
                         await self._confirm(e)
@@ -300,6 +300,8 @@ class Terminal:
                 self.console.print(ledger_view(await self.backend.context(self.sid)))
             elif name == "/init":
                 await self.turn(INIT_PROMPT)
+            elif name == "/review":
+                await self.turn(arg, review=True)
             elif name == "/merge":
                 no_tests = arg in ("直接", "--no-tests", "no-tests")
                 self.renderer.waiting("正在合并…" if no_tests else "正在跑测试…")

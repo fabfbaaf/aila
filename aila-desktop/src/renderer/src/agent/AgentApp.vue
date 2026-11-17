@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
  * 工作窗口：在这里给她编程任务。
- * 左边是会话（终端里用 aila 开的也在这里），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
+ * 左边是会话（终端里用 aila 开的也在这里；能搜、改名、删除），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
+ * 输入框下面的「审查改动」（或者输入 /review）让她只读地审一遍没提交的改动。
  */
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
@@ -15,6 +16,8 @@ import TraceView from './TraceView.vue'
 import UndoResult from './UndoResult.vue'
 import BudgetControls from './BudgetControls.vue'
 import { parseBudget, validBudget } from '../../../shared/budget'
+import Icon from '../theme/Icon.vue'
+import { deleteNotice, groupSessions } from './sessions'
 
 const source = createAgentSource()
 const sessions = ref<AgentSessionSummary[]>([])
@@ -40,6 +43,18 @@ let openingSid = ''
 const undoing = reactive(new Set<string>())
 const undoDialog = ref<HTMLDialogElement>()
 const undoPreview = ref<{ sid: string; plan: UndoPreview; branch: string | null } | null>(null)
+
+// 左边列表：搜索、改名、删除
+const query = ref('')
+const groups = computed(() => groupSessions(sessions.value))
+const menuFor = ref('')
+const renaming = ref('')
+const renameText = ref('')
+const renameInput = ref<HTMLInputElement[]>()
+const deleteDialog = ref<HTMLDialogElement>()
+const deleteTarget = ref<AgentSessionSummary | null>(null)
+const deleting = ref(false)
+let searchTimer = 0
 
 const running = computed(() => t.value.running)
 const pending = computed(() => t.value.pending)
@@ -102,7 +117,7 @@ let listRequest = 0
 async function refreshList(): Promise<void> {
   const request = ++listRequest
   try {
-    const result = await source.list()
+    const result = await source.list(query.value)
     if (request !== listRequest) return
     sessions.value = result
     const active = current.value
@@ -176,19 +191,119 @@ async function pickOther(): Promise<void> {
   if (path) await startNew(path)
 }
 
+// ---------- 搜索、改名、删除 ----------
+
+// 打字停一下再搜（服务端按标题和项目路径找，能找到很早的会话）
+watch(query, () => {
+  clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => void refreshList(), 250)
+})
+
+function toggleMenu(sid: string): void {
+  menuFor.value = menuFor.value === sid ? '' : sid
+}
+
+async function startRename(s: AgentSessionSummary): Promise<void> {
+  menuFor.value = ''
+  renaming.value = s.id
+  renameText.value = s.title
+  await nextTick()
+  renameInput.value?.[0]?.focus()
+  renameInput.value?.[0]?.select()
+}
+
+async function saveRename(s: AgentSessionSummary): Promise<void> {
+  if (renaming.value !== s.id) return
+  const title = renameText.value.trim()
+  renaming.value = ''
+  if (!title || title === s.title) return
+  try {
+    const saved = await source.rename(s.id, title)
+    s.title = saved.title
+    if (current.value?.id === s.id) current.value.title = saved.title
+  } catch (err) {
+    error.value = (err as Error).message
+  }
+}
+
+async function askDelete(s: AgentSessionSummary): Promise<void> {
+  menuFor.value = ''
+  if (s.running) {
+    error.value = '她还在做这个任务：先打断，再删除。'
+    return
+  }
+  deleteTarget.value = s
+  await nextTick()
+  if (!deleteDialog.value?.open) deleteDialog.value?.showModal()
+}
+
+function closeDelete(): void {
+  deleteTarget.value = null
+  deleteDialog.value?.close()
+}
+
+async function deleteNow(): Promise<void> {
+  const target = deleteTarget.value
+  if (!target || deleting.value) return
+  deleting.value = true
+  try {
+    await source.remove(target.id)
+    closeDelete()
+    if (current.value?.id === target.id) {
+      current.value = null
+      t.value = reactive(new Transcript())
+      ledger.value = null
+    }
+    await refreshList()
+    if (!current.value) {
+      if (sessions.value.length) await open(sessions.value[0].id)
+      else picking.value = true
+    }
+  } catch (err) {
+    closeDelete()
+    error.value = (err as Error).message
+  } finally {
+    deleting.value = false
+  }
+}
+
+function closeMenus(): void {
+  menuFor.value = ''
+}
+
 // ---------- 说话、确认、打断 ----------
+
+/** 现在能不能开始新的一轮（说话或者审查） */
+function canStart(): boolean {
+  if (!current.value || undoBusy.value || opening.value || undoPreview.value || t.value.closed) return false
+  if (running.value) {
+    error.value = '她还在做事：等她做完，或者先按 Esc 打断。'
+    return false
+  }
+  return true
+}
 
 function send(): void {
   const msg = text.value.trim()
-  if (!msg || !current.value || undoBusy.value || opening.value || undoPreview.value) return
-  if (running.value) {
-    error.value = '她还在做事：等她做完，或者先按 Esc 打断。'
-    return
-  }
+  if (!msg) return
+  // 「/review 重点」= 点「审查改动」
+  const command = /^\/review(?:\s+([\s\S]*))?$/.exec(msg)
+  if (command) return review(command[1] ?? '')
+  if (!canStart() || !current.value) return
   error.value = ''
   text.value = ''
   streaming.add(current.value.id)
   source.send(current.value.id, msg)
+  void nextTick(scrollToBottom)
+}
+
+/** /review：她只读地审一遍没提交的改动，按严重程度列出问题；focus 是可选的「特别注意什么」 */
+function review(focus = ''): void {
+  if (!canStart() || !current.value) return
+  error.value = ''
+  text.value = ''
+  streaming.add(current.value.id)
+  source.send(current.value.id, focus.trim(), true)
   void nextTick(scrollToBottom)
 }
 
@@ -328,7 +443,7 @@ function onComposerKey(e: KeyboardEvent): void {
 }
 
 function onKey(e: KeyboardEvent): void {
-  if (undoDialog.value?.open) return // 对话框里的 Esc 只取消撤销预览
+  if (undoDialog.value?.open || deleteDialog.value?.open) return // 对话框里的 Esc 只关对话框
   const typing = e.target instanceof HTMLTextAreaElement && text.value.length > 0
   const p = pending.value
   if (p?.confirm && !typing) {
@@ -373,6 +488,7 @@ const endMark: Record<string, string> = { done: '✓', error: '✗' }
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
+  window.addEventListener('click', closeMenus)
   // 轨迹里正在做的那一轮每秒往右长一点（只在看轨迹、而且她在做事的时候）
   clock = window.setInterval(() => {
     if (running.value && view.value === 'trace') now.value = Date.now() / 1000
@@ -393,44 +509,83 @@ onActivated(() => window.addEventListener('keydown', onKey))
 onDeactivated(() => {
   window.removeEventListener('keydown', onKey)
   closeUndoPreview()
+  closeDelete()
+  closeMenus()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('click', closeMenus)
   clearInterval(clock)
   clearTimeout(ledgerTimer)
+  clearTimeout(searchTimer)
 })
 </script>
 
 <template>
   <div class="app" :class="{ bare: !current }">
     <aside class="side">
-      <div class="brand">艾拉 <span>编程</span></div>
-      <button class="new" @click="picking = true">＋ 新任务</button>
+      <div class="side-head">
+        <h2>任务</h2>
+        <button class="new" title="开一个新任务" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+      </div>
+      <label class="search">
+        <Icon name="search" :size="15" />
+        <input v-model="query" type="search" placeholder="找任务：标题或项目" aria-label="找任务" @keydown.stop @keydown.esc="query = ''" />
+      </label>
       <div class="list">
-        <div
-          v-for="s in sessions"
-          :key="s.id"
-          class="sess"
-          :class="{ on: s.id === current?.id }"
-          :title="s.cwd"
-          @click="open(s.id)"
-        >
-          <div class="title"><i v-if="s.running" class="live"></i>{{ s.title }}</div>
-          <div class="meta">{{ basename(s.cwd) }} · {{ when(s.updated) }}</div>
-        </div>
-        <div v-if="!sessions.length" class="none">还没有任务</div>
+        <template v-for="g in groups" :key="g.label">
+          <div class="group">{{ g.label }}</div>
+          <div
+            v-for="s in g.items"
+            :key="s.id"
+            class="sess"
+            :class="{ on: s.id === current?.id, menu: menuFor === s.id }"
+            :title="s.cwd"
+            @click="renaming !== s.id && open(s.id)"
+          >
+            <input
+              v-if="renaming === s.id"
+              ref="renameInput"
+              v-model="renameText"
+              class="rename"
+              maxlength="100"
+              aria-label="新标题"
+              @click.stop
+              @keydown.stop
+              @keydown.enter.prevent="saveRename(s)"
+              @keydown.esc.prevent="renaming = ''"
+              @blur="saveRename(s)"
+            />
+            <template v-else>
+              <div class="title"><i v-if="s.running" class="live" title="她在做"></i>{{ s.title }}</div>
+              <div class="meta">
+                <span>{{ basename(s.cwd) }}</span>
+                <span v-if="s.branch" class="meta-branch" :title="`在分支 ${s.branch} 上做`"><Icon name="branch" :size="12" /></span>
+                <span class="dot">·</span>
+                <span>{{ when(s.updated) }}</span>
+              </div>
+              <button class="more" title="改名、删除" aria-label="改名、删除" @click.stop="toggleMenu(s.id)"><Icon name="more" :size="16" :stroke="2.4" /></button>
+              <div v-if="menuFor === s.id" class="menu-pop" role="menu" @click.stop>
+                <button role="menuitem" @click="startRename(s)"><Icon name="pencil" :size="15" />改名</button>
+                <button role="menuitem" class="danger" @click="askDelete(s)"><Icon name="trash" :size="15" />删除</button>
+              </div>
+            </template>
+          </div>
+        </template>
+        <div v-if="!sessions.length" class="none">{{ query.trim() ? '没找到对得上的任务' : '还没有任务' }}</div>
       </div>
       <div class="side-foot">终端里也能用：<code>aila</code></div>
     </aside>
 
     <main class="main">
       <header v-if="current" class="top">
-        <div class="proj">
+        <div class="proj" :title="current.cwd">
           <b>{{ basename(current.cwd) }}</b>
           <span class="path">{{ current.cwd }}</span>
         </div>
-        <span v-if="t.branch" class="branch-badge" title="她在这个分支的临时目录里改，你的代码一个字都没动">⑂ {{ t.branch }}</span>
+        <span v-if="t.branch" class="branch-badge" title="她在这个分支的临时目录里改，你的代码一个字都没动"><Icon name="branch" :size="13" />{{ t.branch }}</span>
+        <BudgetControls class="task-budget" :sid="current.id" :cost="current.cost" :budget="t.budget" :change="source.setBudget" @changed="changedBudget" />
         <select class="mode" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
           <option v-for="(label, m) in MODE_LABELS" :key="m" :value="m">{{ label }}</option>
         </select>
@@ -440,7 +595,6 @@ onBeforeUnmount(() => {
           <button :class="{ on: view === 'trace' }" title="按时间看每一步花了多久" @click="view = 'trace'">轨迹</button>
         </div>
       </header>
-      <BudgetControls v-if="current" class="task-budget" :sid="current.id" :cost="current.cost" :budget="t.budget" :change="source.setBudget" @changed="changedBudget" />
 
       <div v-if="current && view === 'trace'" class="scroll">
         <TraceView :turns="trace" />
@@ -452,7 +606,8 @@ onBeforeUnmount(() => {
             <p class="dim">比如「这个项目是做什么的」「给购物车加一个打折函数，写好测试并跑通」「看看为什么 npm test 失败」</p>
           </div>
           <template v-for="item in t.items" :key="item.key">
-            <div v-if="item.kind === 'user'" class="user">{{ item.text }}</div>
+            <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>只读</span></div>
+            <div v-else-if="item.kind === 'user'" class="user">{{ item.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
             <div v-else-if="item.kind === 'text'" class="md" :class="{ live: item.live }" v-html="renderMarkdown(item.text)"></div>
             <ToolCard v-else-if="item.kind === 'tool'" :item="item" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
@@ -483,30 +638,44 @@ onBeforeUnmount(() => {
           <div v-if="running && !pending" class="working"><i></i><i></i><i></i>她在做……<span>Esc 打断</span></div>
         </div>
         <div v-else class="hello big">
+          <div class="hello-mark" aria-hidden="true">&gt;_</div>
           <p>给她一个编程任务：她会读代码、改文件、跑命令和测试，直到做完。</p>
-          <button class="new" @click="picking = true">＋ 新任务</button>
+          <button class="new" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
         </div>
       </div>
 
       <div v-if="error" class="error" @click="error = ''">{{ error }}</div>
 
       <footer v-if="current" class="composer">
-        <textarea
-          ref="input"
-          v-model="text"
-          rows="3"
-          :disabled="t.closed"
-          :placeholder="
-            t.closed
-              ? '这个会话的分支已经放弃了，点左上角「新任务」开一个新的'
-              : running
-                ? '她在做事……想好的下一句可以先写着'
-                : '要她做什么？Enter 发送，Shift+Enter 换行'
-          "
-          @keydown="onComposerKey"
-        ></textarea>
-        <button v-if="running" class="stop" @click="interrupt">停下 <kbd>Esc</kbd></button>
-        <button v-else class="send" :disabled="!text.trim() || undoBusy || opening" @click="send">发送</button>
+        <div class="box">
+          <textarea
+            ref="input"
+            v-model="text"
+            rows="3"
+            :disabled="t.closed"
+            :placeholder="
+              t.closed
+                ? '这个会话的分支已经放弃了，点左上角「新任务」开一个新的'
+                : running
+                  ? '她在做事……想好的下一句可以先写着'
+                  : '要她做什么？'
+            "
+            @keydown="onComposerKey"
+          ></textarea>
+          <div class="bar">
+            <button
+              class="chip"
+              :disabled="running || undoBusy || opening || t.closed"
+              title="她只读地审一遍还没提交的改动，按严重程度列出问题。也可以输入「/review 要特别注意的地方」"
+              @click="review()"
+            >
+              <Icon name="review" :size="15" />审查改动
+            </button>
+            <span class="keys">Enter 发送 · Shift+Enter 换行</span>
+            <button v-if="running" class="stop" @click="interrupt"><Icon name="stop" :size="13" :stroke="2.2" />停下 <kbd>Esc</kbd></button>
+            <button v-else class="send" :disabled="!text.trim() || undoBusy || opening" @click="send">发送<Icon name="send" :size="15" :stroke="2" /></button>
+          </div>
+        </div>
       </footer>
     </main>
 
@@ -571,6 +740,22 @@ onBeforeUnmount(() => {
       </template>
     </dialog>
 
+    <dialog
+      ref="deleteDialog"
+      class="undo-dialog"
+      aria-labelledby="delete-heading"
+      @close="!deleteDialog?.open && (deleteTarget = null)"
+    >
+      <template v-if="deleteTarget">
+        <h2 id="delete-heading">删除「{{ deleteTarget.title }}」？</h2>
+        <p v-for="line in deleteNotice(deleteTarget)" :key="line">{{ line }}</p>
+        <div class="undo-actions">
+          <button type="button" class="ghost" autofocus @click="closeDelete">取消</button>
+          <button type="button" class="ghost danger-btn" :disabled="deleting" @click="deleteNow">{{ deleting ? '正在删除…' : '删除' }}</button>
+        </div>
+      </template>
+    </dialog>
+
     <div v-if="picking" class="overlay" @click.self="current && (picking = false)">
       <div class="picker">
         <h2>在哪个项目里做？</h2>
@@ -615,69 +800,41 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 颜色都来自 theme/tokens.css；这里的短名字给子组件（工具卡片、轨迹、账本）继续用 */
 .app {
-  --bg: #0f1117;
-  --side: #12151c;
-  --card: #161a23;
-  --code: #0b0e14;
-  --line: #262b37;
-  --text: #d7dce5;
-  --dim: #8a92a3;
-  --accent: #a78bfa;
-  --accent-bg: rgba(167, 139, 250, 0.16);
-  --ok: #4ade80;
-  --warn: #facc15;
-  --bad: #f87171;
+  --bg: var(--ui-bg);
+  --side: var(--ui-panel);
+  --card: var(--ui-surface);
+  --raised: var(--ui-raised);
+  --code: var(--ui-code);
+  --line: var(--ui-line);
+  --line-strong: var(--ui-line-strong);
+  --text: var(--ui-text);
+  --text-2: var(--ui-text-2);
+  --dim: var(--ui-muted);
+  --accent: var(--ui-accent);
+  --accent-bg: var(--ui-accent-soft);
+  --accent-line: var(--ui-accent-line);
+  --ok: var(--ui-ok);
+  --warn: var(--ui-warn);
+  --bad: var(--ui-bad);
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 260px;
+  grid-template-columns: 252px minmax(0, 1fr) 272px;
   height: 100%;
+  background: var(--bg);
   color: var(--text);
-}
-
-.new-budget {
-  margin: 12px 0;
-}
-
-.task-budget {
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--line);
-}
-
-.new-budget label {
-  display: block;
-  margin-bottom: 6px;
-}
-
-.new-budget input {
-  box-sizing: border-box;
-  width: min(200px, 100%);
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--text);
-  font: inherit;
-}
-
-.new-budget input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.budget-error {
-  color: var(--bad);
-  margin: 6px 0;
 }
 
 /* 还没打开会话：没有右边那一栏 */
 .app.bare {
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 252px minmax(0, 1fr);
 }
 
 /* 窗口窄的时候先收起右边那一栏 */
-@media (max-width: 1000px) {
-  .app {
-    grid-template-columns: 200px minmax(0, 1fr);
+@media (max-width: 1060px) {
+  .app,
+  .app.bare {
+    grid-template-columns: 216px minmax(0, 1fr);
   }
 
   .info {
@@ -696,17 +853,83 @@ button:disabled {
   cursor: default;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-ring);
+}
+
 kbd {
   margin-left: 4px;
-  padding: 0 4px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  font-size: 11px;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: var(--ui-mono);
+  font-size: 10.5px;
   color: var(--dim);
 }
 
 .dim {
   color: var(--dim);
+}
+
+code {
+  font-family: var(--ui-mono);
+  font-size: 0.92em;
+}
+
+/* 主按钮：新任务、发送 */
+.new,
+.send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-r);
+  background: var(--ui-brand);
+  color: #160f2a;
+  font-weight: 600;
+  box-shadow: 0 3px 12px rgba(167, 139, 250, 0.22);
+  transition: filter var(--ui-fast), transform var(--ui-fast), box-shadow var(--ui-fast);
+}
+
+.new:hover:enabled,
+.send:hover:enabled {
+  filter: brightness(1.08);
+  box-shadow: 0 4px 16px rgba(167, 139, 250, 0.32);
+}
+
+.new:active:enabled,
+.send:active:enabled {
+  transform: translateY(1px);
+}
+
+.send:disabled {
+  background: var(--raised);
+  color: var(--dim);
+  box-shadow: none;
+}
+
+/* 次要按钮 */
+.ghost {
+  margin-top: 8px;
+  padding: 5px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r-s);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  transition: border-color var(--ui-fast), color var(--ui-fast), background var(--ui-fast);
+}
+
+.ghost:hover:enabled {
+  border-color: var(--accent-line);
+  color: var(--text);
+  background: var(--accent-bg);
 }
 
 /* ---------- 左边：会话 ---------- */
@@ -719,87 +942,257 @@ kbd {
   border-right: 1px solid var(--line);
 }
 
-.brand {
-  padding: 14px 16px 10px;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 1px;
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 10px 18px;
 }
 
-.brand span {
+.side-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.side-head .new {
+  padding: 5px 11px 5px 9px;
+  font-size: 12.5px;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 12px 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r);
+  background: var(--ui-sunken);
+  color: var(--ui-faint);
+  transition: border-color var(--ui-fast);
+}
+
+.search:focus-within {
+  border-color: var(--accent-line);
   color: var(--accent);
 }
 
-.new {
-  margin: 0 12px 10px;
-  padding: 8px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: var(--accent-bg);
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  box-shadow: none;
+}
+
+.search input::placeholder {
+  color: var(--ui-faint);
 }
 
 .list {
   flex: 1;
   overflow-y: auto;
+  padding: 0 8px 8px;
+}
+
+.group {
+  padding: 12px 10px 5px;
+  color: var(--ui-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
 }
 
 .sess {
-  padding: 8px 16px;
+  position: relative;
+  padding: 8px 34px 8px 12px;
+  border-radius: var(--ui-r);
   cursor: pointer;
-  border-left: 3px solid transparent;
+  transition: background var(--ui-fast);
 }
 
-.sess:hover {
-  background: rgba(255, 255, 255, 0.03);
+.sess:hover,
+.sess.menu {
+  background: var(--card);
 }
 
 .sess.on {
-  background: rgba(167, 139, 250, 0.08);
-  border-left-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.sess.on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
 }
 
 .sess .title {
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13.5px;
+}
+
+.sess.on .title {
+  color: var(--ui-accent-hi);
+  font-weight: 600;
+}
+
+.sess .meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.sess .meta > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.sess .meta {
-  margin-top: 2px;
-  font-size: 12px;
+.meta-branch {
+  display: inline-flex;
+  color: var(--ui-cyan);
+}
+
+.sess .dot {
+  color: var(--ui-faint);
+}
+
+.more {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ui-r-s);
+  background: none;
   color: var(--dim);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--ui-fast), background var(--ui-fast);
+}
+
+.sess:hover .more,
+.sess.menu .more,
+.more:focus-visible {
+  opacity: 1;
+}
+
+.more:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.menu-pop {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 6px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r);
+  background: var(--raised);
+  box-shadow: var(--ui-shadow);
+}
+
+.menu-pop button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--ui-r-s);
+  background: none;
+  font-size: 13px;
+  text-align: left;
+}
+
+.menu-pop button:hover {
+  background: var(--accent-bg);
+}
+
+.menu-pop .danger {
+  color: var(--ui-bad);
+}
+
+.menu-pop .danger:hover {
+  background: var(--ui-bad-soft);
+}
+
+.rename {
+  box-sizing: border-box;
+  width: calc(100% + 22px);
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--ui-r-s);
+  background: var(--ui-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
 }
 
 .live {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 6px;
+  margin-right: 7px;
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+  vertical-align: 1px;
   animation: pulse 1.2s infinite;
 }
 
 @keyframes pulse {
   50% {
-    opacity: 0.3;
+    opacity: 0.35;
   }
 }
 
 .none {
-  padding: 12px 16px;
+  padding: 24px 12px;
   color: var(--dim);
+  font-size: 13px;
+  text-align: center;
 }
 
 .side-foot {
-  padding: 10px 16px;
+  padding: 10px 18px;
   border-top: 1px solid var(--line);
   font-size: 12px;
   color: var(--dim);
 }
 
-code {
-  font-family: Consolas, monospace;
+.side-foot code {
+  padding: 1px 6px;
+  border-radius: var(--ui-r-xs);
+  background: var(--card);
+  color: var(--ui-accent-hi);
 }
 
 /* ---------- 中间 ---------- */
@@ -814,36 +1207,58 @@ code {
 .top {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 18px;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 18px;
   border-bottom: 1px solid var(--line);
+  background: var(--bg);
 }
 
 .proj {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   flex: 1;
   min-width: 0;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proj b {
+  font-size: 15px;
 }
 
 .proj .path {
-  margin-left: 10px;
-  color: var(--dim);
-  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ui-faint);
+  font-family: var(--ui-mono);
+  font-size: 11.5px;
 }
 
 .mode {
   padding: 4px 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 999px;
   background: var(--card);
-  color: var(--text);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.mode:hover {
+  border-color: var(--accent-line);
 }
 
 .model {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--dim);
-  font-size: 12px;
+  font-family: var(--ui-mono);
+  font-size: 11.5px;
   cursor: pointer;
 }
 
@@ -853,21 +1268,31 @@ code {
 
 .tabs {
   display: flex;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: var(--ui-r);
+  background: var(--ui-sunken);
 }
 
 .tabs button {
   padding: 3px 12px;
   border: none;
+  border-radius: 7px;
   background: transparent;
   color: var(--dim);
+  font-size: 12.5px;
+  transition: background var(--ui-fast), color var(--ui-fast);
+}
+
+.tabs button:hover {
+  color: var(--text);
 }
 
 .tabs button.on {
-  background: var(--accent-bg);
+  background: var(--raised);
   color: var(--text);
+  box-shadow: var(--ui-shadow-s);
 }
 
 .scroll {
@@ -876,23 +1301,43 @@ code {
 }
 
 .transcript {
-  max-width: 920px;
+  max-width: 880px;
   margin: 0 auto;
-  padding: 18px 24px 30px;
+  padding: 20px 28px 36px;
 }
 
+/* 你说的话：靠右的浅紫气泡 */
 .user {
-  margin: 18px 0 8px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: rgba(167, 139, 250, 0.12);
-  border: 1px solid rgba(167, 139, 250, 0.3);
+  width: fit-content;
+  max-width: 82%;
+  margin: 22px 0 10px auto;
+  padding: 9px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--ui-brand-soft);
   white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.user.review {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-color: var(--ui-cyan-line);
+  background: var(--ui-cyan-soft);
+}
+
+.user.review span {
+  padding: 0 6px;
+  border: 1px solid var(--ui-cyan-line);
+  border-radius: 999px;
+  color: var(--ui-cyan);
+  font-size: 11px;
 }
 
 .md {
-  margin: 6px 0;
-  line-height: 1.7;
+  margin: 8px 0;
+  line-height: 1.75;
 }
 
 .md :deep(p) {
@@ -900,7 +1345,7 @@ code {
 }
 
 .md :deep(h4) {
-  margin: 12px 0 4px;
+  margin: 14px 0 4px;
   font-size: 15px;
 }
 
@@ -912,18 +1357,18 @@ code {
 
 .md :deep(code) {
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--ui-r-xs);
   background: var(--code);
-  font-family: Consolas, monospace;
+  font-family: var(--ui-mono);
   font-size: 12.5px;
-  color: #f0abfc;
+  color: var(--ui-code-inline);
 }
 
 .md :deep(pre) {
-  margin: 8px 0;
-  padding: 10px 12px;
+  margin: 10px 0;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--ui-r);
   background: var(--code);
   overflow-x: auto;
 }
@@ -931,49 +1376,75 @@ code {
 .md :deep(pre code) {
   padding: 0;
   background: none;
-  color: #e2e8f0;
+  color: var(--ui-code-text);
 }
 
 .md :deep(blockquote) {
   margin: 6px 0;
-  padding-left: 10px;
-  border-left: 3px solid var(--line);
+  padding-left: 12px;
+  border-left: 3px solid var(--accent-line);
   color: var(--dim);
 }
 
 .md :deep(.md-link) {
-  color: #7dd3fc;
+  color: var(--ui-cyan);
 }
 
+/* 一轮结束那一行 */
 .end {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  margin: 10px 0 4px;
+  margin: 14px 0 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--ui-ok-line);
+  border-radius: var(--ui-r);
+  background: var(--ui-ok-soft);
   color: var(--ok);
+  font-size: 13px;
+}
+
+.end.error {
+  border-color: var(--ui-bad-line);
+  background: var(--ui-bad-soft);
+  color: var(--bad);
+}
+
+.end:not(.done):not(.error) {
+  border-color: var(--ui-warn-line);
+  background: var(--ui-warn-soft);
+  color: var(--warn);
+}
+
+.end .stats {
+  color: var(--dim);
+  font-family: var(--ui-mono);
+  font-size: 11.5px;
 }
 
 .undo-button {
-  margin-left: auto;
-  font-size: 12.5px;
+  margin: 0 0 0 auto;
 }
 
 .undo-dialog {
   box-sizing: border-box;
-  width: min(540px, 92vw);
+  width: min(520px, 92vw);
   max-height: 86vh;
   overflow: auto;
-  padding: 18px 22px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--side);
+  padding: 20px 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r-l);
+  background: var(--raised);
   color: var(--text);
+  box-shadow: var(--ui-shadow);
   overflow-wrap: anywhere;
+  line-height: 1.6;
 }
 
 .undo-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--ui-overlay);
+  backdrop-filter: blur(2px);
 }
 
 .undo-dialog h2 {
@@ -981,40 +1452,42 @@ code {
   font-size: 17px;
 }
 
+.undo-dialog p {
+  margin: 6px 0;
+}
+
 .undo-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
-.undo-dialog :focus-visible,
-.undo-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.undo-actions .ghost {
+  margin: 0;
+  padding: 6px 14px;
 }
 
 .undo-actions .undo-confirm {
-  border-color: var(--warn);
+  border-color: var(--ui-warn-line);
   color: var(--warn);
 }
 
-.end.error {
-  color: var(--bad);
+.undo-actions .danger-btn {
+  border-color: var(--ui-bad-line);
+  background: var(--ui-bad-soft);
+  color: var(--ui-bad-text);
 }
 
-.end:not(.done):not(.error) {
-  color: var(--warn);
-}
-
-.end .stats {
-  color: var(--dim);
-  font-size: 12.5px;
+.undo-actions .danger-btn:hover:enabled {
+  border-color: var(--bad);
+  background: rgba(248, 113, 113, 0.18);
+  color: #fff;
 }
 
 .note {
-  margin: 8px 0;
+  margin: 10px 0;
   color: var(--dim);
   font-size: 12.5px;
   text-align: center;
@@ -1024,8 +1497,9 @@ code {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 10px 0;
+  margin: 12px 0;
   color: var(--dim);
+  font-size: 13px;
 }
 
 .working i {
@@ -1051,85 +1525,169 @@ code {
 }
 
 .hello {
-  margin: 40px 0;
+  margin: 48px 0;
+  color: var(--text-2);
   text-align: center;
+  line-height: 1.7;
+}
+
+.hello b {
+  color: var(--text);
 }
 
 .hello.big {
-  margin-top: 22vh;
+  margin-top: 20vh;
+}
+
+.hello-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 10px;
+  border-radius: 16px;
+  background: var(--ui-brand-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--ui-accent-hi);
+  font-family: var(--ui-mono);
+  font-size: 20px;
+  font-weight: 700;
 }
 
 .hello .new {
-  margin-top: 12px;
-  padding: 8px 18px;
+  margin-top: 14px;
+  padding: 8px 18px 8px 14px;
 }
 
 .error {
-  margin: 0 18px 6px;
-  padding: 6px 12px;
-  border: 1px solid rgba(248, 113, 113, 0.5);
-  border-radius: 6px;
-  background: rgba(248, 113, 113, 0.1);
-  color: #fecaca;
+  margin: 0 18px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--ui-bad-line);
+  border-radius: var(--ui-r);
+  background: var(--ui-bad-soft);
+  color: var(--ui-bad-text);
+  font-size: 13px;
   cursor: pointer;
 }
 
+/* 输入框：一个圆角盒子，下面一条工具栏 */
 .composer {
-  display: flex;
-  gap: 10px;
-  padding: 10px 18px 14px;
-  border-top: 1px solid var(--line);
+  padding: 4px 22px 16px;
 }
 
-.composer textarea {
-  flex: 1;
-  resize: none;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+.box {
+  max-width: 880px;
+  margin: 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r-l);
   background: var(--card);
+  box-shadow: var(--ui-shadow-s);
+  transition: border-color var(--ui-fast), box-shadow var(--ui-fast);
+}
+
+.box:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-bg), var(--ui-shadow-s);
+}
+
+.box textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  resize: none;
+  padding: 12px 14px 4px;
+  border: none;
+  background: transparent;
   color: var(--text);
   font: inherit;
+  line-height: 1.6;
   outline: none;
+  box-shadow: none;
 }
 
-.composer textarea:focus {
-  border-color: var(--accent);
+.box textarea::placeholder {
+  color: var(--ui-faint);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 8px 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ui-sunken);
+  color: var(--text-2);
+  font-size: 12.5px;
+  transition: border-color var(--ui-fast), color var(--ui-fast), background var(--ui-fast);
+}
+
+.chip:hover:enabled {
+  border-color: var(--ui-cyan-line);
+  background: var(--ui-cyan-soft);
+  color: var(--ui-cyan);
+}
+
+.keys {
+  flex: 1;
+  color: var(--ui-faint);
+  font-size: 11.5px;
+  text-align: right;
 }
 
 .send,
 .stop {
-  align-self: flex-end;
-  padding: 8px 18px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: var(--accent-bg);
+  padding: 6px 14px;
+  font-size: 13px;
 }
 
 .stop {
-  border-color: var(--warn);
-  background: rgba(250, 204, 21, 0.1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ui-warn-line);
+  border-radius: var(--ui-r);
+  background: var(--ui-warn-soft);
+  color: var(--warn);
 }
 
 /* ---------- 右边 ---------- */
 
 .info {
   overflow-y: auto;
-  padding: 6px 16px;
+  padding: 4px 16px 16px;
   background: var(--side);
   border-left: 1px solid var(--line);
 }
 
 .info section {
-  padding: 10px 0;
+  padding: 14px 0;
   border-bottom: 1px solid var(--line);
 }
 
+.info section:last-child {
+  border-bottom: none;
+}
+
 .info h3 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  color: var(--dim);
+  margin: 0 0 8px;
+  color: var(--ui-faint);
+  font-size: 11.5px;
   font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.info p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
 .info ul {
@@ -1139,24 +1697,27 @@ code {
 }
 
 .info li {
-  padding: 2px 0;
-  white-space: nowrap;
+  padding: 3px 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: 13px;
 }
 
 .todos .completed {
   color: var(--dim);
   text-decoration: line-through;
+  text-decoration-color: var(--ui-faint);
 }
 
 .todos .in_progress {
-  color: var(--accent);
+  color: var(--ui-accent-hi);
 }
 
 .files li {
-  font-family: Consolas, monospace;
-  font-size: 12.5px;
+  font-family: var(--ui-mono);
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 .rate b {
@@ -1164,37 +1725,29 @@ code {
   color: var(--ok);
 }
 
-.bar {
+.bar-mini,
+.info .bar {
   height: 5px;
   margin: 6px 0;
+  padding: 0;
   border-radius: 3px;
   background: var(--line);
   overflow: hidden;
 }
 
-.bar i {
-  display: block;
-  height: 100%;
-  background: var(--ok);
-}
-
-.ghost {
-  margin-top: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
-}
-
 /* ---------- 在新分支上做 ---------- */
 
 .branch-badge {
-  padding: 2px 8px;
-  border: 1px solid rgba(125, 211, 252, 0.5);
-  border-radius: 10px;
-  color: #7dd3fc;
-  font-size: 12px;
-  font-family: Consolas, monospace;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--ui-cyan-line);
+  border-radius: 999px;
+  background: var(--ui-cyan-soft);
+  color: var(--ui-cyan);
+  font-size: 11.5px;
+  font-family: var(--ui-mono);
   white-space: nowrap;
 }
 
@@ -1202,27 +1755,32 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
+}
+
+.branch-actions .ghost {
+  margin: 0;
 }
 
 .merge-btn {
   padding: 5px 12px;
-  border: 1px solid var(--ok);
-  border-radius: 6px;
-  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid var(--ui-ok-line);
+  border-radius: var(--ui-r-s);
+  background: var(--ui-ok-soft);
+  color: var(--ok);
 }
 
 .merge {
-  margin: 10px 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(250, 204, 21, 0.5);
-  border-radius: 8px;
-  background: rgba(250, 204, 21, 0.05);
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ui-warn-line);
+  border-radius: var(--ui-r);
+  background: var(--ui-warn-soft);
 }
 
 .merge.ok {
-  border-color: rgba(74, 222, 128, 0.55);
-  background: rgba(74, 222, 128, 0.06);
+  border-color: var(--ui-ok-line);
+  background: var(--ui-ok-soft);
 }
 
 .merge-head {
@@ -1249,10 +1807,10 @@ code {
   padding: 8px 10px;
   max-height: 240px;
   overflow: auto;
-  border-radius: 6px;
+  border-radius: var(--ui-r-s);
   background: var(--code);
-  color: #cbd5e1;
-  font-family: Consolas, monospace;
+  color: var(--ui-code-text);
+  font-family: var(--ui-mono);
   font-size: 12px;
   white-space: pre-wrap;
 }
@@ -1261,20 +1819,95 @@ code {
   margin-top: 6px;
 }
 
+/* ---------- 新任务：选项目 ---------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ui-overlay);
+  backdrop-filter: blur(3px);
+}
+
+.picker {
+  box-sizing: border-box;
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 22px 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r-l);
+  background: var(--raised);
+  box-shadow: var(--ui-shadow);
+}
+
+.picker h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.picker > .dim {
+  font-size: 12.5px;
+}
+
+.choices {
+  display: grid;
+  gap: 6px;
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r);
+  background: var(--card);
+  text-align: left;
+  transition: border-color var(--ui-fast), background var(--ui-fast);
+}
+
+.choice:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-bg);
+}
+
+.choice span {
+  margin-top: 2px;
+  font-family: var(--ui-mono);
+  font-size: 11.5px;
+  color: var(--dim);
+  word-break: break-all;
+}
+
+.choice.other {
+  align-items: center;
+  border-style: dashed;
+  color: var(--accent);
+}
+
 .isolate {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  margin-top: 12px;
-  padding: 8px 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--ui-r);
   cursor: pointer;
+  transition: border-color var(--ui-fast), background var(--ui-fast);
 }
 
 .isolate.on {
-  border-color: #7dd3fc;
-  background: rgba(125, 211, 252, 0.08);
+  border-color: var(--ui-cyan-line);
+  background: var(--ui-cyan-soft);
+}
+
+.isolate input {
+  accent-color: var(--ui-cyan);
 }
 
 .isolate span {
@@ -1288,65 +1921,6 @@ code {
   font-size: 14px;
 }
 
-/* ---------- 选项目 ---------- */
-
-.overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 10;
-}
-
-.picker {
-  width: min(640px, 92vw);
-  max-height: 86vh;
-  overflow-y: auto;
-  padding: 18px 22px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--side);
-}
-
-.picker h2 {
-  margin: 0 0 12px;
-  font-size: 17px;
-}
-
-.choices {
-  display: grid;
-  gap: 6px;
-}
-
-.choice {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
-  text-align: left;
-}
-
-.choice:hover {
-  border-color: var(--accent);
-}
-
-.choice span {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--dim);
-  word-break: break-all;
-}
-
-.choice.other {
-  align-items: center;
-  color: var(--accent);
-}
-
 .modes {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1357,10 +1931,15 @@ code {
 .modes label {
   display: flex;
   flex-direction: column;
-  padding: 8px 10px;
+  padding: 9px 11px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--ui-r);
   cursor: pointer;
+  transition: border-color var(--ui-fast), background var(--ui-fast);
+}
+
+.modes label:hover {
+  border-color: var(--line-strong);
 }
 
 .modes label.on {
@@ -1376,5 +1955,36 @@ code {
   margin-top: 2px;
   font-size: 12px;
   color: var(--dim);
+}
+
+.new-budget {
+  margin: 14px 0;
+}
+
+.new-budget label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.new-budget input {
+  box-sizing: border-box;
+  width: min(200px, 100%);
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r-s);
+  background: var(--ui-sunken);
+  color: var(--text);
+  font-family: var(--ui-mono);
+}
+
+.new-budget .dim {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.budget-error {
+  margin: 6px 0;
+  color: var(--bad);
 }
 </style>

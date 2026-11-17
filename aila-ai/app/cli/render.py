@@ -132,7 +132,9 @@ class Renderer:
         self.reset_turn()
         self.turn_started = float(e.get("t") or time.time())  # 重放时按日志里的时间算
         if self.show_text:
-            self.console.print(Text("> " + e["text"], style="bold"))
+            # /review 的请求是固定的一大段：只显示一句
+            shown = e.get("title") if e.get("review") else e["text"]
+            self.console.print(Text("> " + str(shown), style="bold"))
         self.waiting("思考中…")
 
     def _on_text_delta(self, e: Event) -> None:

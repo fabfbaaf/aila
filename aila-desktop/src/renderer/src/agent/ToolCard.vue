@@ -126,33 +126,44 @@ function lineClass(line: string): string {
 
 <style scoped>
 .card {
-  margin: 6px 0;
+  margin: 8px 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--ui-r, 8px);
   background: var(--card);
   overflow: hidden;
+  transition: border-color 120ms ease;
+}
+
+.card:hover {
+  border-color: var(--line-strong, var(--line));
 }
 
 .card.asking {
-  border-color: var(--warn);
-  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.25);
+  border-color: var(--ui-warn-line, var(--warn));
+  box-shadow: 0 0 0 3px var(--ui-warn-soft, rgba(250, 204, 21, 0.12));
 }
 
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
+  gap: 9px;
+  padding: 8px 12px;
   cursor: pointer;
   user-select: none;
+  font-size: 13px;
+}
+
+.head:hover {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .dot {
   flex: none;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ui-ok-soft, transparent);
 }
 
 .dot.pending,
@@ -209,8 +220,8 @@ pre {
   margin: 0;
   padding: 8px 12px;
   overflow-x: auto;
-  font-family: Consolas, 'Cascadia Mono', 'Microsoft YaHei', monospace;
-  font-size: 12.5px;
+  font-family: var(--ui-mono, Consolas), 'Microsoft YaHei', monospace;
+  font-size: 12px;
   line-height: 1.5;
   background: var(--code);
   border-top: 1px solid var(--line);
@@ -222,17 +233,17 @@ pre span {
 }
 
 .add {
-  color: #86efac;
-  background: rgba(34, 197, 94, 0.12);
+  color: var(--ui-diff-add, #86efac);
+  background: var(--ui-diff-add-bg, rgba(34, 197, 94, 0.12));
 }
 
 .del {
-  color: #fca5a5;
-  background: rgba(239, 68, 68, 0.12);
+  color: var(--ui-diff-del, #fca5a5);
+  background: var(--ui-diff-del-bg, rgba(239, 68, 68, 0.12));
 }
 
 .hunk {
-  color: #7dd3fc;
+  color: var(--ui-diff-hunk, #7dd3fc);
 }
 
 .file {
@@ -240,7 +251,7 @@ pre span {
 }
 
 .output {
-  color: #cbd5e1;
+  color: var(--ui-code-text, #cbd5e1);
   max-height: 340px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -249,9 +260,9 @@ pre span {
 .cmd {
   padding: 6px 12px;
   border-top: 1px solid var(--line);
-  font-family: Consolas, monospace;
+  font-family: var(--ui-mono, Consolas, monospace);
   font-size: 12.5px;
-  color: #e2e8f0;
+  color: var(--ui-code-text, #e2e8f0);
   background: var(--code);
 }
 
@@ -318,7 +329,7 @@ pre span {
 
 .q {
   font-weight: 600;
-  color: #fde68a;
+  color: var(--warn, #fde68a);
 }
 
 .reason {

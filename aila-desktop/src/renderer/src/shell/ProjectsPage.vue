@@ -54,35 +54,56 @@ onDeactivated(() => (shown.value = false))
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 9px 18px;
-  border-bottom: 1px solid #262b37;
-  background: #12151c;
+  min-height: 52px;
+  box-sizing: border-box;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-bg);
 }
 
+.bar b {
+  font-size: 15px;
+}
+
+/* 和任务页的「过程 / 轨迹」同一种分段切换 */
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r);
+  background: var(--ui-sunken);
 }
 
 .tabs button {
   padding: 3px 12px;
-  border: 1px solid #262b37;
+  border: none;
   border-radius: 7px;
   background: none;
-  color: #8a92a3;
+  color: var(--ui-muted);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
+  transition: background var(--ui-fast), color var(--ui-fast);
+}
+
+.tabs button:hover {
+  color: var(--ui-text);
 }
 
 .tabs button.on {
-  border-color: #a78bfa;
-  background: rgba(167, 139, 250, 0.16);
-  color: #d7dce5;
+  background: var(--ui-raised);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow-s);
+}
+
+.tabs button:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-ring);
 }
 
 .hint {
-  color: #8a92a3;
+  color: var(--ui-muted);
   font-size: 12.5px;
 }
 
