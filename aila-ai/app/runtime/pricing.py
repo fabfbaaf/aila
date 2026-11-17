@@ -8,11 +8,18 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-# 2026-11-16 核对官方价格页和更新日志，页面已不列这两个旧模型：
+# 2026-11-16 核对 DeepSeek 官方价格页（元 / 百万 token）：
 # https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
-# https://api-docs.deepseek.com/updates/ （2026-04-24 公告旧名在 2026-07-24 停用）
-# 保留空价，用户可在 data/prices.json 填入自己实际账户的价格。
+# 官网分高峰和空闲两档（空闲半价；高峰是北京时间工作日 9–12 点、14–18 点）。这里只能记一个价，
+# 记高峰价：算出来的钱只会偏多，上限宁可早停也不能晚停。按空闲价算的话在 data/prices.json 覆盖。
+# 价格页注明旧名 deepseek-v4-flash 现在由 V4.1 Flash 服务、按 Flash 计价。
+# deepseek-chat、deepseek-reasoner 官方更新记录（https://api-docs.deepseek.com/updates/）公告
+# 2026-07-24 停用，之后的状态没写，所以不估价；还在用的话换成 deepseek-flash。
+_FLASH = {"hit": 0.04, "miss": 2, "output": 8}
 DEFAULT_PRICES: dict[str, dict[str, float] | None] = {
+    "deepseek-flash": _FLASH,
+    "deepseek-v4-flash": _FLASH,
+    "deepseek-v4-pro": {"hit": 0.30, "miss": 9.0, "output": 27.0},
     "deepseek-chat": None,
     "deepseek-reasoner": None,
 }

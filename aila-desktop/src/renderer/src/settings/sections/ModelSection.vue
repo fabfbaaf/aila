@@ -20,7 +20,7 @@ const llmMsg = ref<{ ok: boolean; text: string } | null>(null)
 const searchMsg = ref<{ ok: boolean; text: string } | null>(null)
 const busy = ref(false)
 
-const MODELS = ['deepseek-chat', 'deepseek-reasoner', 'qwen-plus', 'qwen-max', 'moonshot-v1-8k', 'glm-4-plus']
+const MODELS = ['deepseek-flash', 'deepseek-v4-pro', 'qwen-plus', 'qwen-max', 'moonshot-v1-8k', 'glm-4-plus']
 
 async function load(): Promise<void> {
   const res = await api.aiSettings()

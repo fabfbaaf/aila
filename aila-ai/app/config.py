@@ -49,7 +49,7 @@ def load_settings() -> Settings:
     return Settings(
         llm_base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
-        llm_model=os.getenv("LLM_MODEL", "deepseek-chat"),
+        llm_model=os.getenv("LLM_MODEL", "deepseek-flash"),
         search_provider=os.getenv("SEARCH_PROVIDER", "bocha").strip().lower(),
         search_api_key=os.getenv("SEARCH_API_KEY", "").strip(),
         host=os.getenv("AILA_HOST", "127.0.0.1"),

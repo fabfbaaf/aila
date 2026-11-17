@@ -110,7 +110,7 @@ data: {"type": "done"}
 
 `WS /screen`：看屏幕找报错。桌面端发 `{"type": "start"}` 开始、`stop` 停下、`{"type": "pause", "seconds": 3600}` 暂停提醒、`declined`（用户说不用，安静 10 分钟）；服务端推 `started`、`error_seen`（`app`、`title`、`summary`、`snippet`）、`error`（看不了的原因）。连接一断就停。`GET /screen/status`：在不在看、看哪些程序、上次各层过滤的计数。
 
-`GET /health` → `{"ok": true, "model": "deepseek-chat", "tools": [...], "voice": {"ears": "ready", "tts": "ready"}, "embed": "ready"}`
+`GET /health` → `{"ok": true, "model": "deepseek-flash", "tools": [...], "voice": {"ears": "ready", "tts": "ready"}, "embed": "ready"}`
 
 `POST /tts`：`{"text": "我查一下。"}` → `audio/wav`（响应头 `X-Synth-Ms` 是合成耗时）；没有能念的内容（只有标点、网址）时返回 204。
 
@@ -372,7 +372,7 @@ data: {"type": "done"}
 
 `hit` 是命中缓存的输入，`miss` 是没命中的输入，`output` 是输出；三项都要有，且都是有限非负数。计算式是 `(cache_hit × hit + cache_miss × miss + completion × output) / 1000000`。每次计算都会重读价格表，修改后下次查看或预算检查就生效，无需重启。会话金额按当前表汇总所有 `usage`，包括压缩和查资料的助手；每轮结尾记录结束时算出的本轮金额。
 
-**默认价格待填**：2026-11-16 核对 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)时，当前表只列新模型；[官方更新记录](https://api-docs.deepseek.com/updates/)公告 `deepseek-chat`、`deepseek-reasoner` 计划于 2026-07-24 停用，未查到这两个模型名目前适用的三项价格。因此默认留空，可在价格表补上经确认的价格。`mock-coder` 以及其他没配置的模型也不估价。有任一用量无法计价时，会话或本轮的 `cost` 是 `null`，界面保留 token；非法价格或读不到的价格表也按未知处理，不当成免费。
+**默认价格**：2026-11-16 照 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)填了 `deepseek-flash`（和按 Flash 计价的旧名 `deepseek-v4-flash`）、`deepseek-v4-pro`。官网分高峰、空闲两档（空闲半价），默认记**高峰价**：算出来只会偏多，上限宁可早停。想按空闲价算就在价格表覆盖。[官方更新记录](https://api-docs.deepseek.com/updates/)公告 `deepseek-chat`、`deepseek-reasoner` 2026-07-24 停用，之后的状态没写，所以这两个不估价；默认模型已经换成 `deepseek-flash`。`mock-coder` 以及其他没配置的模型也不估价。有任一用量无法计价时，会话或本轮的 `cost` 是 `null`，界面保留 token；非法价格或读不到的价格表也按未知处理，不当成免费。
 
 上限在每一步开始前、自动压缩前检查，压缩后也检查；已经花到上限就以 `reason: "budget"` 结束。它按已发生的花费判断，当前一步和这一步派出的助手会做完，可能略超上限。例如上限 0.01 元、每步 0.004 元，完成三步累计 0.012 元，第 4 步前停。助手自己最多 20 步，不单独设预算。调高上限或 `/budget off` 后说「继续」接着做；仅说「继续」而上限不变，会再次停下。有未知模型时只能根据已知用量的金额检查，补齐价格才能计算完整花费和约束上限。手动 `/compact` 的用量也累计到会话，下一次开始做事时会检查。
 

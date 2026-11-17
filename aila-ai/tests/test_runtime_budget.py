@@ -70,6 +70,17 @@ def test_price_components_and_user_model_override(tmp_path: Path) -> None:
     assert overridden.cost(event) == pytest.approx(0.003375)
 
 
+def test_default_deepseek_prices_are_peak_and_retired_names_stay_unknown(tmp_path: Path) -> None:
+    table = PriceTable()  # 没有价格表文件：只用内置价格
+    assert table.cost(usage_event("deepseek-flash")) == pytest.approx(0.00231)
+    assert table.cost(usage_event("deepseek-v4-flash")) == pytest.approx(0.00231)
+    assert table.cost(usage_event("deepseek-v4-pro")) == pytest.approx(0.009525)
+    assert table.cost(usage_event("deepseek-chat")) is None
+    assert table.cost(usage_event("deepseek-reasoner")) is None
+    off_peak = PriceTable(price_file(tmp_path, {"deepseek-flash": {"hit": 0.02, "miss": 1, "output": 4}}))
+    assert off_peak.cost(usage_event("deepseek-flash")) == pytest.approx(0.001155)
+
+
 @pytest.mark.parametrize("prices", [
     {},
     {MODEL: {"hit": 1, "miss": 4}},
