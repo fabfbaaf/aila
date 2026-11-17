@@ -28,6 +28,7 @@ FENCE = re.compile(r"^\s*(```|~~~)", re.MULTILINE)
 REASONS = {
     "done": ("✓", "green", "做完了"),
     "max_steps": ("■", "yellow", "步数到上限了：说「继续」可以接着做"),
+    "budget": ("■", "yellow", "花到上限了：先调高上限，再说「继续」"),
     "rejected": ("■", "yellow", "停下来了，等你说接下来怎么做"),
     "timeout": ("■", "yellow", "一直没等到你的回答，先停下了"),
     "interrupted": ("■", "yellow", "被你打断了：说「继续」可以接着做"),
@@ -277,6 +278,8 @@ class Renderer:
             rate = self.hit / self.prompt
             stats.append(f"输入 {compact_number(self.prompt)}（命中缓存 {rate:.0%}{'，估算' if self.estimated else ''}）")
             stats.append(f"输出 {compact_number(self.completion)}")
+        if e.get("cost") is not None:
+            stats.append("不到 ¥0.000001" if 0 < e["cost"] < 0.000001 else f"¥{e['cost']:.6f}")
         self.console.print(Text.assemble((f"{mark} {words}", style), ("  " + " · ".join(stats), "dim")))
 
 

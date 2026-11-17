@@ -23,6 +23,7 @@ COMMANDS: dict[str, str] = {
     "/rules": "看这个项目记住的命令；/rules forget 编号 删掉一条，下次执行时重新按权限模式确认",
     "/exit": "退出（Ctrl+D 也行）",
     "/undo": "撤销最近一轮用文件工具做的改动（先问 y/n）",
+    "/budget": "看或修改会话花费上限：/budget 1（元），/budget off（不限）",
 }
 ALIASES = {"/quit": "/exit", "/sessions": "/resume", "/cost": "/usage", "/clear": "/new", "/?": "/help"}
 
@@ -78,10 +79,13 @@ def latest_todos(events: list[dict[str, Any]]) -> list[dict[str, str]]:
 def usage_lines(summary: dict[str, Any]) -> list[str]:
     u = summary.get("usage", {})
     prompt, hit, completion = int(u.get("prompt", 0)), int(u.get("cache_hit", 0)), int(u.get("completion", 0))
-    if not prompt:
-        return ["还没有用量。"]
-    return [
+    lines = [
         f"输入 {prompt:,} token，其中命中缓存 {hit:,}（{hit / prompt:.0%}），没命中 {prompt - hit:,}",
         f"输出 {completion:,} token",
         f"模型 {summary.get('model', '')} · 模式 {MODE_LABELS.get(summary.get('mode', ''), '')}",
-    ]
+    ] if prompt else ["还没有用量。"]
+    if summary.get("cost") is not None:
+        lines.append("已花不到 ¥0.000001" if 0 < summary["cost"] < 0.000001 else f"已花 ¥{summary['cost']:.6f}")
+    if summary.get("budget") is not None:
+        lines.append(f"花费上限 ¥{summary['budget']:.6f}")
+    return lines

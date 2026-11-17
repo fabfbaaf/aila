@@ -23,6 +23,7 @@ from .codetools import CodeAccess
 from .ledger import context_ledger
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
+from .pricing import validate_budget
 from .prompt import build_context
 from .session import Event, Session, SessionStore, latest_turn, turn_edits
 from .shell import Shell, find_shell
@@ -78,8 +79,13 @@ class Runtime:
 
     # ---------- 会话 ----------
 
-    def create(self, cwd: str, mode: Mode = "ask", isolate: bool = False) -> Session:
+    def create(self, cwd: str, mode: Mode = "ask", isolate: bool = False,
+               budget: float | None = None) -> Session:
         """isolate：在新分支上做（git worktree），合并之前你的代码一个字都不动"""
+        try:
+            budget = validate_budget(budget)
+        except ValueError as err:
+            raise RuntimeError_(str(err)) from err
         root = Path(cwd).expanduser()
         if not root.is_dir():
             raise RuntimeError_(f"{cwd} 不是一个目录。")
@@ -88,13 +94,17 @@ class Runtime:
         root = root.resolve()
         model = self.model_factory()
         if not isolate:
-            return self.store.create(root, mode, model.name, build_context(root, self.shell.label))
-        try:
-            info = open_branch(root, self.work_dir)
-        except BranchError as err:
-            raise RuntimeError_(str(err)) from err
-        context = build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
-        return self.store.create(root, mode, model.name, context, {"branch": asdict(info)})
+            session = self.store.create(root, mode, model.name, build_context(root, self.shell.label))
+        else:
+            try:
+                info = open_branch(root, self.work_dir)
+            except BranchError as err:
+                raise RuntimeError_(str(err)) from err
+            context = build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
+            session = self.store.create(root, mode, model.name, context, {"branch": asdict(info)})
+        if budget is not None:
+            session.append({"type": "budget", "amount": budget})
+        return session
 
     def agent(self, sid: str) -> Agent:
         if sid in self._deleting:
@@ -136,6 +146,21 @@ class Runtime:
         agent = self.agent(sid)
         agent.policy.mode = mode
         self._publish(sid, agent.session.append({"type": "mode", "mode": mode}))
+
+    def set_budget(self, sid: str, amount: float | None) -> Event:
+        """改上限只追加事件；正在执行的一步结束后，下一步会看到新上限。"""
+        try:
+            amount = validate_budget(amount)
+        except ValueError as err:
+            raise RuntimeError_(str(err)) from err
+        if sid in self._deleting:
+            raise RuntimeError_("这个会话正在删除，不能改上限。")
+        session = self.store.get(sid)
+        if session is None:
+            raise RuntimeError_("没有这个会话。")
+        event = session.append({"type": "budget", "amount": amount})
+        self._publish(sid, event)
+        return event
 
     def rename(self, sid: str, title: str) -> Session:
         """改名只追加展示事件，不重写历史，也不改变模型的上下文。"""

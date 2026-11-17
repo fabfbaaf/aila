@@ -63,6 +63,28 @@ const TURN: AgentEvent[] = [
 afterEach(() => vi.unstubAllGlobals())
 
 describe('工作窗口的转发（主进程）', () => {
+  it('新建会话传零预算，修改上限可清空且会话路径编码', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ type: 'budget', amount: null })))
+    vi.stubGlobal('fetch', fetchMock)
+    const { r } = relay()
+    await r.create('C:/shop', 'ask', false, 0)
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0 })
+    }))
+    await r.setBudget('s /1', null)
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s%20%2F1/budget', expect.objectContaining({
+      method: 'PUT', body: JSON.stringify({ amount: null })
+    }))
+  })
+
+  it('预算停止通过独立进展通知桌面角色', async () => {
+    fakeService([{ type: 'user', seq: 1, text: '做任务' }, { type: 'turn_end', seq: 2, reason: 'budget', cost: 0.004 }])
+    const { r, seen } = relay()
+    r.send('s1', '做任务')
+    await until(() => seen.ended > 0)
+    expect(seen.progress).toEqual([{ kind: 'start', title: '做任务' }, { kind: 'budget' }])
+  })
+
   it('撤销请求锁定预览的轮次，服务拒绝时原样显示原因', async () => {
     const event = { type: 'undo', seq: 12, t: 1, turn_seq: 4, restored: ['a.py'], skipped: {}, commands: false }
     const fetchMock = vi.fn()

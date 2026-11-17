@@ -16,8 +16,9 @@
   todo         待办清单的最新状态
   compaction   上下文压缩：summary 代替 upto 之前的事件
   mode         权限模式变了
+  budget       用户改了会话的花费上限（不进模型消息）
   title        用户改了会话标题（不进模型消息）
-  turn_end     一轮结束（done / max_steps / interrupted / error）
+  turn_end     一轮结束（done / max_steps / interrupted / error / budget），带本轮费用
   undo         撤销已完成的一轮，结果放到下一句用户消息前
   merge        在新分支上做时：跑测试、合并回你的代码的结果
   branch_closed  分支放弃了（这个会话之后不再接任务）
@@ -30,10 +31,12 @@ import secrets
 import shutil
 import time
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from ..llm import Message, Usage
+from .pricing import PriceTable, validate_budget
 
 Event = dict[str, Any]
 
@@ -43,9 +46,10 @@ MESSAGE_EVENTS = {"user", "assistant", "tool"}
 
 
 class Session:
-    def __init__(self, path: Path, events: list[Event]) -> None:
+    def __init__(self, path: Path, events: list[Event], prices: PriceTable | None = None) -> None:
         self.path = path
         self.events = events
+        self.prices = prices or PriceTable(path.parent.parent / "prices.json")
         start = events[0]
         self.id: str = start["id"]
         self.cwd = Path(start["cwd"])
@@ -114,6 +118,32 @@ class Session:
         return total
 
     @property
+    def budget(self) -> float | None:
+        for event in reversed(self.events):
+            if event["type"] == "budget":
+                return validate_budget(event.get("amount"))
+            if event["type"] == "start":
+                return validate_budget(event.get("budget"))
+        return None
+
+    @property
+    def cost(self) -> float | None:
+        return self.prices.totals(self.events, self.events[0].get("model", ""))[0]
+
+    @property
+    def known_cost(self) -> Decimal:
+        """已知价格的用量下界，含压缩和查资料助手，用于跨步预算检查。"""
+        return self.prices.totals(self.events, self.events[0].get("model", ""))[1]
+
+    def cost_since(self, index: int) -> float | None:
+        return self.prices.totals(self.events[index:], self.events[0].get("model", ""))[0]
+
+    @property
+    def turn_cost(self) -> float | None:
+        index = next((i for i in range(len(self.events) - 1, -1, -1) if self.events[i]["type"] == "user"), 0)
+        return self.cost_since(index)
+
+    @property
     def last_prompt_tokens(self) -> int:
         """最近一步的输入长度：决定要不要压缩上下文"""
         for e in reversed(self.events):
@@ -153,6 +183,8 @@ class Session:
             "events": len(self.events),
             "branch": self.branch["branch"] if self.branch else None,
             "usage": {"prompt": u.prompt, "completion": u.completion, "cache_hit": u.cache_hit, "cache_miss": u.cache_miss},
+            "cost": self.cost,
+            "budget": self.budget,
         }
 
 
@@ -241,8 +273,9 @@ def derive_messages(system: str, events: list[Event]) -> list[Message]:
 class SessionStore:
     """data/sessions 下的会话文件；加载过的会话留在内存里（运行时状态挂在上面）"""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, prices: PriceTable | None = None) -> None:
         self.root = root
+        self.prices = prices or PriceTable(root.parent / "prices.json")
         self._open: dict[str, Session] = {}
 
     def create(self, cwd: Path, mode: str, model: str, context: str, extra: dict[str, Any] | None = None) -> Session:
@@ -262,7 +295,7 @@ class SessionStore:
             "t": round(time.time(), 3),
         }
         path.write_text(json.dumps(event, ensure_ascii=False) + "\n", encoding="utf-8")
-        session = Session(path, [event])
+        session = Session(path, [event], self.prices)
         self._open[sid] = session
         return session
 
@@ -277,7 +310,7 @@ class SessionStore:
         events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
         if not events or events[0].get("type") != "start":
             return None
-        session = Session(path, events)
+        session = Session(path, events, self.prices)
         self._open[sid] = session
         return session
 

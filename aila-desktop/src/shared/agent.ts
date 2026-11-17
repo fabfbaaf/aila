@@ -31,6 +31,9 @@ export interface AgentSessionSummary {
   updated?: number
   events: number
   usage: AgentUsage
+  /** null 或旧服务缺失字段表示当前无法完整计价。 */
+  cost?: number | null
+  budget?: number | null
   running?: boolean
   shell?: string
   /** 在新分支上做时的分支名（放弃了或者不在分支上是 null） */
@@ -54,6 +57,11 @@ export interface AgentUndoEvent extends AgentEvent {
   restored: string[]
   skipped: Record<string, string>
   commands: boolean
+}
+
+export interface AgentBudgetEvent extends AgentEvent {
+  type: 'budget'
+  amount: number | null
 }
 
 export interface AgentSession extends Omit<AgentSessionSummary, 'events'> {
@@ -92,4 +100,5 @@ export type AgentProgress =
   | { kind: 'confirm'; action: string }
   | { kind: 'done'; files: number }
   | { kind: 'stopped'; reason: string }
+  | { kind: 'budget' }
   | { kind: 'error'; message: string }

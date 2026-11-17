@@ -26,6 +26,26 @@ function turn(): AgentEvent[] {
 }
 
 describe('工作窗口：事件折叠', () => {
+  it('回放预算变更和每轮费用，未知价格和旧事件不伪装成零费用', () => {
+    const t = new Transcript()
+    t.apply(ev('start', { seq: 0, budget: 0 }))
+    expect(t.budget).toBe(0)
+    t.apply(ev('user', { seq: 1, t: 1 }))
+    t.apply(ev('turn_end', { seq: 2, t: 2, reason: 'budget', cost: 0.004 }))
+    const end = t.items.find((item) => item.kind === 'end') as EndItem
+    expect(endStats(end)).toBe('0 步 · 1.0 秒 · ¥0.004')
+    expect(endText(end)).toContain('调高或取消上限后说「继续」')
+    expect(endStats({ ...end, cost: null })).not.toContain('¥')
+    expect(endStats({ ...end, cost: undefined })).not.toContain('¥')
+    expect(endStats({ ...end, cost: 0 })).toContain('¥0.00')
+    t.apply(ev('budget', { seq: 3, amount: 0.5 }))
+    expect(t.budget).toBe(0.5)
+    t.apply(ev('budget', { seq: 4, amount: null }))
+    expect(t.budget).toBeNull()
+    t.apply(ev('budget', { seq: 5, amount: -1 }))
+    expect(t.budget).toBeNull()
+  })
+
   it('只给最近一轮撤销入口，预览去重并区分新建、修改、未留底和命令', () => {
     const t = reactive(new Transcript())
     const target = computed(() => t.undoTarget)

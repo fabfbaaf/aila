@@ -85,7 +85,7 @@ class Explorer:
         if not task:
             return Outcome("task 是空的：写清楚要查什么。", ok=False)
         model = self.model_factory()
-        session = SessionStore(self.root).create(
+        session = SessionStore(self.root, prices=self.parent.prices).create(
             self.parent.cwd, "read_only", model.name, self.parent.context, {"parent": self.parent.id}
         )
         tools = CodingTools(Workspace(self.workspace_root), self.shell, self.extra)  # 自己的「读过哪些文件」

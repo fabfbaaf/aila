@@ -29,6 +29,7 @@ aila -c                       # 接着这个目录最近的会话
 aila -r                       # 列出这个目录的会话，选一个接着做（aila -r 会话id 直接打开）
 aila --mode auto              # 权限模式：read_only 只读 / ask 先问再改（默认）/ auto 工作区内自动
 aila --branch                 # 在新分支上做：你的代码不动；/merge 跑测试并合并，/merge 直接 不跑测试，/discard 放弃
+aila --budget 0.5             # 这个会话累计花费到 0.5 元后，在下一步开始前停下
 # 交互模式里 /trace 看上一轮的执行轨迹（每一步多久、命中多少缓存），/context 看上下文账本
 aila -p "跑一下测试" --json    # 按行输出 JSON 事件，给脚本和 CI 用
 ```
@@ -127,13 +128,14 @@ data: {"type": "done"}
 
 | 接口 | 作用 |
 |---|---|
-| `POST /agent/sessions` | 新建会话 `{cwd, mode}`，mode 是 `read_only` / `ask`（默认）/ `auto` |
-| `GET /agent/sessions` | 会话列表（最近的在前，带标题、用量、是否在做） |
+| `POST /agent/sessions` | 新建会话 `{cwd, mode, budget?}`，mode 是 `read_only` / `ask`（默认）/ `auto`，budget 是累计元数上限，省略或 `null` 表示不限 |
+| `GET /agent/sessions` | 会话列表（最近的在前，带标题、用量、花费 `cost`、上限 `budget`、是否在做） |
 | `GET /agent/sessions/{id}` | 会话的全部日志事件（界面据此重建） |
 | `POST /agent/sessions/{id}/messages` | 说一句话开始一轮，返回这一轮的事件流（SSE）；连接断了她照样做完 |
 | `GET /agent/sessions/{id}/events?after=N` | 订阅：补发 N 之后的事件，正在做的话接着推实时事件 |
 | `POST /agent/sessions/{id}/interrupt` | 打断 |
 | `PUT /agent/sessions/{id}/mode` | 换权限模式 |
+| `PUT /agent/sessions/{id}/budget` | 改累计花费上限 `{"amount": 1}`，`{"amount": null}` 取消上限；返回追加的 `budget` 事件 |
 | `POST /agent/sessions/{id}/compact` | 手动压缩上下文 |
 | `GET /agent/sessions/{id}/context` | 上下文账本：下一步发给模型的上下文由哪几块组成、各占多少、命中多少缓存、最占地方的几个工具结果 |
 | `POST /agent/tasks` | 开会话并马上开始做 `{text, cwd 或 project（代码库里的项目 id）, mode}`（屏幕上的报错、星图交过来的任务） |
@@ -144,7 +146,7 @@ data: {"type": "done"}
 `POST /agent/sessions` 带 `isolate: true` 就是「在新分支上做」。对话里的「编程任务」技能包（`coding_task`）也能开任务：她按名字找到项目、开会话、开始做，对话的事件流里多一条 `agent_task`，桌面端据此打开工作窗口。
 | `POST /agent/confirm` | 回答确认 `{id, approved, remember}`（remember = 以后都允许） |
 
-事件：`user`、`text_delta`（逐字）、`assistant`（一步的完整输出和工具调用）、`usage`、`tool_start`、`tool`（结果，改文件的带 `diff`）、`confirm` / `confirm_end`、`compaction`、`mode`、`turn_end`（`done` / `max_steps` / `rejected` / `timeout` / `interrupted` / `error`）。带 `seq` 的事件都写在日志里，`text_delta`、`tool_start` 只推给正在看的人。
+事件：`user`、`text_delta`（逐字）、`assistant`（一步的完整输出和工具调用）、`usage`、`tool_start`、`tool`（结果，改文件的带 `diff`）、`confirm` / `confirm_end`、`compaction`、`mode`、`budget`、`turn_end`（`done` / `max_steps` / `rejected` / `timeout` / `interrupted` / `error` / `budget`）。每轮 `turn_end.cost` 是这一轮的元数，无法完整计价时是 `null`。带 `seq` 的事件都写在日志里，`text_delta`、`tool_start` 只推给正在看的人。
 
 ## 设计
 
@@ -355,6 +357,24 @@ data: {"type": "done"}
 - **从别处开任务**：屏幕上的报错「交给她修」、星图「让她修」走 `/agent/tasks`；对话里说「帮我在 xx 里……」走「编程任务」技能包：她不在对话里写大段代码，而是在工作窗口开任务。工具想告诉桌面端的事（打开工作窗口）用 `tools.emit()`，对话循环把它跟在工具结果后面推出去。
 - **在新分支上做**（`runtime/branch.py`）：开会话时从 HEAD 开 `aila/task-xxxx` 分支和一个 git worktree，放进你没提交的改动（按字节复制），依赖目录（`node_modules`、`.venv`）做链接；她的工作区、命令都在那里，你的代码一个字不动。合并时：先跑项目自带的测试（按改了哪些文件识别，不由大模型决定）→ 再比你这期间有没有改过同样的文件（只比内容、不管换行符）→ 都没问题才按字节写回、不替你提交；合并后分支上记一次提交当新的基线，她可以接着做、下次只合并新的改动。放弃时先拆依赖链接再删 worktree，绝不顺着链接删到原来的依赖。
 - **还没做**：Windows 上没有沙箱（命令能做什么只靠上面的规则把关，危险命令识别是尽力而为）；搜索没用 ripgrep。
+
+### 花费和上限
+
+`/usage` 看这个会话累计的 token、元数和上限；每轮结束那一行也显示这一轮的钱。`/budget 1` 把整个会话的累计上限设为 1 元，`/budget off` 取消，`/budget` 看当前值。新会话用 `aila --budget 0.5`，恢复旧会话时显式传 `--budget` 也会改它的上限。金额可以是 0，必须是有限的非负数。
+
+价格表是 `aila-ai/data/prices.json`（服务配置的 `data_dir` 下）。以模型名为键，三项单位都是**元 / 百万 token**，数字或十进制字符串均可。下面只演示格式，`my-model` 的数字是示例，实际使用要填供应商价格：
+
+```json
+{
+  "my-model": { "hit": "0.5", "miss": "2", "output": "8" }
+}
+```
+
+`hit` 是命中缓存的输入，`miss` 是没命中的输入，`output` 是输出；三项都要有，且都是有限非负数。计算式是 `(cache_hit × hit + cache_miss × miss + completion × output) / 1000000`。每次计算都会重读价格表，修改后下次查看或预算检查就生效，无需重启。会话金额按当前表汇总所有 `usage`，包括压缩和查资料的助手；每轮结尾记录结束时算出的本轮金额。
+
+**默认价格待填**：2026-11-16 核对 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)时，当前表只列新模型；[官方更新记录](https://api-docs.deepseek.com/updates/)公告 `deepseek-chat`、`deepseek-reasoner` 计划于 2026-07-24 停用，未查到这两个模型名目前适用的三项价格。因此默认留空，可在价格表补上经确认的价格。`mock-coder` 以及其他没配置的模型也不估价。有任一用量无法计价时，会话或本轮的 `cost` 是 `null`，界面保留 token；非法价格或读不到的价格表也按未知处理，不当成免费。
+
+上限在每一步开始前、自动压缩前检查，压缩后也检查；已经花到上限就以 `reason: "budget"` 结束。它按已发生的花费判断，当前一步和这一步派出的助手会做完，可能略超上限。例如上限 0.01 元、每步 0.004 元，完成三步累计 0.012 元，第 4 步前停。助手自己最多 20 步，不单独设预算。调高上限或 `/budget off` 后说「继续」接着做；仅说「继续」而上限不变，会再次停下。有未知模型时只能根据已知用量的金额检查，补齐价格才能计算完整花费和约束上限。手动 `/compact` 的用量也累计到会话，下一次开始做事时会检查。
 
 ### 编程 Agent 评测
 

@@ -10,6 +10,15 @@ vi.mock('electron', () => ({
 }))
 
 describe('会话管理的预加载桥', () => {
+  it('预算只传固定通道，零预算和取消上限按原值转发', async () => {
+    const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
+    const api = exposed?.[1] as AilaApi
+    await api.agentCreate('C:/shop', 'ask', false, 0)
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', 'C:/shop', 'ask', false, 0)
+    await api.agentSetBudget('s1', null)
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:budget', 's1', null)
+  })
+
   it('撤销只转发会话和已确认的轮次', async () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi

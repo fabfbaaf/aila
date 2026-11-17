@@ -13,6 +13,8 @@ import LedgerPanel from './LedgerPanel.vue'
 import ToolCard from './ToolCard.vue'
 import TraceView from './TraceView.vue'
 import UndoResult from './UndoResult.vue'
+import BudgetControls from './BudgetControls.vue'
+import { parseBudget, validBudget } from '../../../shared/budget'
 
 const source = createAgentSource()
 const sessions = ref<AgentSessionSummary[]>([])
@@ -25,6 +27,8 @@ const projects = ref<ProjectChoice[]>([])
 const newMode = ref<AgentMode>('ask')
 /** 新任务在新分支上做（git worktree，测试通过才合并回来） */
 const newIsolate = ref(false)
+const newBudget = ref('')
+const newBudgetError = ref('')
 const merging = ref('')
 const models = ref<{ coder: string; chat: string; keySet: boolean } | null>(null)
 const scroller = ref<HTMLElement>()
@@ -32,6 +36,7 @@ const input = ref<HTMLTextAreaElement>()
 const streaming = reactive(new Set<string>())
 const opening = ref(false)
 let openRequest = 0
+let openingSid = ''
 const undoing = reactive(new Set<string>())
 const undoDialog = ref<HTMLDialogElement>()
 const undoPreview = ref<{ sid: string; plan: UndoPreview; branch: string | null } | null>(null)
@@ -93,16 +98,27 @@ const choices = computed<ProjectChoice[]>(() => {
 
 // ---------- 会话 ----------
 
+let listRequest = 0
 async function refreshList(): Promise<void> {
+  const request = ++listRequest
   try {
-    sessions.value = await source.list()
+    const result = await source.list()
+    if (request !== listRequest) return
+    sessions.value = result
+    const active = current.value
+    const latest = active && result.find((session) => session.id === active.id)
+    if (active && latest && latest.events > t.value.lastSeq) {
+      active.cost = latest.cost ?? null
+      t.value.budget = validBudget(latest.budget) ? latest.budget : null
+    }
   } catch (err) {
-    error.value = (err as Error).message
+    if (request === listRequest) error.value = (err as Error).message
   }
 }
 
 async function open(sid: string): Promise<void> {
   const request = ++openRequest
+  openingSid = sid
   opening.value = true
   closeUndoPreview()
   error.value = ''
@@ -116,6 +132,7 @@ async function open(sid: string): Promise<void> {
     if (current.value?.id === sid) for (const e of t.value.events) tr.apply(e)
     t.value = tr
     current.value = { ...s, events: s.events.length }
+    void refreshList() // 详情请求期间可能又记了用量，重新取服务端累计费用
     picking.value = false
     ledger.value = null
     loadLedger()
@@ -135,13 +152,23 @@ async function open(sid: string): Promise<void> {
 
 async function startNew(path: string): Promise<void> {
   error.value = ''
+  newBudgetError.value = ''
+  let budget: number | null
+  try { budget = parseBudget(newBudget.value) }
+  catch (err) { newBudgetError.value = (err as Error).message; return }
   try {
-    const s = await source.create(path, newMode.value, newIsolate.value)
+    const s = await source.create(path, newMode.value, newIsolate.value, budget)
     await refreshList()
     await open(s.id)
   } catch (err) {
     error.value = (err as Error).message
   }
+}
+
+function changedBudget(sid: string): void {
+  // HTTP 保存结果可能先于实时流到达，重读完整日志，不能用单条事件跳过中间记录。
+  if (current.value?.id === sid && (!opening.value || openingSid === sid)) void open(sid)
+  else void refreshList()
 }
 
 async function pickOther(): Promise<void> {
@@ -280,7 +307,7 @@ source.onEvent((sid, e) => {
   const near = nearBottom()
   t.value.apply(e)
   if (e.type === 'user' || e.type === 'undo' || e.type === 'branch_closed') closeUndoPreview()
-  if (e.type === 'user' || e.type === 'turn_end' || e.type === 'undo') void refreshList()
+  if (e.type === 'user' || e.type === 'usage' || e.type === 'turn_end' || e.type === 'undo' || e.type === 'budget') void refreshList()
   if (['usage', 'turn_end', 'compaction', 'tool', 'undo'].includes(e.type)) loadLedger()
   if (near) void nextTick(scrollToBottom)
 })
@@ -413,6 +440,7 @@ onBeforeUnmount(() => {
           <button :class="{ on: view === 'trace' }" title="按时间看每一步花了多久" @click="view = 'trace'">轨迹</button>
         </div>
       </header>
+      <BudgetControls v-if="current" class="task-budget" :sid="current.id" :cost="current.cost" :budget="t.budget" :change="source.setBudget" @changed="changedBudget" />
 
       <div v-if="current && view === 'trace'" class="scroll">
         <TraceView :turns="trace" />
@@ -565,6 +593,20 @@ onBeforeUnmount(() => {
             <b>{{ label }}</b><span>{{ MODE_HINTS[m] }}</span>
           </label>
         </div>
+        <div class="new-budget">
+          <label for="new-task-budget">花费上限（元，可以不填）</label>
+          <input
+            id="new-task-budget"
+            v-model="newBudget"
+            @keydown.stop
+            inputmode="decimal"
+            placeholder="不限"
+            :aria-invalid="Boolean(newBudgetError)"
+            aria-describedby="new-task-budget-help new-task-budget-error"
+          />
+          <p id="new-task-budget-help" class="dim">未知价格的用量无法完整计价。达到上限后在下一步前停下，单步可能超出上限。</p>
+          <p v-if="newBudgetError" id="new-task-budget-error" class="budget-error" role="alert">{{ newBudgetError }}</p>
+        </div>
         <p class="dim">她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。</p>
         <button v-if="current" class="ghost" @click="picking = false">取消</button>
       </div>
@@ -590,6 +632,41 @@ onBeforeUnmount(() => {
   grid-template-columns: 240px minmax(0, 1fr) 260px;
   height: 100%;
   color: var(--text);
+}
+
+.new-budget {
+  margin: 12px 0;
+}
+
+.task-budget {
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.new-budget label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.new-budget input {
+  box-sizing: border-box;
+  width: min(200px, 100%);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.new-budget input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.budget-error {
+  color: var(--bad);
+  margin: 6px 0;
 }
 
 /* 还没打开会话：没有右边那一栏 */

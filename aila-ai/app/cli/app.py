@@ -33,6 +33,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..runtime.permissions import MODE_LABELS, MODES
+from ..runtime.pricing import validate_budget
 from ..runtime.session import SESSION_ID, latest_turn, same_project, turn_edits
 from .backend import Backend, BackendError, connect
 from .commands import COMMANDS, INIT_PROMPT, KEYS, changed_files, latest_todos, next_mode, parse, usage_lines
@@ -332,6 +333,21 @@ class Terminal:
                         self.console.print(Text(f"删掉了记住的命令：{command}；下次执行时重新按权限模式确认。", style="dim"))
             elif name == "/undo":
                 await self._undo()
+            elif name == "/budget":
+                if not arg:
+                    info = await self.backend.session(self.sid)
+                    amount = info.get("budget")
+                else:
+                    if arg.lower() == "off":
+                        amount = None
+                    else:
+                        try:
+                            amount = validate_budget(float(arg))
+                        except (ValueError, TypeError):
+                            raise BackendError("用 /budget 金额 设上限，金额要是非负有限数字；/budget off 取消上限。")
+                    await self.backend.set_budget(self.sid, amount)
+                    self.info["budget"] = amount
+                self.console.print(Text("花费不限。" if amount is None else f"花费上限 ¥{amount:.6f}", style="dim"))
             else:
                 self.console.print(Text(f"没有 {name} 这个命令，/help 看所有命令", style="dim"))
         except BackendError as err:
@@ -465,7 +481,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     g.add_argument("--service", action="store_true", help="一定连 AI 服务（没开就报错）")
     p.add_argument("--json", action="store_true", help="-p 时按行输出 JSON 事件")
     p.add_argument("--branch", action="store_true", help="在新分支上做：你的代码不动，/merge 时跑测试、合并回来")
+    p.add_argument("--budget", type=_budget_arg, help="会话累计花费上限（元），不填就不限")
     return p.parse_args(argv)
+
+
+def _budget_arg(value: str) -> float:
+    try:
+        return float(validate_budget(float(value)))
+    except (ValueError, TypeError):
+        raise argparse.ArgumentTypeError("花费上限要是非负的有限数字（元）。") from None
 
 
 async def open_session(backend: Backend, args: argparse.Namespace, console: Console) -> tuple[dict[str, Any], bool]:
@@ -487,8 +511,11 @@ async def open_session(backend: Backend, args: argparse.Namespace, console: Cons
         if args.mode and args.mode != resumed.get("mode"):
             await backend.set_mode(resumed["id"], args.mode)
             resumed["mode"] = args.mode
+        if args.budget is not None:
+            await backend.set_budget(resumed["id"], args.budget)
+            resumed["budget"] = args.budget
         return resumed, True
-    return await backend.create(cwd, args.mode or "ask", args.branch), False
+    return await backend.create(cwd, args.mode or "ask", args.branch, budget=args.budget), False
 
 
 async def main(argv: list[str] | None = None) -> int:
