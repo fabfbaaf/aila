@@ -13,7 +13,7 @@
 | [07 撤销一轮](07-undo-turn.md) | 把她最近一轮改的文件退回去（用户之后改过的不碰） | 新的 `runtime/snapshots.py`、`tools.py`、`runner.py`、任务页、终端 | 已合并（cd108de） |
 | [08 花费和上限](08-budget.md) | 按价格表算钱；给任务设上限，花到了就停 | 新的 `runtime/pricing.py`、`loop.py`、`session.py`、任务页、终端 | 已合并（0c2254d）；DeepSeek 价格要在 `aila-ai/data/prices.json` 填 |
 | [09 嘴上只说总结](09-spoken-summary.md) | 回答照样写全，语音只念开头一两句总结，气泡也只显示总结 | `aila-ai/app/tags.py`、桌面端 `chat/Conversation.ts`、气泡 | 已合并（0af94e6） |
-| [10 编程任务里的浏览器](10-agent-browser.md) | 编程任务也能用浏览器，能开项目自己的本机开发服务器、按键、多标签、上传、截图 | 新的 `runtime/browsertools.py`、`permissions.py`、`browser/session.py`、任务页卡片 | 已合并（见下一个提交）；截图直接给模型看没做 |
+| [10 编程任务里的浏览器](10-agent-browser.md) | 编程任务也能用浏览器，能开项目自己的本机开发服务器、按键、多标签、上传、截图 | 新的 `runtime/browsertools.py`、`permissions.py`、`browser/session.py`、任务页卡片 | 已合并（609b6c5）；截图直接给模型看没做 |
 | [11 电脑任务](11-computer-tasks.md) | 不选项目，用命令行操作这台电脑；对话里一两步的小事直接做 | `runner.py`、`permissions.py`、`prompt.py`、任务页、对话的新技能包 | 可以开始（先读 [B 的结果说明](B-long-tasks-result.md)） |
 
 ## 先后顺序
