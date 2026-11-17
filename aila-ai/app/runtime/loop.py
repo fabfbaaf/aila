@@ -22,6 +22,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from ..confirm import Confirmations
@@ -106,9 +107,15 @@ class Agent:
         reason, error = "done", ""
         try:
             for step in range(1, self.config.max_steps + 1):
+                if self._budget_exhausted():
+                    reason = "budget"
+                    break
                 if self._should_compact():
                     async for e in self.compact():
                         yield e
+                    if self._budget_exhausted():
+                        reason = "budget"
+                        break
                 calls: list[ToolCall] = []
                 async for e in self._step(step, calls):
                     yield e
@@ -147,7 +154,7 @@ class Agent:
             for e in self._close("error", error):
                 yield e
             return
-        end = self.session.append({"type": "turn_end", "reason": reason})
+        end = self.session.append({"type": "turn_end", "reason": reason, "cost": self.session.turn_cost})
         await self.hooks.emit("turn_end", session=self.session, reason=reason)
         yield end
 
@@ -305,6 +312,10 @@ class Agent:
 
     # ---------- 压缩 ----------
 
+    def _budget_exhausted(self) -> bool:
+        budget = self.session.budget
+        return budget is not None and self.session.known_cost >= Decimal(str(budget))
+
     def _should_compact(self) -> bool:
         return self.session.last_prompt_tokens > self.config.context_window * self.config.compact_at
 
@@ -342,7 +353,8 @@ class Agent:
         if self.session.last_message_role() == "user":
             note = "（这一轮被打断了，没有回复）" if reason == "interrupted" else f"（出错了，没有回复：{error}）"
             self.session.append({"type": "assistant", "text": note, "tool_calls": []})
-        self.session.append({"type": "turn_end", "reason": reason, **({"error": error} if error else {})})
+        self.session.append({"type": "turn_end", "reason": reason, "cost": self.session.turn_cost,
+                             **({"error": error} if error else {})})
         return self.session.events[first:]
 
 

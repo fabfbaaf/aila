@@ -59,6 +59,7 @@ export const lines = {
     max_steps: '步骤有点多……我先停在这里。说「继续」我就接着做。'
   } as Record<string, string>,
   agentError: '……出错了，没做完。原因写在任务页里。',
+  agentBudget: '……花到上限了，我先停在这里。调高或取消上限后，说「继续」我再接着做。',
   agentTaskStarted: ['好，我去任务页里修。', '……交给我。改之前会先问你。'],
   agentTaskFailed: (why: string): string => `……没开成。${why}`,
   /** 交给编程 Agent 的修报错任务（报错原文附在后面） */

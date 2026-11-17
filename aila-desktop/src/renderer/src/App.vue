@@ -540,6 +540,11 @@ function onAgentProgress(p: AgentProgress): void {
       behavior.react('sad')
       if (!quiet) behavior.say(lines.agentError, 3500)
       break
+    case 'budget':
+      behavior.setWorking(false)
+      behavior.gesture('tilt')
+      if (!quiet) behavior.say(lines.agentBudget, 5000)
+      break
   }
 }
 

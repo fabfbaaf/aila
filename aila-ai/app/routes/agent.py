@@ -23,10 +23,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..deps import get_runtime
 from ..runtime.permissions import MODE_LABELS
+from ..runtime.pricing import validate_budget
 from ..runtime.runner import Runtime, RuntimeError_
 from ..runtime.session import Event
 
@@ -35,10 +36,20 @@ router = APIRouter(prefix="/agent")
 ModeName = Literal["read_only", "ask", "auto"]
 
 
+def _budget_input(value: object) -> float | None:
+    # FastAPI 的默认校验响应会回显 input，NaN/Infinity 无法序列化成 JSON。
+    try:
+        return validate_budget(value)
+    except (ValueError, TypeError) as err:
+        raise HTTPException(422, str(err)) from err
+
+
 class NewSession(BaseModel):
     cwd: str = Field(min_length=1, max_length=1000)
     mode: ModeName = "ask"
     isolate: bool = False  # 在新分支上做
+    budget: float | None = Field(default=None, ge=0, allow_inf_nan=False, strict=True)
+    _valid_budget = field_validator("budget", mode="before")(_budget_input)
 
 
 class Merge(BaseModel):
@@ -86,7 +97,7 @@ def _session_or_404(rt: Runtime, sid: str):  # noqa: ANN202
 @router.post("/sessions", status_code=201)
 async def create_session(req: NewSession, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
-        session = rt.create(req.cwd, req.mode, req.isolate)
+        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget)
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
     return {**session.summary(), "shell": rt.shell.label, "modes": MODE_LABELS}
@@ -243,5 +254,20 @@ async def undo_turn(sid: str, req: UndoTurn | None = None, rt: Runtime = Depends
         raise HTTPException(404, "没有这个会话。")
     try:
         return rt.undo(sid, req.turn_seq if req else None)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
+class SetBudget(BaseModel):
+    amount: float | None = Field(ge=0, allow_inf_nan=False, strict=True)
+    _valid_amount = field_validator("amount", mode="before")(_budget_input)
+
+
+@router.put("/sessions/{sid}/budget")
+async def set_budget(sid: str, req: SetBudget, rt: Runtime = Depends(get_runtime)) -> Event:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return rt.set_budget(sid, req.amount)
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err

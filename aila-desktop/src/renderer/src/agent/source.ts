@@ -1,6 +1,6 @@
 // 工作窗口的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import { SseParser } from '../../../shared/chat'
-import type { AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
+import type { AgentBudgetEvent, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 
@@ -12,7 +12,8 @@ export interface ProjectChoice {
 export interface AgentSource {
   list(): Promise<AgentSessionSummary[]>
   get(sid: string): Promise<AgentSession>
-  create(cwd: string, mode: AgentMode, isolate?: boolean): Promise<AgentSessionSummary>
+  create(cwd: string, mode: AgentMode, isolate?: boolean, budget?: number | null): Promise<AgentSessionSummary>
+  setBudget(sid: string, amount: number | null): Promise<AgentBudgetEvent>
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
   merge(sid: string, runTests: boolean): Promise<AgentEvent>
   discard(sid: string): Promise<AgentEvent>
@@ -46,7 +47,8 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
   return {
     list: async () => unwrap(await api.agentList()),
     get: async (sid) => unwrap(await api.agentGet(sid)),
-    create: async (cwd, mode, isolate) => unwrap(await api.agentCreate(cwd, mode, isolate)),
+    create: async (cwd, mode, isolate, budget) => unwrap(await api.agentCreate(cwd, mode, isolate, budget)),
+    setBudget: async (sid, amount) => unwrap(await api.agentSetBudget(sid, amount)),
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),
     discard: async (sid) => unwrap(await api.agentDiscard(sid)),
     undo: async (sid, turnSeq) => unwrap(await api.agentUndo(sid, turnSeq)),
@@ -119,7 +121,8 @@ function web(): AgentSource {
   return {
     list: () => call('GET', '/agent/sessions'),
     get: (sid) => call('GET', `/agent/sessions/${sid}`),
-    create: (cwd, mode, isolate) => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate }),
+    create: (cwd, mode, isolate, budget = null) => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate, budget }),
+    setBudget: (sid, amount) => call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/budget`, { amount }),
     merge: (sid, runTests) => call('POST', `/agent/sessions/${sid}/merge`, { run_tests: runTests }),
     discard: (sid) => call('POST', `/agent/sessions/${sid}/discard`),
     undo: (sid, turnSeq) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/undo`, { turn_seq: turnSeq }),

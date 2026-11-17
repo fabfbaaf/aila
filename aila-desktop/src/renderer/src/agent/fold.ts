@@ -8,6 +8,7 @@
  * - 整个会话：最新的待办清单、改过的文件、累计用量、权限模式、是不是正在做
  */
 import type { AgentEvent, AgentMode, AgentUndoEvent } from '../../../shared/agent'
+import { validBudget, yuan } from '../../../shared/budget'
 
 export interface TodoItem {
   content: string
@@ -53,6 +54,7 @@ export interface EndItem {
   hit: number
   completion: number
   estimated: boolean
+  cost?: number | null
   undo?: UndoPreview
 }
 
@@ -156,6 +158,7 @@ export class Transcript {
   running = false
   mode: AgentMode = 'ask'
   model = ''
+  budget: number | null = null
   todos: TodoItem[] = []
   /** 改过的文件 → 改了几次 */
   files = new Map<string, number>()
@@ -186,6 +189,7 @@ export class Transcript {
       case 'start':
         this.mode = (e.mode as AgentMode) ?? 'ask'
         this.model = String(e.model ?? '')
+        this.budget = validBudget(e.budget) ? e.budget : null
         this.branch = (e.branch as { branch?: string } | undefined)?.branch ?? null
         break
       case 'merge':
@@ -313,6 +317,12 @@ export class Transcript {
         this.mode = e.mode as AgentMode
         this.items.push({ kind: 'note', key: this.key(), text: `权限模式：${MODE_NOTE[String(e.mode)] ?? e.mode}` })
         break
+      case 'budget':
+        if (validBudget(e.amount)) {
+          this.budget = e.amount
+          this.items.push({ kind: 'note', key: this.key(), text: e.amount === null ? '花费上限已取消' : `花费上限设为 ${yuan(e.amount)}` })
+        }
+        break
       case 'turn_end': {
         this.closeText()
         const t = this.turn
@@ -333,6 +343,7 @@ export class Transcript {
           hit: t.hit,
           completion: t.completion,
           estimated: t.estimated,
+          cost: validBudget(e.cost) ? e.cost : null,
           undo
         }
         this.items.push(end)
@@ -405,6 +416,7 @@ export function endText(end: EndItem): string {
     rejected: '停下来了，等你说接下来怎么做',
     timeout: '一直没等到你的回答，先停下了',
     interrupted: '被打断了，说「继续」接着做',
+    budget: '花到上限了，调高或取消上限后说「继续」接着做',
     error: `出错了${end.error ? `：${end.error}` : ''}`
   }
   return words[end.reason] ?? end.reason
@@ -416,5 +428,6 @@ export function endStats(end: EndItem): string {
     parts.push(`输入 ${compact(end.prompt)}（命中缓存 ${Math.round((end.hit / end.prompt) * 100)}%${end.estimated ? '，估算' : ''}）`)
     parts.push(`输出 ${compact(end.completion)}`)
   }
+  if (typeof end.cost === 'number' && Number.isFinite(end.cost) && end.cost >= 0) parts.push(yuan(end.cost))
   return parts.join(' · ')
 }

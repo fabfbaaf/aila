@@ -48,6 +48,8 @@ import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
+import { registerAgentBudgetIpc } from './agentBudgetIpc'
+import { validBudget } from '../shared/budget'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
 import type { SocketLike } from './cloud/sync'
@@ -588,10 +590,13 @@ function registerIpc(): void {
   const notAllowed = { ok: false, error: '只有主窗口能用' }
   ipcMain.handle('agent:list', (e) => (fromAgent(e) ? agentRelay.list() : notAllowed))
   ipcMain.handle('agent:get', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.get(sid) : notAllowed))
-  ipcMain.handle('agent:create', (e, cwd: unknown, mode: unknown, isolate: unknown) => {
+  ipcMain.handle('agent:create', (e, cwd: unknown, mode: unknown, isolate: unknown, budget: unknown) => {
     if (!fromAgent(e) || typeof cwd !== 'string' || cwd.length > 1000) return notAllowed
-    return agentRelay.create(cwd, AGENT_MODES.includes(mode as AgentMode) ? (mode as AgentMode) : 'ask', isolate === true)
+    const amount = budget === undefined ? null : budget
+    if (!validBudget(amount)) return { ok: false, error: '花费上限要是有限的非负金额，null 表示不限。' }
+    return agentRelay.create(cwd, AGENT_MODES.includes(mode as AgentMode) ? (mode as AgentMode) : 'ask', isolate === true, amount)
   })
+  registerAgentBudgetIpc(ipcMain, agentRelay, fromAgent, sidOk)
   ipcMain.handle('agent:merge', (e, sid: unknown, runTests: unknown) =>
     fromAgent(e) && sidOk(sid) ? agentRelay.merge(sid, runTests !== false) : notAllowed
   )

@@ -7,6 +7,7 @@
 import { SseParser } from '../shared/chat'
 import type {
   AgentActivity,
+  AgentBudgetEvent,
   AgentEvent,
   AgentLedger,
   AgentMode,
@@ -57,8 +58,12 @@ export class AgentRelay {
     return this.remember(await this.call<AgentSession>('GET', `/agent/sessions/${encodeURIComponent(sid)}`))
   }
 
-  async create(cwd: string, mode: AgentMode, isolate = false): Promise<AiResult<AgentSessionSummary>> {
-    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate }))
+  async create(cwd: string, mode: AgentMode, isolate = false, budget: number | null = null): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate, budget }))
+  }
+
+  setBudget(sid: string, amount: number | null): Promise<AiResult<AgentBudgetEvent>> {
+    return this.call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/budget`, { amount })
   }
 
   /** 在新分支上做时：跑测试、合并回你的代码（测试可能要跑几分钟） */
@@ -233,6 +238,7 @@ export class AgentRelay {
         const files = this.turnFiles.get(sid)?.size ?? 0
         this.turnFiles.delete(sid)
         if (e.reason === 'done') this.hooks.progress({ kind: 'done', files })
+        else if (e.reason === 'budget') this.hooks.progress({ kind: 'budget' })
         else if (e.reason === 'error') this.hooks.progress({ kind: 'error', message: String(e.error ?? '') })
         else this.hooks.progress({ kind: 'stopped', reason: String(e.reason ?? '') })
         break

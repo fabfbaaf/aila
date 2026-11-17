@@ -24,7 +24,7 @@ import type {
   VoicePrefs
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
-import type { AgentActivity, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../shared/agent'
+import type { AgentActivity, AgentBudgetEvent, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
@@ -134,8 +134,9 @@ const api = {
   // 工作窗口（编程 Agent）：主进程只认工作窗口发来的
   agentList: (): Promise<AiResult<AgentSessionSummary[]>> => ipcRenderer.invoke('agent:list'),
   agentGet: (sid: string): Promise<AiResult<AgentSession>> => ipcRenderer.invoke('agent:get', sid),
-  agentCreate: (cwd: string, mode: AgentMode, isolate = false): Promise<AiResult<AgentSessionSummary>> =>
-    ipcRenderer.invoke('agent:create', cwd, mode, isolate),
+  agentCreate: (cwd: string, mode: AgentMode, isolate = false, budget: number | null = null): Promise<AiResult<AgentSessionSummary>> =>
+    ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget),
+  agentSetBudget: (sid: string, amount: number | null): Promise<AiResult<AgentBudgetEvent>> => ipcRenderer.invoke('agent:budget', sid, amount),
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
   agentMerge: (sid: string, runTests: boolean): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:merge', sid, runTests),
   agentDiscard: (sid: string): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:discard', sid),

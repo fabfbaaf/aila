@@ -21,7 +21,7 @@ class BackendError(Exception):
 class Backend(Protocol):
     label: str
 
-    async def create(self, cwd: str, mode: str, isolate: bool = False) -> dict[str, Any]: ...
+    async def create(self, cwd: str, mode: str, isolate: bool = False, budget: float | None = None) -> dict[str, Any]: ...
     async def merge(self, sid: str, run_tests: bool = True) -> Event: ...
     async def context(self, sid: str) -> dict[str, Any]: ...
     async def discard(self, sid: str) -> Event: ...
@@ -39,6 +39,7 @@ class Backend(Protocol):
     async def rules(self) -> list[dict[str, Any]]: ...
     async def forget_rule(self, project: str, command: str) -> None: ...
     async def undo(self, sid: str, turn_seq: int) -> Event: ...
+    async def set_budget(self, sid: str, amount: float | None) -> Event: ...
 
 
 class EmbeddedBackend:
@@ -49,9 +50,9 @@ class EmbeddedBackend:
     def __init__(self, runtime: Runtime) -> None:
         self.rt = runtime
 
-    async def create(self, cwd: str, mode: str, isolate: bool = False) -> dict[str, Any]:
+    async def create(self, cwd: str, mode: str, isolate: bool = False, budget: float | None = None) -> dict[str, Any]:
         try:
-            session = self.rt.create(cwd, mode, isolate)  # type: ignore[arg-type]
+            session = self.rt.create(cwd, mode, isolate, budget=budget)  # type: ignore[arg-type]
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
         return {**session.summary(), "shell": self.rt.shell.label}
@@ -139,6 +140,12 @@ class EmbeddedBackend:
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
 
+    async def set_budget(self, sid: str, amount: float | None) -> Event:
+        try:
+            return self.rt.set_budget(sid, amount)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
+
 
 class HttpBackend:
     """走本地 AI 服务（桌面端用的也是它）"""
@@ -162,8 +169,8 @@ class HttpBackend:
             raise BackendError(_detail(res))
         return res.json()
 
-    async def create(self, cwd: str, mode: str, isolate: bool = False) -> dict[str, Any]:
-        return await self._call("POST", "/agent/sessions", json={"cwd": cwd, "mode": mode, "isolate": isolate})
+    async def create(self, cwd: str, mode: str, isolate: bool = False, budget: float | None = None) -> dict[str, Any]:
+        return await self._call("POST", "/agent/sessions", json={"cwd": cwd, "mode": mode, "isolate": isolate, "budget": budget})
 
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/merge", json={"run_tests": run_tests}, timeout=660)
@@ -228,6 +235,9 @@ class HttpBackend:
 
     async def undo(self, sid: str, turn_seq: int) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/undo", json={"turn_seq": turn_seq}, timeout=60)
+
+    async def set_budget(self, sid: str, amount: float | None) -> Event:
+        return await self._call("PUT", f"/agent/sessions/{sid}/budget", json={"amount": amount})
 
 
 def _detail(res: httpx.Response) -> str:
