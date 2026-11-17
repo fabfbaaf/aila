@@ -81,7 +81,9 @@ async def test_agent_gets_code_tools(shop: Path, tmp_path: Path) -> None:
     sid = rt.create(str(shop)).id
     agent = rt.agent(sid)
     names = [t["function"]["name"] for t in agent.tools.specs]
-    assert names[-8:] == ["code_search", "code_locate", "code_symbol", "explore", "propose_plan", "stage_done", "stage_blocked", "remember"]  # 接在基本工具后面，顺序固定
+    existing = [name for name in names if not name.startswith("browser_")]
+    assert existing[-8:] == ["code_search", "code_locate", "code_symbol", "explore", "propose_plan", "stage_done",
+                             "stage_blocked", "remember"]  # 接在基本工具后面，顺序固定
     events = await drive(agent, "checkout 调用了谁")
     result = next(e for e in events if e["type"] == "tool")
     assert result["status"] == "ok" and "它调用的：item_total" in result["content"]

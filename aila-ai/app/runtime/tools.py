@@ -69,6 +69,8 @@ class CodingTool:
     preview: Callable[[dict[str, Any]], str] | None = None
     # 同一步里连着调用几次时可以一起跑（只读、互不影响，比如派几个子 Agent 去查不同的事）
     parallel: bool = False
+    # 某些权限按工具算出的目标识别，例如浏览器访问的本机端口。
+    permission_key: Callable[[dict[str, Any]], str] | None = None
 
     @property
     def spec(self) -> dict[str, Any]:
@@ -89,11 +91,12 @@ def _int(desc: str) -> dict[str, str]:
 
 class CodingTools:
     def __init__(self, workspace: Workspace, shell: Shell, extra: list[CodingTool] | None = None,
-                 snapshots: Snapshots | None = None) -> None:
+                 snapshots: Snapshots | None = None,
+                 on_close: Callable[[], Awaitable[None]] | None = None) -> None:
         self.ws = workspace
         self.shell = shell
         self.snapshots = snapshots
-        self.jobs = BackgroundJobs()
+        self.jobs = BackgroundJobs(on_close)
         self.todos: list[dict[str, str]] = []
         # 基本工具在前、额外的（代码库）在后，顺序固定
         self.tools: dict[str, CodingTool] = {t.name: t for t in [*self._build(), *(extra or [])]}

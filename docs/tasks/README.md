@@ -12,25 +12,24 @@
 | [06 安装包](06-installer.md) | Windows 安装包，AI 服务打包在里面，不用装 Python、Node | `aila-ai/scripts/build_service.py`、`aila-desktop/electron-builder.yml` | 暂停：等一个干净的 Windows 测试用户或虚拟机（草稿在 `codex/06-installer`） |
 | [07 撤销一轮](07-undo-turn.md) | 把她最近一轮改的文件退回去（用户之后改过的不碰） | 新的 `runtime/snapshots.py`、`tools.py`、`runner.py`、任务页、终端 | 已合并（cd108de） |
 | [08 花费和上限](08-budget.md) | 按价格表算钱；给任务设上限，花到了就停 | 新的 `runtime/pricing.py`、`loop.py`、`session.py`、任务页、终端 | 已合并（0c2254d）；DeepSeek 价格要在 `aila-ai/data/prices.json` 填 |
-| [09 嘴上只说总结](09-spoken-summary.md) | 回答照样写全，语音只念开头一两句总结，气泡也只显示总结 | `aila-ai/app/tags.py`、桌面端 `chat/Conversation.ts`、气泡 | 可以开始 |
-| [10 编程任务里的浏览器](10-agent-browser.md) | 编程任务也能用浏览器，能开项目自己的本机开发服务器、按键、多标签、上传、截图 | 新的 `runtime/browsertools.py`、`permissions.py`、`browser/session.py`、任务页卡片 | 可以开始 |
-| [11 电脑任务](11-computer-tasks.md) | 不选项目，用命令行操作这台电脑；对话里一两步的小事直接做 | `runner.py`、`permissions.py`、`prompt.py`、任务页、对话的新技能包 | B 合并后可以开始（先读 [B 的结果说明](B-long-tasks-result.md)） |
+| [09 嘴上只说总结](09-spoken-summary.md) | 回答照样写全，语音只念开头一两句总结，气泡也只显示总结 | `aila-ai/app/tags.py`、桌面端 `chat/Conversation.ts`、气泡 | 已合并（0af94e6） |
+| [10 编程任务里的浏览器](10-agent-browser.md) | 编程任务也能用浏览器，能开项目自己的本机开发服务器、按键、多标签、上传、截图 | 新的 `runtime/browsertools.py`、`permissions.py`、`browser/session.py`、任务页卡片 | 已合并（见下一个提交）；截图直接给模型看没做 |
+| [11 电脑任务](11-computer-tasks.md) | 不选项目，用命令行操作这台电脑；对话里一两步的小事直接做 | `runner.py`、`permissions.py`、`prompt.py`、任务页、对话的新技能包 | 可以开始（先读 [B 的结果说明](B-long-tasks-result.md)） |
 
 ## 先后顺序
 
 改同一批文件的任务一个接一个做，不同的可以同时做。每个分支合并以后再开下一个依赖它的：
 
 ```
-已合并：         01   02   03   04   05   07   08
-现在可以开：     09   10
-B 合并以后：     11
+已合并：         01   02   03   04   05   07   08   09   10   A   B
+现在可以开：     11
 暂停：           06（等测试环境）
 ```
 
 Claude 自己做的两件（不交给 Codex，做完同样在自己的分支上、写结果说明）：
 
 - A 人格和说话方式（已合并，56c3332）：把她这个人写具体，回答精简，定下 09 用的 `[say]` 格式（改 `aila-ai/app/persona.py`，09 不碰这个文件）
-- B 长任务和整体规划（在 `claude/long-tasks`，见 [结果说明](B-long-tasks-result.md)）：先出分阶段的计划、你批准后按阶段推进、不受一轮步数限制、能断点接着做（改 `runner.py`、`loop.py`、`session.py`、任务页）
+- B 长任务和整体规划（已合并，4df4ec9，见 [结果说明](B-long-tasks-result.md)）：先出分阶段的计划、你批准后按阶段推进、不受一轮步数限制、能断点接着做（改 `runner.py`、`loop.py`、`session.py`、任务页）
 
 - 09 只改对话那条路（AI 服务的标签解析和桌面端的语音、气泡），和谁都不冲突
 - 10 只在 `runner.py` 组装工具列表那一处加东西，可以和 B 同时做

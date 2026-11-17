@@ -50,6 +50,7 @@ import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
 import { validMcpName } from '../shared/mcp'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
+import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { validBudget } from '../shared/budget'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
@@ -676,6 +677,7 @@ function registerIpc(): void {
     }
     return forgetAgentRule(AI_URL, project, command)
   })
+  registerAgentScreenshotIpc(ipcMain, fromAgent, async () => (await getAiSettings(AI_URL)).data?.paths.data)
   ipcMain.handle('agent:confirm', (e, id: unknown, approved: unknown, remember: unknown) => {
     if (!fromAgent(e) || typeof id !== 'string' || id.length > 64 || typeof approved !== 'boolean') return false
     return agentRelay.confirm(id, approved, remember === true)

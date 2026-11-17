@@ -19,6 +19,7 @@ export interface AgentSource {
   remember(cwd: string, text: string): Promise<AgentMemoryNote & { added: boolean }>
   forgetMemory(cwd: string, id: string): Promise<void>
   get(sid: string): Promise<AgentSession>
+  screenshot?(sid: string, name: string): Promise<string>
   create(cwd: string, mode: AgentMode, isolate?: boolean, budget?: number | null): Promise<AgentSessionSummary>
   setBudget(sid: string, amount: number | null): Promise<AgentBudgetEvent>
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
@@ -62,6 +63,7 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     remember: async (cwd, text) => unwrap(await api.agentRemember(cwd, text)),
     forgetMemory: async (cwd, id) => void unwrap(await api.agentForgetMemory(cwd, id)),
     get: async (sid) => unwrap(await api.agentGet(sid)),
+    screenshot: async (sid, name) => unwrap(await api.agentScreenshot(sid, name)),
     create: async (cwd, mode, isolate, budget) => unwrap(await api.agentCreate(cwd, mode, isolate, budget)),
     setBudget: async (sid, amount) => unwrap(await api.agentSetBudget(sid, amount)),
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),

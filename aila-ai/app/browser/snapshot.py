@@ -26,9 +26,18 @@ KIND_NAMES = {
     "file": "上传文件",
 }
 
+SENSITIVE_JS = r"""(el, type) => {
+  const field = el.labels && el.labels[0]
+  const hint = [type, el.getAttribute('name'), el.id, el.getAttribute('autocomplete'),
+                el.getAttribute('placeholder'), field && field.innerText, el.getAttribute('aria-label')].join(' ').toLowerCase()
+  return type === 'password' ||
+    /cc-|card|cvv|cvc|one-time-code|otp|passw|pwd|密码|卡号|验证码|校验码|安全码|身份证|支付/.test(hint)
+}"""
+
 # 在页面里执行：标出可以操作的元素，返回它们的信息和正文。先挑视口里的，再按页面顺序编号
 SNAPSHOT_JS = r"""
 ([maxElements, maxText]) => {
+  const isSensitive = """ + SENSITIVE_JS + r"""
   const SEL = [
     'a[href]', 'button', 'input:not([type=hidden])', 'textarea', 'select', 'summary',
     '[role=button]', '[role=link]', '[role=checkbox]', '[role=radio]', '[role=switch]', '[role=tab]',
@@ -76,10 +85,7 @@ SNAPSHOT_JS = r"""
       (tag === 'input' && ['submit', 'button', 'reset'].includes(type) ? clean(el.value) : '') ||
       clean(el.getAttribute('name'))
 
-    const hint = [type, el.getAttribute('name'), el.id, el.getAttribute('autocomplete'),
-                  el.getAttribute('placeholder'), label, el.getAttribute('aria-label')].join(' ').toLowerCase()
-    const sensitive = kind === 'input' && (type === 'password' ||
-      /cc-|card|cvv|cvc|one-time-code|otp|passw|pwd|密码|卡号|验证码|校验码|安全码|身份证|支付/.test(hint))
+    const sensitive = kind === 'input' && isSensitive(el, type)
 
     const form = el.form || el.closest('form')
     const submits = !!form && ((tag === 'button' && (type === '' || type === 'submit')) ||

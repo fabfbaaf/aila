@@ -732,7 +732,8 @@ onBeforeUnmount(() => {
               @approve="(pause: boolean) => planAction('approve', pause)"
               @reject="planAction('reject')"
             />
-            <ToolCard v-else-if="item.kind === 'tool'" :item="item" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
+            <ToolCard v-else-if="item.kind === 'tool'" :item="item" :session-id="current.id"
+              :load-screenshot="source.screenshot" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
             <div v-else-if="item.kind === 'merge'" class="merge" :class="{ ok: item.merged }">
               <div class="merge-head">{{ item.merged ? '✓ 合并了' : '■ 没有合并' }}</div>
               <div>{{ item.reason }}</div>

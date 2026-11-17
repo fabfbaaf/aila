@@ -208,6 +208,8 @@ class Agent:
         kind = tool.kind(args)
         # 按命令原文判断的是命令；MCP 工具按工具名判断「以后都不用问」
         command = str(args.get("command", "")) if kind == "command" else call.name if kind == "mcp" else ""
+        if tool.permission_key is not None:
+            command = tool.permission_key(args)
         decision = self.policy.decide(kind, command)
 
         if decision.verdict == "deny":
