@@ -63,6 +63,20 @@ const TURN: AgentEvent[] = [
 afterEach(() => vi.unstubAllGlobals())
 
 describe('工作窗口的转发（主进程）', () => {
+  it('撤销请求锁定预览的轮次，服务拒绝时原样显示原因', async () => {
+    const event = { type: 'undo', seq: 12, t: 1, turn_seq: 4, restored: ['a.py'], skipped: {}, commands: false }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(event)))
+      .mockResolvedValueOnce(new Response('{"detail":"最近一轮已经变了"}', { status: 409 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { r } = relay()
+    expect(await r.undo('s /1', 4)).toEqual({ ok: true, data: event })
+    expect(fetchMock).toHaveBeenCalledWith('http://ai/agent/sessions/s%20%2F1/undo', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ turn_seq: 4 })
+    }))
+    expect(await r.undo('s /1', 4)).toEqual({ ok: false, error: '最近一轮已经变了' })
+  })
+
   it('改名转发 PATCH，标题放在请求体，会话 id 按路径编码', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 's /1', cwd: 'C:/code', title: '新标题' })))
     vi.stubGlobal('fetch', fetchMock)

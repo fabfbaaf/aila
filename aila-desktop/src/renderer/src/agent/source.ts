@@ -1,6 +1,6 @@
 // 工作窗口的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import { SseParser } from '../../../shared/chat'
-import type { AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary } from '../../../shared/agent'
+import type { AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 
@@ -16,6 +16,7 @@ export interface AgentSource {
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
   merge(sid: string, runTests: boolean): Promise<AgentEvent>
   discard(sid: string): Promise<AgentEvent>
+  undo(sid: string, turnSeq: number): Promise<AgentUndoEvent>
   send(sid: string, text: string): void
   watch(sid: string, after: number): void
   interrupt(sid: string): Promise<void>
@@ -48,6 +49,7 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     create: async (cwd, mode, isolate) => unwrap(await api.agentCreate(cwd, mode, isolate)),
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),
     discard: async (sid) => unwrap(await api.agentDiscard(sid)),
+    undo: async (sid, turnSeq) => unwrap(await api.agentUndo(sid, turnSeq)),
     send: (sid, text) => api.agentSend(sid, text),
     watch: (sid, after) => api.agentWatch(sid, after),
     interrupt: async (sid) => void unwrap(await api.agentInterrupt(sid)),
@@ -120,6 +122,7 @@ function web(): AgentSource {
     create: (cwd, mode, isolate) => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate }),
     merge: (sid, runTests) => call('POST', `/agent/sessions/${sid}/merge`, { run_tests: runTests }),
     discard: (sid) => call('POST', `/agent/sessions/${sid}/discard`),
+    undo: (sid, turnSeq) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/undo`, { turn_seq: turnSeq }),
     send: (sid, text) => void stream(sid, `/agent/sessions/${sid}/messages`, { method: 'POST', body: JSON.stringify({ text }) }),
     watch: (sid, after) => void stream(sid, `/agent/sessions/${sid}/events?after=${after}`, { method: 'GET' }),
     interrupt: async (sid) => void (await call('POST', `/agent/sessions/${sid}/interrupt`)),

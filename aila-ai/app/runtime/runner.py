@@ -24,8 +24,9 @@ from .ledger import context_ledger
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
 from .prompt import build_context
-from .session import Event, Session, SessionStore
+from .session import Event, Session, SessionStore, latest_turn, turn_edits
 from .shell import Shell, find_shell
+from .snapshots import Snapshots
 from .subagent import Explorer
 from .tools import CodingTools
 from .workspace import Workspace
@@ -112,7 +113,8 @@ class Runtime:
         agent = Agent(
             session,
             self.model_factory(),
-            CodingTools(workspace, self.shell, [*extra, explorer.tool()]),
+            CodingTools(workspace, self.shell, [*extra, explorer.tool()],
+                        snapshots=Snapshots(session.path.with_suffix(".snap"))),
             Policy(session.cwd, self.rules, mode),  # type: ignore[arg-type]
             self.confirms,
             self.config,
@@ -207,6 +209,48 @@ class Runtime:
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
         return agent
+
+    def undo(self, sid: str, turn_seq: int | None = None) -> Event:
+        """只撤销最近完整一轮的文件工具，撤销本身记在同一份追加日志里。"""
+        if self.running(sid):
+            raise RuntimeError_("她还在做事，先打断这一轮再撤销。")
+        agent = self.agent(sid)
+        session = agent.session
+        with self._maintenance(sid):
+            if session.branch_closed:
+                raise RuntimeError_("这个会话的分支已经放弃，不能撤销。")
+            workdir = session.workdir.resolve()
+            expected = session.cwd
+            if branch := session.branch:
+                # 原 worktree 丢失或被链接替换时，不能退回原项目或别的会话的 worktree。
+                tree = self.work_dir.resolve() / Path(branch["worktree"]).name
+                expected = tree / branch.get("sub", "")
+                if not workdir.is_relative_to(tree):
+                    raise RuntimeError_("会话的临时工作目录已经不在原处，不能撤销。")
+            if workdir != expected or not workdir.is_dir() or workdir != agent.tools.ws.root:
+                raise RuntimeError_("会话的工作目录已经不在原处，不能撤销。")
+
+            turn = latest_turn(session.events)
+            if not turn:
+                raise RuntimeError_("最近一轮没有改文件。")
+            current = turn[0]["seq"]
+            if turn_seq is not None and current != turn_seq:
+                raise RuntimeError_("最近一轮已经变了，重新确认后再撤销。")
+            if any(e["type"] == "undo" and e.get("turn_seq") == current for e in session.events):
+                raise RuntimeError_("最近一轮已经撤销，没有可撤销的改动。")
+            edits = turn_edits(turn)
+            if not edits:
+                raise RuntimeError_("最近一轮没有改文件。")
+            snapshots = agent.tools.snapshots
+            if snapshots is None:
+                raise RuntimeError_("这个会话没有启用文件底片，不能撤销。")
+            restored, skipped = snapshots.restore(agent.tools.ws, edits)
+            commands = any(e["type"] == "tool" and e.get("name") == "run_command"
+                           and e.get("status") == "ok" for e in turn)
+            event = session.append({"type": "undo", "turn_seq": current, "restored": restored,
+                                    "skipped": skipped, "commands": commands})
+            self._publish(sid, event)
+            return event
 
     # ---------- 在新分支上做 ----------
 

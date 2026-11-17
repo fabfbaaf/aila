@@ -231,3 +231,17 @@ async def delete_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
     return {"ok": True}
+
+
+class UndoTurn(BaseModel):
+    turn_seq: int | None = Field(default=None, ge=0, strict=True)
+
+
+@router.post("/sessions/{sid}/undo")
+async def undo_turn(sid: str, req: UndoTurn | None = None, rt: Runtime = Depends(get_runtime)) -> Event:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return rt.undo(sid, req.turn_seq if req else None)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err

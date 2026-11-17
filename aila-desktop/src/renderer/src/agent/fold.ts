@@ -7,7 +7,7 @@
  * - 一轮结束：一行统计（几步、多久、输入多少、命中缓存多少、输出多少）
  * - 整个会话：最新的待办清单、改过的文件、累计用量、权限模式、是不是正在做
  */
-import type { AgentEvent, AgentMode } from '../../../shared/agent'
+import type { AgentEvent, AgentMode, AgentUndoEvent } from '../../../shared/agent'
 
 export interface TodoItem {
   content: string
@@ -53,6 +53,14 @@ export interface EndItem {
   hit: number
   completion: number
   estimated: boolean
+  undo?: UndoPreview
+}
+
+export interface UndoPreview {
+  turnSeq: number
+  files: { path: string; created: boolean }[]
+  missing: string[]
+  commands: boolean
 }
 
 export interface MergeItem {
@@ -73,6 +81,7 @@ export type Item =
   | { kind: 'text'; key: string; text: string; live: boolean }
   | ToolItem
   | EndItem
+  | { kind: 'undo'; key: string; result: AgentUndoEvent }
   | { kind: 'note'; key: string; text: string }
 
 export const MODE_NOTE: Record<string, string> = { read_only: '只读', ask: '先问再改', auto: '工作区内自动' }
@@ -120,6 +129,27 @@ function parseArgs(raw: unknown): Record<string, unknown> {
   }
 }
 
+export function readUndo(e: AgentEvent): AgentUndoEvent | undefined {
+  if (e.type !== 'undo' || typeof e.seq !== 'number' || typeof e.turn_seq !== 'number' ||
+      !Array.isArray(e.restored) || !e.skipped || typeof e.skipped !== 'object' || Array.isArray(e.skipped)) return
+  return {
+    type: 'undo',
+    seq: e.seq,
+    t: e.t ?? 0,
+    turn_seq: e.turn_seq,
+    restored: e.restored.filter((path): path is string => typeof path === 'string'),
+    skipped: Object.fromEntries(Object.entries(e.skipped).filter(([, reason]) => typeof reason === 'string')),
+    commands: e.commands === true
+  }
+}
+
+function newTurn(t = 0, seq?: number) {
+  return {
+    seq, start: t, steps: 0, prompt: 0, hit: 0, completion: 0, estimated: false,
+    edits: new Map<string, { created: boolean; backedUp: boolean }>(), commands: false
+  }
+}
+
 export class Transcript {
   items: Item[] = []
   lastSeq = -1
@@ -139,7 +169,9 @@ export class Transcript {
 
   private calls = new Map<string, { name: string; args: Record<string, unknown> }>()
   private tools = new Map<string, ToolItem>()
-  private turn = { start: 0, steps: 0, prompt: 0, hit: 0, completion: 0, estimated: false }
+  private turn = newTurn()
+  private lastEnd: EndItem | undefined
+  private undone = new Set<number>()
   /** 第几轮：工具调用的 id 只在一轮里唯一（有的模型每轮都从 call_0 开始编号），按「轮 + id」找卡片 */
   private turnNo = 0
   private n = 0
@@ -176,7 +208,7 @@ export class Transcript {
       case 'user':
         this.closeText()
         this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
-        this.turn = { start: Number(e.t ?? 0), steps: 0, prompt: 0, hit: 0, completion: 0, estimated: false }
+        this.turn = newTurn(Number(e.t ?? 0), e.seq)
         this.turnNo++
         this.running = true
         break
@@ -264,6 +296,13 @@ export class Transcript {
         }
         if ('exit_code' in e) tool.exitCode = e.exit_code as number | null
         if (typeof e.sub === 'string') tool.sub = { model: String(e.model ?? ''), steps: Number(e.steps ?? 0) }
+        if (e.status === 'ok' && tool.name === 'run_command') this.turn.commands = true
+        if (e.status === 'ok' && (tool.name === 'edit_file' || tool.name === 'write_file') && typeof e.file === 'string') {
+          const previous = this.turn.edits.get(e.file)
+          const backedUp = typeof e.after === 'string' && e.after.length > 0 &&
+            (e.created === true || (typeof e.snap === 'number' && Number.isSafeInteger(e.snap) && e.snap >= 0))
+          this.turn.edits.set(e.file, { created: previous?.created ?? (e.created === true), backedUp: backedUp && (previous?.backedUp ?? true) })
+        }
         break
       }
       case 'compaction':
@@ -277,7 +316,13 @@ export class Transcript {
       case 'turn_end': {
         this.closeText()
         const t = this.turn
-        this.items.push({
+        const undo = t.seq === undefined ? undefined : {
+          turnSeq: t.seq,
+          files: [...t.edits].filter(([, edit]) => edit.backedUp).map(([path, edit]) => ({ path, created: edit.created })),
+          missing: [...t.edits].filter(([, edit]) => !edit.backedUp).map(([path]) => path),
+          commands: t.commands
+        }
+        const end: EndItem = {
           kind: 'end',
           key: this.key(),
           reason: String(e.reason ?? ''),
@@ -287,14 +332,33 @@ export class Transcript {
           prompt: t.prompt,
           hit: t.hit,
           completion: t.completion,
-          estimated: t.estimated
-        })
+          estimated: t.estimated,
+          undo
+        }
+        this.items.push(end)
+        this.lastEnd = end
         // 还在等的卡片（被打断时）不再转圈
         for (const tool of this.tools.values()) if (['pending', 'running', 'asking'].includes(tool.status)) tool.status = 'interrupted'
         this.running = false
         break
       }
+      case 'undo': {
+        const result = readUndo(e)
+        if (result) {
+          this.undone.add(result.turn_seq)
+          this.items.push({ kind: 'undo', key: this.key(), result })
+        }
+        break
+      }
     }
+  }
+
+  /** 只有最近一轮有底片或新文件，且会话停下、没有撤销过时，才可以给用户预览。 */
+  get undoTarget(): EndItem | undefined {
+    const end = this.lastEnd
+    const undo = end?.undo
+    if (!this.running && !this.closed && undo?.files.length && !this.undone.has(undo.turnSeq)) return end
+    return undefined
   }
 
   /** 正在等用户回答的确认 */

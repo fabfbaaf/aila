@@ -38,6 +38,7 @@ class Backend(Protocol):
     async def close(self) -> None: ...
     async def rules(self) -> list[dict[str, Any]]: ...
     async def forget_rule(self, project: str, command: str) -> None: ...
+    async def undo(self, sid: str, turn_seq: int) -> Event: ...
 
 
 class EmbeddedBackend:
@@ -96,7 +97,7 @@ class EmbeddedBackend:
             session = self.rt.agent(sid).session
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
-        return {**session.summary(), "shell": self.rt.shell.label, "events": session.events}
+        return {**session.summary(), "running": self.rt.running(sid), "shell": self.rt.shell.label, "events": session.events}
 
     async def run(self, sid: str, text: str) -> AsyncIterator[Event]:
         try:
@@ -131,6 +132,12 @@ class EmbeddedBackend:
         if command not in self.rt.rules.commands(Path(project)):
             raise BackendError("没有这条记住的命令，可能已经删掉了。")
         self.rt.rules.forget(Path(project), command)
+
+    async def undo(self, sid: str, turn_seq: int) -> Event:
+        try:
+            return self.rt.undo(sid, turn_seq)
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
 
 
 class HttpBackend:
@@ -218,6 +225,9 @@ class HttpBackend:
 
     async def forget_rule(self, project: str, command: str) -> None:
         await self._call("DELETE", "/agent/rules", json={"project": project, "command": command})
+
+    async def undo(self, sid: str, turn_seq: int) -> Event:
+        return await self._call("POST", f"/agent/sessions/{sid}/undo", json={"turn_seq": turn_seq}, timeout=60)
 
 
 def _detail(res: httpx.Response) -> str:

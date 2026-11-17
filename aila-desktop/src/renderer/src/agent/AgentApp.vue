@@ -5,13 +5,14 @@
  */
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef } from 'vue'
 import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
-import { Transcript, endStats, endText, type ToolItem } from './fold'
+import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
 import { createAgentSource, type ProjectChoice } from './source'
 import { buildTrace } from './trace'
 import LedgerPanel from './LedgerPanel.vue'
 import ToolCard from './ToolCard.vue'
 import TraceView from './TraceView.vue'
+import UndoResult from './UndoResult.vue'
 
 const source = createAgentSource()
 const sessions = ref<AgentSessionSummary[]>([])
@@ -28,12 +29,23 @@ const merging = ref('')
 const models = ref<{ coder: string; chat: string; keySet: boolean } | null>(null)
 const scroller = ref<HTMLElement>()
 const input = ref<HTMLTextAreaElement>()
-const streaming = new Set<string>()
+const streaming = reactive(new Set<string>())
+const opening = ref(false)
+let openRequest = 0
+const undoing = reactive(new Set<string>())
+const undoDialog = ref<HTMLDialogElement>()
+const undoPreview = ref<{ sid: string; plan: UndoPreview; branch: string | null } | null>(null)
 
 const running = computed(() => t.value.running)
 const pending = computed(() => t.value.pending)
 const files = computed(() => [...t.value.files.entries()])
 const usage = computed(() => t.value.usage)
+const undoBusy = computed(() => !!current.value && undoing.has(current.value.id))
+const undoTarget = computed(() => {
+  const sid = current.value?.id
+  if (!sid || opening.value || merging.value || streaming.has(sid)) return undefined
+  return t.value.undoTarget
+})
 
 // ---------- 执行轨迹、上下文账本 ----------
 
@@ -90,12 +102,18 @@ async function refreshList(): Promise<void> {
 }
 
 async function open(sid: string): Promise<void> {
+  const request = ++openRequest
+  opening.value = true
+  closeUndoPreview()
   error.value = ''
   if (!sessions.value.some((s) => s.id === sid)) void refreshList() // 刚从别处交过来的任务
   try {
     const s = await source.get(sid)
+    if (request !== openRequest) return
     const tr = reactive(new Transcript())
     for (const e of s.events) tr.apply(e)
+    // 刷新同一个会话时，保留请求期间已经收到的事件（包括撤销结果）。
+    if (current.value?.id === sid) for (const e of t.value.events) tr.apply(e)
     t.value = tr
     current.value = { ...s, events: s.events.length }
     picking.value = false
@@ -109,7 +127,9 @@ async function open(sid: string): Promise<void> {
     scrollToBottom()
     input.value?.focus()
   } catch (err) {
-    error.value = (err as Error).message
+    if (request === openRequest) error.value = (err as Error).message
+  } finally {
+    if (request === openRequest) opening.value = false
   }
 }
 
@@ -133,7 +153,7 @@ async function pickOther(): Promise<void> {
 
 function send(): void {
   const msg = text.value.trim()
-  if (!msg || !current.value) return
+  if (!msg || !current.value || undoBusy.value || opening.value || undoPreview.value) return
   if (running.value) {
     error.value = '她还在做事：等她做完，或者先按 Esc 打断。'
     return
@@ -172,7 +192,7 @@ async function setMode(mode: AgentMode): Promise<void> {
 // ---------- 在新分支上做 ----------
 
 async function mergeNow(runTests: boolean): Promise<void> {
-  if (!current.value || running.value || merging.value) return
+  if (!current.value || running.value || merging.value || undoBusy.value) return
   merging.value = runTests ? '正在跑测试……' : '正在合并……'
   error.value = ''
   try {
@@ -186,7 +206,7 @@ async function mergeNow(runTests: boolean): Promise<void> {
 }
 
 async function discardNow(): Promise<void> {
-  if (!current.value || running.value) return
+  if (!current.value || running.value || undoBusy.value) return
   if (!window.confirm(`放弃分支 ${t.value.branch}？她在分支上还没合并的改动会删掉，你的代码保持原样。`)) return
   try {
     t.value.apply(await source.discard(current.value.id))
@@ -197,12 +217,58 @@ async function discardNow(): Promise<void> {
 }
 
 async function compactNow(): Promise<void> {
-  if (!current.value || running.value) return
+  if (!current.value || running.value || undoBusy.value) return
   try {
     await source.compact(current.value.id)
     await open(current.value.id)
   } catch (err) {
     error.value = (err as Error).message
+  }
+}
+
+// ---------- 撤销最近一轮 ----------
+
+function closeUndoPreview(): void {
+  undoPreview.value = null
+  undoDialog.value?.close()
+}
+
+async function previewUndo(item: EndItem): Promise<void> {
+  const sid = current.value?.id
+  if (!sid || undoBusy.value || !item.undo || undoTarget.value?.key !== item.key || undoPreview.value) return
+  undoPreview.value = { sid, plan: item.undo, branch: t.value.branch }
+  await nextTick()
+  if (undoPreview.value?.sid === sid && !undoDialog.value?.open) undoDialog.value?.showModal()
+}
+
+async function undoNow(): Promise<void> {
+  const preview = undoPreview.value
+  if (!preview) return
+  const { sid, plan } = preview
+  closeUndoPreview()
+  if (current.value?.id !== sid || undoing.has(sid)) return
+  if (undoTarget.value?.undo?.turnSeq !== plan.turnSeq) {
+    error.value = '最近一轮已经变了，重新查看再撤销。'
+    return
+  }
+  undoing.add(sid)
+  error.value = ''
+  try {
+    const result = await source.undo(sid, plan.turnSeq)
+    if (current.value?.id === sid) {
+      t.value.apply(result)
+      loadLedger()
+      void nextTick(scrollToBottom)
+    }
+    void refreshList()
+  } catch (err) {
+    if (current.value?.id === sid && !opening.value) {
+      // 服务拒绝时重读会话，避免继续显示已经过时的轮次。
+      await open(sid)
+      if (current.value?.id === sid && !opening.value) error.value = (err as Error).message
+    }
+  } finally {
+    undoing.delete(sid)
   }
 }
 
@@ -213,8 +279,9 @@ source.onEvent((sid, e) => {
   }
   const near = nearBottom()
   t.value.apply(e)
-  if (e.type === 'user' || e.type === 'turn_end') void refreshList()
-  if (['usage', 'turn_end', 'compaction', 'tool'].includes(e.type)) loadLedger()
+  if (e.type === 'user' || e.type === 'undo' || e.type === 'branch_closed') closeUndoPreview()
+  if (e.type === 'user' || e.type === 'turn_end' || e.type === 'undo') void refreshList()
+  if (['usage', 'turn_end', 'compaction', 'tool', 'undo'].includes(e.type)) loadLedger()
   if (near) void nextTick(scrollToBottom)
 })
 source.onStreamEnd((sid, err) => {
@@ -234,6 +301,7 @@ function onComposerKey(e: KeyboardEvent): void {
 }
 
 function onKey(e: KeyboardEvent): void {
+  if (undoDialog.value?.open) return // 对话框里的 Esc 只取消撤销预览
   const typing = e.target instanceof HTMLTextAreaElement && text.value.length > 0
   const p = pending.value
   if (p?.confirm && !typing) {
@@ -295,7 +363,10 @@ onMounted(async () => {
 // 在主窗口里切到别的页面时，任务页还留着（KeepAlive）：这时不能再听 1 / 2 / Esc，
 // 不然在设置里打个「1」就替你同意了
 onActivated(() => window.addEventListener('keydown', onKey))
-onDeactivated(() => window.removeEventListener('keydown', onKey))
+onDeactivated(() => {
+  window.removeEventListener('keydown', onKey)
+  closeUndoPreview()
+})
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
@@ -374,7 +445,11 @@ onBeforeUnmount(() => {
             <div v-else-if="item.kind === 'end'" class="end" :class="item.reason">
               <span>{{ endMark[item.reason] ?? '■' }} {{ endText(item) }}</span>
               <span class="stats">{{ endStats(item) }}</span>
+              <button v-if="undoTarget?.key === item.key" class="ghost undo-button" :disabled="undoBusy" @click="previewUndo(item)">
+                {{ undoBusy ? '正在撤销…' : '撤销这一轮' }}
+              </button>
             </div>
+            <UndoResult v-else-if="item.kind === 'undo'" :result="item.result" />
             <div v-else class="note">{{ item.text }}</div>
           </template>
           <div v-if="running && !pending" class="working"><i></i><i></i><i></i>她在做……<span>Esc 打断</span></div>
@@ -403,7 +478,7 @@ onBeforeUnmount(() => {
           @keydown="onComposerKey"
         ></textarea>
         <button v-if="running" class="stop" @click="interrupt">停下 <kbd>Esc</kbd></button>
-        <button v-else class="send" :disabled="!text.trim()" @click="send">发送</button>
+        <button v-else class="send" :disabled="!text.trim() || undoBusy || opening" @click="send">发送</button>
       </footer>
     </main>
 
@@ -412,8 +487,8 @@ onBeforeUnmount(() => {
         <h3>分支</h3>
         <p class="dim">她在 <code>{{ t.branch }}</code> 上改，你的代码一个字都没动。觉得可以了就合并：先跑项目的测试，全过、而且你这期间没改过同样的文件，才写回你的代码（不替你提交）。</p>
         <div class="branch-actions">
-          <button class="merge-btn" :disabled="running || !!merging" @click="mergeNow(true)">{{ merging || '跑测试并合并' }}</button>
-          <button class="ghost" :disabled="running || !!merging" @click="discardNow">放弃分支</button>
+          <button class="merge-btn" :disabled="running || !!merging || undoBusy" @click="mergeNow(true)">{{ merging || '跑测试并合并' }}</button>
+          <button class="ghost" :disabled="running || !!merging || undoBusy" @click="discardNow">放弃分支</button>
         </div>
       </section>
       <section>
@@ -435,9 +510,38 @@ onBeforeUnmount(() => {
       <section>
         <h3>上下文账本</h3>
         <LedgerPanel :ledger="ledger" :steps="t.steps" :totals="usage" />
-        <button class="ghost" :disabled="running" title="用一份交接说明代替前面的对话（快满时会自动做）" @click="compactNow">压缩上下文</button>
+        <button class="ghost" :disabled="running || undoBusy" title="用一份交接说明代替前面的对话（快满时会自动做）" @click="compactNow">压缩上下文</button>
       </section>
     </aside>
+
+    <dialog
+      ref="undoDialog"
+      class="undo-dialog"
+      aria-labelledby="undo-heading"
+      aria-describedby="undo-summary"
+      @close="!undoDialog?.open && (undoPreview = null)"
+    >
+      <template v-if="undoPreview">
+        <h2 id="undo-heading">撤销最近一轮？</h2>
+        <p id="undo-summary">以下文件会退回到这一轮开始前。你之后改过的文件会跳过。</p>
+        <ul>
+          <li v-for="file in undoPreview.plan.files" :key="file.path">
+            <code>{{ file.path }}</code> · {{ file.created ? '删除这一轮新建的文件' : '恢复原内容' }}
+          </li>
+        </ul>
+        <p v-if="undoPreview.plan.missing.length" class="dim">
+          未留底的文件会跳过：{{ undoPreview.plan.missing.join('、') }}
+        </p>
+        <p v-if="undoPreview.branch" class="dim">
+          只处理分支 <code>{{ undoPreview.branch }}</code> 的临时目录，已经合并到项目里的改动需要另外处理。
+        </p>
+        <p v-if="undoPreview.plan.commands" class="dim">这一轮还跑过命令，命令做的事无法撤销。</p>
+        <div class="undo-actions">
+          <button type="button" class="ghost" autofocus @click="closeUndoPreview">取消</button>
+          <button type="button" class="ghost undo-confirm" @click="undoNow">确认撤销</button>
+        </div>
+      </template>
+    </dialog>
 
     <div v-if="picking" class="overlay" @click.self="current && (picking = false)">
       <div class="picker">
@@ -768,8 +872,55 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
   margin: 10px 0 4px;
   color: var(--ok);
+}
+
+.undo-button {
+  margin-left: auto;
+  font-size: 12.5px;
+}
+
+.undo-dialog {
+  box-sizing: border-box;
+  width: min(540px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--side);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.undo-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.undo-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.undo-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.undo-dialog :focus-visible,
+.undo-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.undo-actions .undo-confirm {
+  border-color: var(--warn);
+  color: var(--warn);
 }
 
 .end.error {

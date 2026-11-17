@@ -56,8 +56,10 @@ class Workspace:
         path = (p if p.is_absolute() else self.root / p).resolve()
         if path != self.root and not path.is_relative_to(self.root):
             raise WorkspaceError(f"{raw} 不在项目目录里，不能碰。")
-        if for_write and ".git" in path.relative_to(self.root).parts:
+        if for_write and any(os.path.normcase(part) == ".git" for part in path.relative_to(self.root).parts):
             raise WorkspaceError("不能改 .git 里面的文件。")
+        if for_write and os.name == "nt" and any(":" in part for part in path.relative_to(self.root).parts):
+            raise WorkspaceError("不能改文件的备用数据流。")
         return path
 
     def rel(self, path: Path) -> str:
@@ -72,18 +74,24 @@ class Workspace:
 
     # ---------- 读过才能改 ----------
 
-    def remember(self, path: Path) -> None:
+    def remember(self, path: Path, data: bytes | None = None) -> None:
         st = path.stat()
-        self.seen[path] = FileState(st.st_mtime_ns, st.st_size, _digest(path))
+        digest = _digest(path) if data is None else digest_bytes(data)
+        self.seen[path] = FileState(st.st_mtime_ns, st.st_size, digest)
 
-    def check_fresh(self, path: Path) -> None:
-        """改已有的文件之前：这个会话里读过，并且之后没被改过"""
+    def check_fresh(self, path: Path) -> bytes:
+        """改已有文件前检查读过的版本，返回这一版的原始字节。"""
         state = self.seen.get(path)
         if state is None:
             raise WorkspaceError(f"还没读过 {self.rel(path)}，先用 read_file 读一下再改。")
+        changed = f"{self.rel(path)} 在你读过之后被改过（可能是用户自己改的），先重新读一下再改。"
         st = path.stat()
-        if st.st_mtime_ns != state.mtime_ns or st.st_size != state.size or _digest(path) != state.digest:
-            raise WorkspaceError(f"{self.rel(path)} 在你读过之后被改过（可能是用户自己改的），先重新读一下再改。")
+        if st.st_mtime_ns != state.mtime_ns or st.st_size != state.size:
+            raise WorkspaceError(changed)
+        data = path.read_bytes()
+        if digest_bytes(data) != state.digest:
+            raise WorkspaceError(changed)
+        return data
 
     # ---------- 列文件 ----------
 
@@ -134,9 +142,12 @@ def glob_match(rel: str, pattern: str) -> bool:
 
 def read_text(path: Path) -> tuple[str, str]:
     """读文本文件，返回（内容，编码）。认得 UTF-8（带不带 BOM）和 Windows 上常见的 GBK"""
-    raw = path.read_bytes()
+    return decode_text(path.read_bytes(), path.name)
+
+
+def decode_text(raw: bytes, name: str) -> tuple[str, str]:
     if b"\0" in raw[:8192]:
-        raise WorkspaceError(f"{path.name} 是二进制文件，读不了。")
+        raise WorkspaceError(f"{name} 是二进制文件，读不了。")
     if raw.startswith(b"\xef\xbb\xbf"):
         return raw[3:].decode("utf-8", "replace"), "utf-8-sig"
     try:
@@ -157,5 +168,9 @@ def write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     path.write_bytes(data)
 
 
+def digest_bytes(data: bytes) -> str:
+    return hashlib.blake2b(data, digest_size=16).hexdigest()
+
+
 def _digest(path: Path) -> str:
-    return hashlib.blake2b(path.read_bytes(), digest_size=16).hexdigest()
+    return digest_bytes(path.read_bytes())

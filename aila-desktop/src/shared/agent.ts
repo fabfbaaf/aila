@@ -45,6 +45,17 @@ export interface AgentEvent {
   [key: string]: unknown
 }
 
+/** 撤销只追加这一条结果，turn_seq 指向这一轮的 user 事件。 */
+export interface AgentUndoEvent extends AgentEvent {
+  type: 'undo'
+  seq: number
+  t: number
+  turn_seq: number
+  restored: string[]
+  skipped: Record<string, string>
+  commands: boolean
+}
+
 export interface AgentSession extends Omit<AgentSessionSummary, 'events'> {
   events: AgentEvent[]
 }

@@ -596,6 +596,11 @@ function registerIpc(): void {
     fromAgent(e) && sidOk(sid) ? agentRelay.merge(sid, runTests !== false) : notAllowed
   )
   ipcMain.handle('agent:discard', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.discard(sid) : notAllowed))
+  ipcMain.handle('agent:undo', (e, sid: unknown, turnSeq: unknown) =>
+    fromAgent(e) && sidOk(sid) && typeof turnSeq === 'number' && Number.isSafeInteger(turnSeq) && turnSeq >= 0
+      ? agentRelay.undo(sid, turnSeq)
+      : notAllowed
+  )
   ipcMain.handle('agent:rename', (e, sid: unknown, title: unknown) => {
     if (!fromAgent(e) || !sidOk(sid)) return notAllowed
     if (typeof title !== 'string' || !title.trim() || Array.from(title).length > 100) {

@@ -12,7 +12,8 @@ import type {
   AgentMode,
   AgentProgress,
   AgentSession,
-  AgentSessionSummary
+  AgentSessionSummary,
+  AgentUndoEvent
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 
@@ -68,6 +69,11 @@ export class AgentRelay {
   /** 放弃分支（你的代码保持原样） */
   discard(sid: string): Promise<AiResult<AgentEvent>> {
     return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/discard`, undefined, 60000)
+  }
+
+  /** 用用户确认过的轮次发请求，期间有新的一轮就由服务拒绝。 */
+  undo(sid: string, turnSeq: number): Promise<AiResult<AgentUndoEvent>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/undo`, { turn_seq: turnSeq }, 60000)
   }
 
   /** 改名只追加标题事件，历史和模型消息保持原样 */

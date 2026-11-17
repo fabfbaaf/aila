@@ -18,6 +18,7 @@
   mode         权限模式变了
   title        用户改了会话标题（不进模型消息）
   turn_end     一轮结束（done / max_steps / interrupted / error）
+  undo         撤销已完成的一轮，结果放到下一句用户消息前
   merge        在新分支上做时：跑测试、合并回你的代码的结果
   branch_closed  分支放弃了（这个会话之后不再接任务）
 """
@@ -155,6 +156,36 @@ class Session:
         }
 
 
+def latest_turn(events: list[Event]) -> list[Event]:
+    """取最新的一轮（含 user 和 turn_end），不回退到更早的轮次。"""
+    start = next((i for i in range(len(events) - 1, -1, -1) if events[i]["type"] == "user"), None)
+    if start is None:
+        return []
+    for end in range(start + 1, len(events)):
+        if events[end]["type"] == "turn_end":
+            return events[start : end + 1]
+    return []
+
+
+def turn_edits(turn: list[Event]) -> list[Event]:
+    """只从该轮已经执行完成的两种文件工具取改动记录。"""
+    return [e for e in turn if e["type"] == "tool" and e.get("status") == "ok"
+            and e.get("name") in ("edit_file", "write_file") and e.get("file")]
+
+
+def _undo_note(event: Event) -> str:
+    restored = event["restored"]
+    if restored:
+        text = "用户撤销了你上一轮对这些文件的改动，文件已经恢复成改之前的样子：" + "、".join(restored) + "。"
+    else:
+        text = "用户尝试撤销你上一轮的文件改动，没有文件被恢复。"
+    if skipped := event["skipped"]:
+        text += "没恢复的：" + "、".join(f"{file}（{reason}）" for file, reason in skipped.items()) + "。"
+    if event["commands"]:
+        text += "这一轮还跑过命令，命令做的事没有撤销。"
+    return f"（{text}）"
+
+
 def derive_messages(system: str, events: list[Event]) -> list[Message]:
     """事件日志 → 发给模型的消息。纯函数：同样的事件永远得到同样的消息；
     日志只追加，所以消息也只追加（压缩除外），每一步的请求开头都和上一步一样"""
@@ -172,10 +203,22 @@ def derive_messages(system: str, events: list[Event]) -> list[Message]:
         messages.append({"role": "user", "content": f"{head}<之前的进展>\n{summary}\n</之前的进展>"})
         pending_context = None
 
-    for e in events[base:]:
+    pending_undo: list[str] = []
+    # 压缩可能在撤销之后、下一句用户消息之前发生，仍要把撤销说明留给那一句。
+    for index, e in enumerate(events[1:], 1):
         kind = e["type"]
+        if kind == "undo":
+            pending_undo.append(_undo_note(e))
+            continue
+        if index < base:
+            if kind == "user":
+                pending_undo.clear()
+            continue
         if kind == "user":
             text = e["text"]
+            if pending_undo:
+                text = "\n\n".join([*pending_undo, text])
+                pending_undo.clear()
             if pending_context:
                 text = f"{pending_context}\n\n{text}"
             pending_context = None
@@ -243,11 +286,12 @@ class SessionStore:
         session = self.get(sid)
         if session is None:
             return False
-        sublogs = session.path.with_suffix(".sub")
-        if sublogs.is_symlink():
-            sublogs.unlink()
-        elif sublogs.is_dir():
-            shutil.rmtree(sublogs)
+        for suffix in (".sub", ".snap"):
+            folder = session.path.with_suffix(suffix)
+            if folder.is_symlink():
+                folder.unlink()
+            elif folder.is_dir():
+                shutil.rmtree(folder)
         session.path.unlink(missing_ok=True)
         self._open.pop(sid, None)
         return True

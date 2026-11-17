@@ -10,6 +10,13 @@ vi.mock('electron', () => ({
 }))
 
 describe('会话管理的预加载桥', () => {
+  it('撤销只转发会话和已确认的轮次', async () => {
+    const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
+    const api = exposed?.[1] as AilaApi
+    await api.agentUndo('s1', 4)
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:undo', 's1', 4)
+  })
+
   it('改名和删除只调用各自的固定 IPC', async () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi
