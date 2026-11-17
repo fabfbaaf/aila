@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from ..runtime.mcp import McpError
 from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 
@@ -45,6 +46,8 @@ class Backend(Protocol):
     async def memory(self, cwd: str) -> list[dict[str, Any]]: ...
     async def remember(self, cwd: str, text: str) -> dict[str, Any]: ...
     async def forget_memory(self, cwd: str, note_id: str) -> None: ...
+    async def mcp_status(self) -> list[dict[str, Any]]: ...
+    async def mcp_restart(self, name: str) -> list[dict[str, Any]]: ...
 
 
 class EmbeddedBackend:
@@ -152,6 +155,17 @@ class EmbeddedBackend:
     async def forget_memory(self, cwd: str, note_id: str) -> None:
         if not self.rt.memory.remove(cwd, note_id):
             raise BackendError("没有这条记忆，可能已经删掉了。")
+
+    async def mcp_status(self) -> list[dict[str, Any]]:
+        await self.rt.mcp.wait_ready()
+        return self.rt.mcp.status()
+
+    async def mcp_restart(self, name: str) -> list[dict[str, Any]]:
+        try:
+            await self.rt.mcp.restart(name)
+        except McpError as err:
+            raise BackendError(str(err)) from err
+        return self.rt.mcp.status()
 
     async def undo(self, sid: str, turn_seq: int) -> Event:
         try:
@@ -261,6 +275,12 @@ class HttpBackend:
 
     async def forget_memory(self, cwd: str, note_id: str) -> None:
         await self._call("DELETE", "/agent/memory", json={"cwd": cwd, "id": note_id})
+
+    async def mcp_status(self) -> list[dict[str, Any]]:
+        return await self._call("GET", "/agent/mcp")
+
+    async def mcp_restart(self, name: str) -> list[dict[str, Any]]:
+        return await self._call("POST", f"/agent/mcp/{name}/restart", timeout=90)
 
     async def undo(self, sid: str, turn_seq: int) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/undo", json={"turn_seq": turn_seq}, timeout=60)

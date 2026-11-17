@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+# 本机测试版打包时生成的记录（npm run pack:local）
+build-local/
 *.log
 models/*.vrm
 # 手势识别的 WebAssembly 和模型：npm run setup:gestures 生成

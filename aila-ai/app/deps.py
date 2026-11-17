@@ -86,7 +86,7 @@ def get_runtime() -> Runtime:
     config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
     # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
     return Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
-                   fast_factory=lambda: get_coder_fast_model())
+                   fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config)
 
 
 def _load(kind: str, build: Any) -> Any:

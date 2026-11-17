@@ -48,6 +48,7 @@ import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
+import { validMcpName } from '../shared/mcp'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { validBudget } from '../shared/budget'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
@@ -643,6 +644,21 @@ function registerIpc(): void {
   ipcMain.handle('agent:compact', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.compact(sid) : notAllowed))
   ipcMain.handle('agent:context', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.context(sid) : notAllowed))
   ipcMain.handle('agent:rules', (e) => (fromAgent(e) ? getAgentRules(AI_URL) : notAllowed))
+  // MCP 外部工具服务：加服务就是让这台电脑跑一个程序，只认主窗口
+  const mcpJson = (json: unknown): json is string => typeof json === 'string' && json.length >= 2 && json.length <= 50000
+  ipcMain.handle('agent:mcp', (e) => (fromAgent(e) ? agentRelay.mcp() : notAllowed))
+  ipcMain.handle('agent:mcp:preview', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpPreview(json) : notAllowed))
+  ipcMain.handle('agent:mcp:import', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpImport(json) : notAllowed))
+  ipcMain.handle('agent:mcp:restart', (e, name: unknown) => (fromAgent(e) && validMcpName(name) ? agentRelay.mcpRestart(name) : notAllowed))
+  ipcMain.handle('agent:mcp:disable', (e, name: unknown, disabled: unknown) =>
+    fromAgent(e) && validMcpName(name) && typeof disabled === 'boolean' ? agentRelay.mcpDisable(name, disabled) : notAllowed
+  )
+  ipcMain.handle('agent:mcp:remove', (e, name: unknown) => (fromAgent(e) && validMcpName(name) ? agentRelay.mcpRemove(name) : notAllowed))
+  ipcMain.handle('agent:mcp:forget', (e, name: unknown, tool: unknown) =>
+    fromAgent(e) && validMcpName(name) && typeof tool === 'string' && tool.length > 0 && tool.length <= 200
+      ? agentRelay.mcpForget(name, tool)
+      : notAllowed
+  )
   ipcMain.handle('agent:rules:forget', (e, project: unknown, command: unknown) => {
     if (!fromAgent(e)) return notAllowed
     if (typeof project !== 'string' || !project.trim() || project.length > 1000 ||

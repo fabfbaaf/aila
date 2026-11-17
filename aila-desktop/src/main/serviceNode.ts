@@ -1,6 +1,6 @@
 /** 托管服务的 Node 适配器：定位可执行文件、直连本地健康接口、仅结束自己创建的进程树。 */
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { request } from 'node:http'
 import { request as secureRequest } from 'node:https'
 import { createConnection } from 'node:net'
@@ -16,15 +16,29 @@ export interface ServiceLocation {
   platform: NodeJS.Platform
   file: (path: string) => boolean
   directory: (path: string) => boolean
+  /** 本机测试版（npm run pack:local）打包时记下的仓库 aila-ai 目录；正式安装包没有这个 */
+  localDir?: string
 }
 
 /** 安装包里的启动方式由任务 06 补充；现在找不到时给出 missing，而不是猜一个系统 Python。 */
 export function packagedCommand(): ServiceCommand | null { return null }
 
+/** 本机测试版的记录：resources/local-service.json 里的 {"aiDir": "..."}；没有、读不了、格式不对都当没有 */
+export function readLocalService(resourcesPath: string, read = (path: string) => readFileSync(path, 'utf8')): string | undefined {
+  try {
+    const data = JSON.parse(read(join(resourcesPath, 'local-service.json'))) as { aiDir?: unknown }
+    return typeof data.aiDir === 'string' && data.aiDir ? data.aiDir : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function locateService(location: ServiceLocation): ServiceCommand | null {
   const { env, platform } = location
-  if (location.packaged && !env['AILA_AI_PYTHON'] && !env['AILA_AI_DIR']) return packagedCommand()
-  const cwd = resolve(env['AILA_AI_DIR'] || join(location.appPath, '..', 'aila-ai'))
+  const explicit = env['AILA_AI_PYTHON'] || env['AILA_AI_DIR']
+  if (location.packaged && !explicit && !location.localDir) return packagedCommand()
+  // 本机测试版：用打包时记下的仓库目录（还是这台电脑上的虚拟环境）
+  const cwd = resolve(env['AILA_AI_DIR'] || (location.packaged && location.localDir) || join(location.appPath, '..', 'aila-ai'))
   const executable = resolve(env['AILA_AI_PYTHON'] || join(cwd, '.venv', platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'))
   return location.directory(cwd) && location.file(executable) ? { executable, args: ['-m', 'app'], cwd } : null
 }
@@ -80,9 +94,10 @@ interface OwnedProcess extends ServiceProcess { child: ChildProcess }
 
 export function createServiceKeeper(options: { packaged: boolean; appPath: string; url: string; changed: (state: ServiceState) => void }): ServiceKeeper {
   const endpoint = new URL(options.url)
+  const localDir = options.packaged ? readLocalService(process.resourcesPath) : undefined
   return new ServiceKeeper({
     port: endpoint.port || (endpoint.protocol === 'https:' ? '443' : '80'),
-    command: () => locateService({ ...options, env: process.env, platform: process.platform, file: (path) => hasType(path, false), directory: (path) => hasType(path, true) }),
+    command: () => locateService({ ...options, localDir, env: process.env, platform: process.platform, file: (path) => hasType(path, false), directory: (path) => hasType(path, true) }),
     now: Date.now,
     later: (callback, delay) => { const timer = setTimeout(callback, delay); return () => clearTimeout(timer) },
     health: (signal) => checkServiceHealth(options.url, signal),

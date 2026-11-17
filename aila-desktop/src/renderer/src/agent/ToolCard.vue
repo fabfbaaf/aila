@@ -52,7 +52,11 @@ const outputMore = computed(() => Math.max(0, props.item.content.split('\n').sli
 const confirmLines = computed(() => (props.item.confirm?.detail ?? '').split('\n'))
 const confirmIsDiff = computed(() => props.item.confirm?.kind === 'edit' && confirmLines.value.some((l) => l.startsWith('@@')))
 const rememberLabel = computed(() =>
-  props.item.confirm?.kind === 'edit' ? '可以，这个会话里改文件不用再问' : '可以，这条命令在这个项目里不用再问'
+  props.item.confirm?.kind === 'edit'
+    ? '可以，这个会话里改文件不用再问'
+    : props.item.confirm?.kind === 'mcp'
+      ? '可以，这个外部工具以后都不用问'
+      : '可以，这条命令在这个项目里不用再问'
 )
 const answered = computed(() => {
   const c = props.item.confirm

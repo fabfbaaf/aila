@@ -237,10 +237,38 @@ class Terminal:
             self.console.print(Text(f"{i:>2}. {note['text']}  ", style="").append(who, style="dim"))
         self.console.print(Text("/memory forget 编号 删掉一条；改动从下一个会话起生效", style="dim"))
 
+    async def _mcp(self, arg: str) -> None:
+        """/mcp：MCP 服务的状态和工具；/mcp restart 名字"""
+        verb, _, name = arg.strip().partition(" ")
+        if verb == "restart" and name.strip():
+            self.renderer.waiting(f"正在重启 {name.strip()}…")
+            try:
+                servers = await self.backend.mcp_restart(name.strip())
+            finally:
+                self.renderer.stop_waiting()
+        elif verb:
+            self.console.print(Text("用法：/mcp 看状态，/mcp restart 名字 重启", style="dim"))
+            return
+        else:
+            servers = await self.backend.mcp_status()
+        if not servers:
+            self.console.print(Text("还没有 MCP 服务。在设置页 → 编程 → 外部工具（MCP）里贴配置加一个（也可以手改 aila-ai/mcp.json，和对话共用）。", style="dim"))
+            return
+        labels = {"ready": "在运行", "starting": "正在启动", "failed": "没起来", "disabled": "停用了", "unsupported": "不支持", "off": "没启动"}
+        for s in servers:
+            line = Text(f"{s['name']}  ", style="bold").append(labels.get(s["status"], s["status"]), style="green" if s["status"] == "ready" else "yellow")
+            line.append(f"  {s['command']}", style="dim")
+            self.console.print(line)
+            if s.get("error"):
+                self.console.print(Text(f"  {s['error']}", style="red"))
+            for t in s.get("tools", []):
+                tags = "（只读）" if t.get("readOnly") else "（以后都不问）" if t.get("alwaysAllow") else ""
+                self.console.print(Text(f"  · {t['name']}{tags}  ", style="").append(t.get("description", "")[:80], style="dim"))
+
     async def _confirm(self, e: dict[str, Any]) -> None:
         options = [("1", "可以")]
         if e.get("can_remember"):
-            what = "这个会话里改文件" if e.get("kind") == "edit" else "这条命令在这个项目里"
+            what = {"edit": "这个会话里改文件", "mcp": "这个外部工具"}.get(str(e.get("kind")), "这条命令在这个项目里")
             options.append(("2", f"可以，{what}以后都不用问"))
         options.append(("3" if e.get("can_remember") else "2", "不要（Esc）——停下来，告诉她怎么做"))
         self.console.print(Text("   ".join(f"{k} {v}" for k, v in options), style="yellow"))
@@ -366,6 +394,8 @@ class Terminal:
                         self.console.print(Text(f"删掉了记住的命令：{command}；下次执行时重新按权限模式确认。", style="dim"))
             elif name == "/memory":
                 await self._memory(arg)
+            elif name == "/mcp":
+                await self._mcp(arg)
             elif name == "/undo":
                 await self._undo()
             elif name == "/budget":

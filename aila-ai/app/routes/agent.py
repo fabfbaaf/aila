@@ -17,6 +17,13 @@
   GET    /agent/memory?cwd=                项目记忆：她在这个项目里记下的约定（下次开会话时带上）
   POST   /agent/memory                     加一条 {cwd, text}
   DELETE /agent/memory                     删一条 {cwd, id}
+  GET    /agent/mcp                        MCP 外部工具服务：状态、工具、最近的日志（env 只给名字，不给值）
+  POST   /agent/mcp/preview                贴进来的配置先看一眼 {json}：要启动的命令（不保存）
+  POST   /agent/mcp/import                 保存贴进来的配置并启动 {json}
+  POST   /agent/mcp/{name}/restart         重启一个服务
+  PUT    /agent/mcp/{name}/disabled        停用 / 启用 {disabled}
+  DELETE /agent/mcp/{name}                 删掉一个服务
+  DELETE /agent/mcp/{name}/allow           撤销「这个工具以后都不用问」 {tool}
 
 和其他接口一样，只接受本机页面和本机程序的请求（见 security.py）。
 """
@@ -33,6 +40,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from ..deps import get_runtime
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
+from ..runtime.mcp import McpError, parse_import
 from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 from ..runtime.session import Event
@@ -319,4 +327,89 @@ async def forget_memory(req: ForgetNote, rt: Runtime = Depends(get_runtime)) -> 
     if not rt.memory.remove(req.cwd, req.id):
         raise HTTPException(404, "没有这条记忆，可能已经删掉了。")
     return {"ok": True}
+
+
+# ---------- MCP 外部工具服务 ----------
+
+
+class McpImport(BaseModel):
+    json_text: str = Field(alias="json", min_length=2, max_length=50000)
+
+
+class McpDisabled(BaseModel):
+    disabled: bool
+
+
+class McpForget(BaseModel):
+    tool: str = Field(min_length=1, max_length=200)
+
+
+def _mcp_name(name: str) -> str:
+    if not name or len(name) > 32 or not all(c.isalnum() or c in "_-" for c in name):
+        raise HTTPException(404, "没有这个服务。")
+    return name
+
+
+@router.get("/mcp")
+async def mcp_status(rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    await rt.mcp.ensure_started()
+    return rt.mcp.status()
+
+
+@router.post("/mcp/preview")
+async def mcp_preview(req: McpImport, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """保存之前给你看：会用什么命令启动哪些服务（由代码从配置拼出来）"""
+    try:
+        parsed = parse_import(req.json_text)
+    except McpError as err:
+        raise HTTPException(422, str(err)) from err
+    existing = rt.mcp.configs()
+    return [{"name": c.name, "command": c.command_line(), "envKeys": sorted(c.env), "exists": c.name in existing,
+             "supported": bool(c.command)} for c in parsed.values()]
+
+
+@router.post("/mcp/import")
+async def mcp_import(req: McpImport, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    try:
+        parsed = parse_import(req.json_text)
+    except McpError as err:
+        raise HTTPException(422, str(err)) from err
+    await rt.mcp.ensure_started()
+    for config in parsed.values():
+        await rt.mcp.save(config, keep_env=True)
+    return rt.mcp.status()
+
+
+@router.post("/mcp/{name}/restart")
+async def mcp_restart(name: str, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    try:
+        await rt.mcp.restart(_mcp_name(name))
+    except McpError as err:
+        raise HTTPException(404, str(err)) from err
+    return rt.mcp.status()
+
+
+@router.put("/mcp/{name}/disabled")
+async def mcp_disable(name: str, req: McpDisabled, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    try:
+        await rt.mcp.set_disabled(_mcp_name(name), req.disabled)
+    except McpError as err:
+        raise HTTPException(404, str(err)) from err
+    return rt.mcp.status()
+
+
+@router.delete("/mcp/{name}")
+async def mcp_remove(name: str, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    try:
+        await rt.mcp.remove(_mcp_name(name))
+    except McpError as err:
+        raise HTTPException(404, str(err)) from err
+    return rt.mcp.status()
+
+
+@router.delete("/mcp/{name}/allow")
+async def mcp_forget(name: str, req: McpForget, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    if not rt.mcp.forget(_mcp_name(name), req.tool):
+        raise HTTPException(404, "这个工具没有设成「以后都不用问」。")
+    return rt.mcp.status()
 

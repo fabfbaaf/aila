@@ -21,6 +21,7 @@ from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
 from .ledger import context_ledger
+from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, remember_tool
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
@@ -59,6 +60,7 @@ class Runtime:
         config: AgentConfig | None = None,
         code_projects: Callable[[], CodeProjects] | None = None,
         fast_factory: Callable[[], CoderModel] | None = None,
+        mcp_config: Path | None = None,
     ) -> None:
         self.store = SessionStore(data_dir / "sessions")
         # 「在新分支上做」的临时目录（git worktree）
@@ -68,6 +70,8 @@ class Runtime:
         self.rules = Rules(data_dir / "agent_rules.json")
         # 项目记忆：她学到的项目约定，下次在这个项目开会话时放进环境说明
         self.memory = ProjectMemory(data_dir / "project_memory.json")
+        # MCP 外部工具服务（和对话共用 aila-ai/mcp.json，你在设置页加）：第一次用到时在后台开起来
+        self.mcp = McpManager(mcp_config or data_dir / "mcp.json")
         self.model_factory = model_factory
         # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
         self.fast_factory = fast_factory or model_factory
@@ -131,9 +135,10 @@ class Runtime:
             session,
             self.model_factory(),
             # 记忆按你原来的项目记（在新分支上做时也是）
-            CodingTools(workspace, self.shell, [*extra, explorer.tool(), remember_tool(self.memory, session.cwd, session.id)],
+            CodingTools(workspace, self.shell, [*extra, explorer.tool(), remember_tool(self.memory, session.cwd, session.id),
+                                                *bridge_tools(self.mcp)],
                         snapshots=Snapshots(session.path.with_suffix(".snap"))),
-            Policy(session.cwd, self.rules, mode),  # type: ignore[arg-type]
+            Policy(session.cwd, self.rules, mode, self.mcp),  # type: ignore[arg-type]
             self.confirms,
             self.config,
             self.hooks,
@@ -344,7 +349,15 @@ class Runtime:
         events = agent.turn(text.strip(), extra)
         if extra and extra.get("review"):
             events = self._read_only(sid, agent, events)
+        events = self._with_mcp(agent, events)
         self._tasks[sid] = asyncio.create_task(self._drive(sid, events))
+
+    async def _with_mcp(self, agent: Agent, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
+        """一轮开始前对齐 MCP 工具：等还在启动的服务一会儿，工具变了才换（一轮里不变，前缀缓存稳定）"""
+        await self.mcp.wait_ready()
+        agent.tools.replace_prefixed(TOOL_PREFIX, bridge_tools(self.mcp))
+        async for event in events:
+            yield event
 
     async def _read_only(self, sid: str, agent: Agent, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
         """/review 这一轮按只读模式把关；结束（做完、出错、打断）后换回原来的模式，
@@ -461,6 +474,7 @@ class Runtime:
             except BaseException:
                 pass
         await asyncio.gather(*(agent.tools.jobs.shutdown() for agent in self._agents.values()))
+        await self.mcp.stop_all()
 
 
 def _unfinished(session: Session) -> bool:

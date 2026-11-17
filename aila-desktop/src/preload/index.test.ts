@@ -47,6 +47,19 @@ describe('会话管理的预加载桥', () => {
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:memory-forget', 'C:/shop', 'ab12')
   })
 
+  it('MCP 管理只走固定通道', async () => {
+    const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
+    const api = exposed?.[1] as AilaApi
+    await api.agentMcp()
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:mcp')
+    await api.agentMcpImport('{}')
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:mcp:import', '{}')
+    await api.agentMcpDisable('db', false)
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:mcp:disable', 'db', false)
+    await api.agentMcpForget('db', 'query')
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:mcp:forget', 'db', 'query')
+  })
+
   it('搜索和审查改动只多传固定的参数', async () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi

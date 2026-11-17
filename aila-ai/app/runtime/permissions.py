@@ -9,6 +9,8 @@
 - 危险命令（删除、强推、改系统设置、下载就执行……）始终要问，也不能「以后都允许」
 - 读可能存着密钥的文件要问
 - 记项目记忆（以后每个会话都会带上）：只读不让记，先问再改要问，自动模式直接记
+- MCP 外部工具（mcp.py）：服务标了只读的不用问；其他的只读模式不让用，另外两种模式都要问
+  （它们在项目以外做事），可以选「这个工具以后都不用问」
 - 问的时候可以选「以后都允许」：改文件 → 这个会话里改文件不再问；命令 → 这个项目里这条命令（一字不差）以后不再问，
   记在 data/agent_rules.json
 
@@ -20,7 +22,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from .workspace import SAFE_ENV_EXAMPLES, SECRET_NAME
 
@@ -129,11 +131,19 @@ class Rules:
                 self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+class McpRules(Protocol):
+    """MCP 工具的「以后都不用问」（存在 mcp.json 的 alwaysAllow 里）"""
+
+    def allowed(self, full_name: str) -> bool: ...
+    def allow(self, full_name: str) -> None: ...
+
+
 class Policy:
-    def __init__(self, project: Path, rules: Rules, mode: Mode = "ask") -> None:
+    def __init__(self, project: Path, rules: Rules, mode: Mode = "ask", mcp: McpRules | None = None) -> None:
         self.project = project
         self.rules = rules
         self.mode: Mode = mode
+        self.mcp = mcp
         self.edits_allowed = False  # 这个会话里选过「改文件以后都允许」
 
     def decide(self, kind: str, command: str = "") -> Decision:
@@ -149,6 +159,15 @@ class Policy:
             return Decision("ask", can_remember=True)
         if kind == "command":
             return self._command(command)
+        if kind == "mcp_read":
+            return Decision("allow")
+        if kind == "mcp":
+            # command 这里是工具名（mcp__服务__工具）
+            if self.mode == "read_only":
+                return Decision("deny", "现在是只读模式，这个外部工具可能会改东西，不能用。")
+            if self.mcp and self.mcp.allowed(command):
+                return Decision("allow")
+            return Decision("ask", "这是外部工具（MCP），会在项目以外做事", can_remember=True)
         if kind == "memory":
             if self.mode == "read_only":
                 return Decision("deny", "现在是只读模式，不能记项目记忆。")
@@ -180,3 +199,5 @@ class Policy:
             self.edits_allowed = True
         elif kind == "command" and command.strip() and not dangerous(command):
             self.rules.allow(self.project, command.strip())
+        elif kind == "mcp" and self.mcp:
+            self.mcp.allow(command)

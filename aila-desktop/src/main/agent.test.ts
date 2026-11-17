@@ -148,6 +148,32 @@ describe('工作窗口的转发（主进程）', () => {
     }))
   })
 
+  it('MCP 服务的管理请求：服务名按路径编码，配置原样放在请求体里', async () => {
+    const fetchMock = vi.fn(async () => new Response('[]'))
+    vi.stubGlobal('fetch', fetchMock)
+    const { r } = relay()
+    await r.mcp()
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp', expect.objectContaining({ method: 'GET' }))
+    await r.mcpPreview('{"mcpServers":{}}')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/preview', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ json: '{"mcpServers":{}}' })
+    }))
+    await r.mcpImport('{"a":{"command":"npx"}}')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/import', expect.objectContaining({ method: 'POST' }))
+    await r.mcpRestart('my-db')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/my-db/restart', expect.objectContaining({ method: 'POST' }))
+    await r.mcpDisable('my-db', true)
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/my-db/disabled', expect.objectContaining({
+      method: 'PUT', body: JSON.stringify({ disabled: true })
+    }))
+    await r.mcpForget('my-db', 'query')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/my-db/allow', expect.objectContaining({
+      method: 'DELETE', body: JSON.stringify({ tool: 'query' })
+    }))
+    await r.mcpRemove('my-db')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/mcp/my-db', expect.objectContaining({ method: 'DELETE' }))
+  })
+
   it('删不了时保留等确认的状态，删除后清理它', async () => {
     const fetchMock = fakeService(TURN.slice(0, 5))
     const { r, seen } = relay()

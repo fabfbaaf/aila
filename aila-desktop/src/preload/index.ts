@@ -24,6 +24,7 @@ import type {
   VoicePrefs
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
+import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { AgentActivity, AgentBudgetEvent, AgentEvent, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
@@ -162,6 +163,13 @@ const api = {
   agentPickFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:pick-folder'),
   agentTakeFocus: (): Promise<string | null> => ipcRenderer.invoke('agent:take-focus'),
   agentRules: (): Promise<AiResult<AgentRuleGroup[]>> => ipcRenderer.invoke('agent:rules'),
+  agentMcp: (): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp'),
+  agentMcpPreview: (json: string): Promise<AiResult<McpPreviewItem[]>> => ipcRenderer.invoke('agent:mcp:preview', json),
+  agentMcpImport: (json: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:import', json),
+  agentMcpRestart: (name: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:restart', name),
+  agentMcpDisable: (name: string, disabled: boolean): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:disable', name, disabled),
+  agentMcpRemove: (name: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:remove', name),
+  agentMcpForget: (name: string, tool: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:forget', name, tool),
   agentForgetRule: (project: string, command: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:rules:forget', project, command),
   onAgentEvent: (cb: (sid: string, event: AgentEvent) => void): Unsubscribe => listen('agent:event', cb),
   onAgentStreamEnd: (cb: (sid: string, error?: string) => void): Unsubscribe => listen('agent:stream-end', cb),

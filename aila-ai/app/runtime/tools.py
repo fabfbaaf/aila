@@ -8,6 +8,8 @@
   command  跑命令                      按权限模式和命令本身
   meta     待办清单                    不用问
   memory   记项目记忆（memory.py）     只读不让记，先问再改要问，自动模式直接记
+  mcp      MCP 外部工具（mcp.py）      只读模式不让用，其他模式要问（可以以后都不问）
+  mcp_read 服务标了只读的 MCP 工具     不用问
 """
 
 import difflib
@@ -99,6 +101,18 @@ class CodingTools:
     @property
     def specs(self) -> list[dict[str, Any]]:
         return [t.spec for t in self.tools.values()]
+
+    def replace_prefixed(self, prefix: str, tools: list[CodingTool]) -> bool:
+        """换掉名字以 prefix 开头的那组工具（MCP），放在最后；返回有没有变（变了前缀缓存会断一次）"""
+        old = [name for name in self.tools if name.startswith(prefix)]
+        new = [t.name for t in tools]
+        if old == new and all(self.tools[t.name].spec == t.spec for t in tools):
+            return False
+        for name in old:
+            del self.tools[name]
+        for tool in tools:
+            self.tools[tool.name] = tool
+        return True
 
     # ---------- 定义（顺序固定：工具列表是请求开头的一部分，变了缓存就不命中） ----------
 

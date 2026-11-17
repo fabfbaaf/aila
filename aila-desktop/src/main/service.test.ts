@@ -4,7 +4,7 @@ import { createServer as httpServer } from 'node:http'
 import { createServer as tcpServer, type Server } from 'node:net'
 import { join, resolve } from 'node:path'
 import { ServiceKeeper, type Health, type ServiceCommand, type ServiceDependencies, type ServiceOutput, type ServiceProcess } from './service'
-import { checkServiceHealth, locateService, packagedCommand } from './serviceNode'
+import { checkServiceHealth, locateService, packagedCommand, readLocalService } from './serviceNode'
 import { registerServiceIpc } from './serviceIpc'
 
 const COMMAND = { executable: 'python', args: ['-m', 'app'], cwd: '/aila-ai' }
@@ -251,6 +251,17 @@ describe('服务定位与 IPC 边界', () => {
     expect(locateService({ ...location, directory: () => false })).toBeNull()
     expect(locateService({ ...location, packaged: true })).toBeNull()
     expect(packagedCommand()).toBeNull()
+  })
+
+  it('本机测试版用打包时记下的仓库目录，开发时不看这个记录', () => {
+    const location = { packaged: true, appPath: resolve('dist/app.asar'), env: {}, platform: 'win32' as const, file: () => true, directory: () => true }
+    const local = resolve('C:/code/aila/aila-ai')
+    expect(locateService({ ...location, localDir: local })).toMatchObject({ cwd: local, executable: join(local, '.venv', 'Scripts', 'python.exe') })
+    expect(locateService({ ...location, localDir: local, env: { AILA_AI_DIR: 'custom' } })?.cwd).toBe(resolve('custom'))
+    expect(locateService({ ...location, packaged: false, localDir: local })?.cwd).toBe(join(location.appPath, '..', 'aila-ai'))
+    expect(readLocalService('res', () => '{"aiDir":"C:/code/aila/aila-ai"}')).toBe('C:/code/aila/aila-ai')
+    for (const bad of ['{', '[]', '{"aiDir":3}', '{"aiDir":""}']) expect(readLocalService('res', () => bad)).toBeUndefined()
+    expect(readLocalService('res', () => { throw new Error('ENOENT') })).toBeUndefined()
   })
 
   it('状态谁都可读；其他窗口不能取日志或重启', async () => {

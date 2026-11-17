@@ -1,9 +1,10 @@
 <script setup lang="ts">
-/** 编程权限说明和记住的命令；这里只能撤销授权，删除后立即按原有权限规则判断。 */
+/** 编程权限说明、记住的命令（只能撤销授权，删除后立即按原有权限规则判断）、外部工具（MCP）。 */
 import { computed, onActivated, ref } from 'vue'
 import { MODE_HINTS, MODE_LABELS, type AgentMode } from '../../../../shared/agent'
 import type { AgentRuleGroup } from '../../../../shared/settings'
 import { loadAgentRules, removeAgentRule } from '../agentRules'
+import McpCard from './McpCard.vue'
 
 const modes: AgentMode[] = ['read_only', 'ask', 'auto']
 const groups = ref<AgentRuleGroup[]>([])
@@ -88,6 +89,8 @@ onActivated(load)
         </ul>
       </section>
     </div>
+
+    <McpCard />
   </section>
 </template>
 

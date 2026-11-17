@@ -18,6 +18,7 @@ import type {
   AgentUndoEvent
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
+import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 
 export interface RelayHooks {
   /** 一个事件 → 工作窗口 */
@@ -114,6 +115,36 @@ export class AgentRelay {
 
   forgetMemory(cwd: string, id: string): Promise<AiResult<{ ok: boolean }>> {
     return this.call('DELETE', '/agent/memory', { cwd, id })
+  }
+
+  /** MCP 外部工具服务：状态、先看一眼、保存并启动、重启、停用、删除、撤销「以后都不用问」 */
+  mcp(): Promise<AiResult<McpServerInfo[]>> {
+    return this.call('GET', '/agent/mcp', undefined, 30000)
+  }
+
+  mcpPreview(json: string): Promise<AiResult<McpPreviewItem[]>> {
+    return this.call('POST', '/agent/mcp/preview', { json })
+  }
+
+  /** 启动要等服务起来（npx 第一次会下载），给长一点 */
+  mcpImport(json: string): Promise<AiResult<McpServerInfo[]>> {
+    return this.call('POST', '/agent/mcp/import', { json }, 180000)
+  }
+
+  mcpRestart(name: string): Promise<AiResult<McpServerInfo[]>> {
+    return this.call('POST', `/agent/mcp/${encodeURIComponent(name)}/restart`, undefined, 120000)
+  }
+
+  mcpDisable(name: string, disabled: boolean): Promise<AiResult<McpServerInfo[]>> {
+    return this.call('PUT', `/agent/mcp/${encodeURIComponent(name)}/disabled`, { disabled }, 120000)
+  }
+
+  mcpRemove(name: string): Promise<AiResult<McpServerInfo[]>> {
+    return this.call('DELETE', `/agent/mcp/${encodeURIComponent(name)}`, undefined, 30000)
+  }
+
+  mcpForget(name: string, tool: string): Promise<AiResult<McpServerInfo[]>> {
+    return this.call('DELETE', `/agent/mcp/${encodeURIComponent(name)}/allow`, { tool })
   }
 
   /** 开一个会话并马上开始做（屏幕上的报错、星图交过来的任务） */

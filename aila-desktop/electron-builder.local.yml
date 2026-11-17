@@ -1,0 +1,20 @@
+# 本机测试版的打包配置（npm run pack:local，见 scripts/pack-local.mjs）。
+# 只打桌面端，AI 服务用这台电脑上仓库里的虚拟环境；正式安装包另做（任务 06）。
+appId: com.aila.desktop
+productName: 艾拉
+directories:
+  output: dist/local
+asar: true
+files:
+  - out/**/*
+extraResources:
+  # 打包时记下的 aila-ai 目录（serviceNode.ts 的 readLocalService 读它）
+  - from: build-local/local-service.json
+    to: local-service.json
+# 复用 npm 已经装好的 Electron，打包时不用再下载
+electronDist: node_modules/electron/dist
+win:
+  target: dir
+  # 测试版不改 exe 的图标和版本信息，也就不用下载签名工具
+  signAndEditExecutable: false
+publish: null

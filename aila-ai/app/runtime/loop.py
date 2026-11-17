@@ -206,7 +206,8 @@ class Agent:
             yield self._tool_event(call, Outcome("工具参数不是合法的 JSON，请重新调用。", ok=False))
             return
         kind = tool.kind(args)
-        command = str(args.get("command", "")) if kind == "command" else ""
+        # 按命令原文判断的是命令；MCP 工具按工具名判断「以后都不用问」
+        command = str(args.get("command", "")) if kind == "command" else call.name if kind == "mcp" else ""
         decision = self.policy.decide(kind, command)
 
         if decision.verdict == "deny":

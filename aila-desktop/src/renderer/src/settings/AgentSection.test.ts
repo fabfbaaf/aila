@@ -5,6 +5,11 @@ import AgentSection from './sections/AgentSection.vue'
 
 const api = vi.hoisted(() => ({ loadAgentRules: vi.fn(), removeAgentRule: vi.fn() }))
 vi.mock('./agentRules', () => api)
+// 外部工具（MCP）那张卡片单独测；这里只要它不去连服务
+vi.mock('./mcp', () => {
+  const empty = async () => ({ ok: true, data: [] })
+  return { loadMcp: empty, previewMcp: empty, importMcp: empty, restartMcp: empty, disableMcp: empty, removeMcp: empty, forgetMcpTool: empty, MCP_EXAMPLE: '' }
+})
 
 interface ViewNode {
   tag: string

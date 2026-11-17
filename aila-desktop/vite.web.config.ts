@@ -17,7 +17,8 @@ export default defineConfig({
     // 对话请求转给本地 AI 服务（桌面版由主进程转发，不走这里）
     proxy: {
       '/ai': {
-        target: 'http://127.0.0.1:8765',
+        // AILA_AI_URL：换一个 AI 服务（比如测试用的另一个端口），和桌面版主进程用同一个变量
+        target: process.env['AILA_AI_URL'] ?? 'http://127.0.0.1:8765',
         ws: true, // 语音的 WebSocket 也转过去
         rewrite: (p) => p.replace(/^\/ai/, ''),
         // 连不上 AI 服务时回 502（Vite 默认回 500），好和「服务内部出错」区分开
