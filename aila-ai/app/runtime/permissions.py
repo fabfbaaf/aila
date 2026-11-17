@@ -8,6 +8,7 @@
 不管哪种模式：
 - 危险命令（删除、强推、改系统设置、下载就执行……）始终要问，也不能「以后都允许」
 - 读可能存着密钥的文件要问
+- 记项目记忆（以后每个会话都会带上）：只读不让记，先问再改要问，自动模式直接记
 - 问的时候可以选「以后都允许」：改文件 → 这个会话里改文件不再问；命令 → 这个项目里这条命令（一字不差）以后不再问，
   记在 data/agent_rules.json
 
@@ -148,6 +149,12 @@ class Policy:
             return Decision("ask", can_remember=True)
         if kind == "command":
             return self._command(command)
+        if kind == "memory":
+            if self.mode == "read_only":
+                return Decision("deny", "现在是只读模式，不能记项目记忆。")
+            if self.mode == "auto":
+                return Decision("allow")
+            return Decision("ask", "记下的话以后每个会话都会带上")
         return Decision("ask")
 
     def _command(self, command: str) -> Decision:

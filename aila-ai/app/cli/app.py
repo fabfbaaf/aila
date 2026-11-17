@@ -206,6 +206,37 @@ class Terminal:
             return "error"
         return self.renderer.reason
 
+    async def _memory(self, arg: str) -> None:
+        """/memory：看、加、删这个项目的记忆（新记的从下一个会话起带上）"""
+        cwd = str(self.info["cwd"])
+        verb, _, rest = arg.strip().partition(" ")
+        if verb == "add":
+            if not rest.strip():
+                self.console.print(Text("要记什么？/memory add 一句话", style="dim"))
+                return
+            note = await self.backend.remember(cwd, rest)
+            self.console.print(Text(f"记下了：{note['text']}（下一个会话起带上）" if note.get("added") else "这条已经记过了。", style="dim"))
+            return
+        notes = await self.backend.memory(cwd)
+        if verb == "forget":
+            if not rest.strip().isdigit() or not 0 < int(rest) <= len(notes):
+                self.console.print(Text("用 /memory 看编号，再用 /memory forget 编号 删掉一条。", style="dim"))
+                return
+            note = notes[int(rest) - 1]
+            await self.backend.forget_memory(cwd, note["id"])
+            self.console.print(Text(f"删掉了：{note['text']}", style="dim"))
+            return
+        if verb:
+            self.console.print(Text("用法：/memory 看，/memory add 一句话，/memory forget 编号", style="dim"))
+            return
+        if not notes:
+            self.console.print(Text("这个项目还没有记忆。她弄清了测试命令、代码约定这类事会自己记，你也可以 /memory add 一句话。", style="dim"))
+            return
+        for i, note in enumerate(notes, 1):
+            who = "她记的" if note.get("source") == "agent" else "你加的"
+            self.console.print(Text(f"{i:>2}. {note['text']}  ", style="").append(who, style="dim"))
+        self.console.print(Text("/memory forget 编号 删掉一条；改动从下一个会话起生效", style="dim"))
+
     async def _confirm(self, e: dict[str, Any]) -> None:
         options = [("1", "可以")]
         if e.get("can_remember"):
@@ -333,6 +364,8 @@ class Terminal:
                         command = commands[int(parts[1]) - 1]
                         await self.backend.forget_rule(mine["project"], command)
                         self.console.print(Text(f"删掉了记住的命令：{command}；下次执行时重新按权限模式确认。", style="dim"))
+            elif name == "/memory":
+                await self._memory(arg)
             elif name == "/undo":
                 await self._undo()
             elif name == "/budget":

@@ -4,11 +4,13 @@
 import json
 import os
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
 
+from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 
 Event = dict[str, Any]
@@ -40,6 +42,9 @@ class Backend(Protocol):
     async def forget_rule(self, project: str, command: str) -> None: ...
     async def undo(self, sid: str, turn_seq: int) -> Event: ...
     async def set_budget(self, sid: str, amount: float | None) -> Event: ...
+    async def memory(self, cwd: str) -> list[dict[str, Any]]: ...
+    async def remember(self, cwd: str, text: str) -> dict[str, Any]: ...
+    async def forget_memory(self, cwd: str, note_id: str) -> None: ...
 
 
 class EmbeddedBackend:
@@ -133,6 +138,20 @@ class EmbeddedBackend:
         if command not in self.rt.rules.commands(Path(project)):
             raise BackendError("没有这条记住的命令，可能已经删掉了。")
         self.rt.rules.forget(Path(project), command)
+
+    async def memory(self, cwd: str) -> list[dict[str, Any]]:
+        return [asdict(n) for n in self.rt.memory.notes(cwd)]
+
+    async def remember(self, cwd: str, text: str) -> dict[str, Any]:
+        try:
+            note, added = self.rt.memory.add(cwd, text, "user")
+        except MemoryError_ as err:
+            raise BackendError(str(err)) from err
+        return {**asdict(note), "added": added}
+
+    async def forget_memory(self, cwd: str, note_id: str) -> None:
+        if not self.rt.memory.remove(cwd, note_id):
+            raise BackendError("没有这条记忆，可能已经删掉了。")
 
     async def undo(self, sid: str, turn_seq: int) -> Event:
         try:
@@ -233,6 +252,15 @@ class HttpBackend:
 
     async def forget_rule(self, project: str, command: str) -> None:
         await self._call("DELETE", "/agent/rules", json={"project": project, "command": command})
+
+    async def memory(self, cwd: str) -> list[dict[str, Any]]:
+        return await self._call("GET", "/agent/memory", params={"cwd": cwd})
+
+    async def remember(self, cwd: str, text: str) -> dict[str, Any]:
+        return await self._call("POST", "/agent/memory", json={"cwd": cwd, "text": text})
+
+    async def forget_memory(self, cwd: str, note_id: str) -> None:
+        await self._call("DELETE", "/agent/memory", json={"cwd": cwd, "id": note_id})
 
     async def undo(self, sid: str, turn_seq: int) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/undo", json={"turn_seq": turn_seq}, timeout=60)

@@ -21,6 +21,7 @@ from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
 from .ledger import context_ledger
+from .memory import ProjectMemory, remember_tool
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, Mode, Policy, Rules
 from .pricing import validate_budget
@@ -65,6 +66,8 @@ class Runtime:
         # 代码库（代码 RAG + 调用图）：给了就让她能按意思搜、按报错定位、看调用关系
         self.code_projects = code_projects
         self.rules = Rules(data_dir / "agent_rules.json")
+        # 项目记忆：她学到的项目约定，下次在这个项目开会话时放进环境说明
+        self.memory = ProjectMemory(data_dir / "project_memory.json")
         self.model_factory = model_factory
         # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
         self.fast_factory = fast_factory or model_factory
@@ -97,13 +100,14 @@ class Runtime:
         root = root.resolve()
         model = self.model_factory()
         if not isolate:
-            session = self.store.create(root, mode, model.name, build_context(root, self.shell.label))
+            session = self.store.create(root, mode, model.name, build_context(root, self.shell.label) + self.memory.context(root))
         else:
             try:
                 info = open_branch(root, self.work_dir)
             except BranchError as err:
                 raise RuntimeError_(str(err)) from err
-            context = build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
+            context = (build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
+                       + self.memory.context(root))
             session = self.store.create(root, mode, model.name, context, {"branch": asdict(info)})
         if budget is not None:
             session.append({"type": "budget", "amount": budget})
@@ -126,7 +130,8 @@ class Runtime:
         agent = Agent(
             session,
             self.model_factory(),
-            CodingTools(workspace, self.shell, [*extra, explorer.tool()],
+            # 记忆按你原来的项目记（在新分支上做时也是）
+            CodingTools(workspace, self.shell, [*extra, explorer.tool(), remember_tool(self.memory, session.cwd, session.id)],
                         snapshots=Snapshots(session.path.with_suffix(".snap"))),
             Policy(session.cwd, self.rules, mode),  # type: ignore[arg-type]
             self.confirms,

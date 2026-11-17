@@ -7,6 +7,7 @@
   edit     改文件、写文件              按权限模式
   command  跑命令                      按权限模式和命令本身
   meta     待办清单                    不用问
+  memory   记项目记忆（memory.py）     只读不让记，先问再改要问，自动模式直接记
 """
 
 import difflib

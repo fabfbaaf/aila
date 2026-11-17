@@ -19,6 +19,7 @@ COMMANDS: dict[str, str] = {
     "/changes": "这个会话里她改过的文件",
     "/init": "让她读一遍项目，写一份 AGENTS.md（以后每个会话开头都会带上）",
     "/review": "让她只读地审一遍没提交的改动，按严重程度列出问题：/review 重点（可以不写）",
+    "/memory": "项目记忆（下次在这个项目开会话时带上）：/memory 看，/memory add 一句话，/memory forget 编号",
     "/merge": "在新分支上做时：跑测试、合并回你的代码；/merge 直接 = 不跑测试直接合并",
     "/discard": "在新分支上做时：放弃分支，你的代码保持原样",
     "/rules": "看这个项目记住的命令；/rules forget 编号 删掉一条，下次执行时重新按权限模式确认",

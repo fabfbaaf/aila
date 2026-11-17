@@ -616,6 +616,17 @@ function registerIpc(): void {
     return agentRelay.rename(sid, title)
   })
   ipcMain.handle('agent:delete', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.delete(sid) : notAllowed))
+  // 项目记忆：写进去的话以后每个会话都会带上，所以也只认主窗口
+  const cwdOk = (cwd: unknown): cwd is string => typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 1000
+  ipcMain.handle('agent:memory', (e, cwd: unknown) => (fromAgent(e) && cwdOk(cwd) ? agentRelay.memory(cwd) : notAllowed))
+  ipcMain.handle('agent:memory-add', (e, cwd: unknown, text: unknown) => {
+    if (!fromAgent(e) || !cwdOk(cwd)) return notAllowed
+    if (typeof text !== 'string' || !text.trim() || text.length > 2000) return { ok: false, error: '要记的话不能是空的，也别太长。' }
+    return agentRelay.addMemory(cwd, text)
+  })
+  ipcMain.handle('agent:memory-forget', (e, cwd: unknown, id: unknown) =>
+    fromAgent(e) && cwdOk(cwd) && typeof id === 'string' && /^[\w-]{1,64}$/.test(id) ? agentRelay.forgetMemory(cwd, id) : notAllowed
+  )
   ipcMain.on('agent:send', (e, sid: unknown, text: unknown, review: unknown) => {
     if (!fromAgent(e) || !sidOk(sid) || typeof text !== 'string') return
     // /review 可以不带话；普通的一句话不能是空的

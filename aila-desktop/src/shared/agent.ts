@@ -68,6 +68,16 @@ export interface AgentSession extends Omit<AgentSessionSummary, 'events'> {
   events: AgentEvent[]
 }
 
+/** 项目记忆的一条（GET /agent/memory?cwd=）：下次在这个项目开会话时放进开头 */
+export interface AgentMemoryNote {
+  id: string
+  text: string
+  t: number
+  /** agent：她记的；user：你加的 */
+  source: 'agent' | 'user'
+  session?: string
+}
+
 /** 上下文账本（GET /agent/sessions/{id}/context）：下一步发给模型的上下文由哪几块组成 */
 export interface AgentLedger {
   /** 模型的上下文窗口（token），快满（compact_at）时压缩 */

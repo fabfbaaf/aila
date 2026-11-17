@@ -14,11 +14,15 @@
   POST   /agent/sessions/{id}/compact      手动压缩上下文
   GET    /agent/sessions/{id}/context      上下文账本：上下文由哪几块组成、各占多少
   POST   /agent/confirm                    回答她的确认 {id, approved, remember}
+  GET    /agent/memory?cwd=                项目记忆：她在这个项目里记下的约定（下次开会话时带上）
+  POST   /agent/memory                     加一条 {cwd, text}
+  DELETE /agent/memory                     删一条 {cwd, id}
 
 和其他接口一样，只接受本机页面和本机程序的请求（见 security.py）。
 """
 
 import json
+from dataclasses import asdict
 from collections.abc import AsyncIterator
 from typing import Literal
 
@@ -29,6 +33,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from ..deps import get_runtime
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
+from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 from ..runtime.session import Event
 
@@ -279,3 +284,39 @@ async def set_budget(sid: str, req: SetBudget, rt: Runtime = Depends(get_runtime
         return rt.set_budget(sid, req.amount)
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
+
+
+# ---------- 项目记忆 ----------
+
+
+class MemoryNote(BaseModel):
+    cwd: str = Field(min_length=1, max_length=1000)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ForgetNote(BaseModel):
+    cwd: str = Field(min_length=1, max_length=1000)
+    id: str = Field(min_length=1, max_length=64)
+
+
+@router.get("/memory")
+async def list_memory(cwd: str, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """这个项目记下的话，早的在前"""
+    return [asdict(n) for n in rt.memory.notes(cwd)]
+
+
+@router.post("/memory", status_code=201)
+async def add_memory(req: MemoryNote, rt: Runtime = Depends(get_runtime)) -> dict:
+    try:
+        note, added = rt.memory.add(req.cwd, req.text, "user")
+    except MemoryError_ as err:
+        raise HTTPException(422, str(err)) from err
+    return {**asdict(note), "added": added}
+
+
+@router.delete("/memory")
+async def forget_memory(req: ForgetNote, rt: Runtime = Depends(get_runtime)) -> dict:
+    if not rt.memory.remove(req.cwd, req.id):
+        raise HTTPException(404, "没有这条记忆，可能已经删掉了。")
+    return {"ok": True}
+

@@ -129,6 +129,25 @@ describe('工作窗口的转发（主进程）', () => {
     }))
   })
 
+  it('项目记忆按项目目录看、加、删，目录放在查询参数或请求体里', async () => {
+    const fetchMock = vi.fn(async () => new Response('[]'))
+    vi.stubGlobal('fetch', fetchMock)
+    const { r } = relay()
+    await r.memory('C:\\code\\shop & co')
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'http://ai/agent/memory?cwd=C%3A%5Ccode%5Cshop%20%26%20co',
+      expect.objectContaining({ method: 'GET' })
+    )
+    await r.addMemory('C:/shop', '改完跑 npm test')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/memory', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', text: '改完跑 npm test' })
+    }))
+    await r.forgetMemory('C:/shop', 'ab12')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/memory', expect.objectContaining({
+      method: 'DELETE', body: JSON.stringify({ cwd: 'C:/shop', id: 'ab12' })
+    }))
+  })
+
   it('删不了时保留等确认的状态，删除后清理它', async () => {
     const fetchMock = fakeService(TURN.slice(0, 5))
     const { r, seen } = relay()

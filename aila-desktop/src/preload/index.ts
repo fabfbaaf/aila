@@ -24,7 +24,7 @@ import type {
   VoicePrefs
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
-import type { AgentActivity, AgentBudgetEvent, AgentEvent, AgentLedger, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../shared/agent'
+import type { AgentActivity, AgentBudgetEvent, AgentEvent, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
@@ -144,6 +144,10 @@ const api = {
   /** 仅主窗口：改会话标题、删除会话 */
   agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
   agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),
+  agentMemory: (cwd: string): Promise<AiResult<AgentMemoryNote[]>> => ipcRenderer.invoke('agent:memory', cwd),
+  agentRemember: (cwd: string, text: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> =>
+    ipcRenderer.invoke('agent:memory-add', cwd, text),
+  agentForgetMemory: (cwd: string, id: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:memory-forget', cwd, id),
   /** 说一句话开始一轮；事件从 onAgentEvent 来 */
   agentSend: (sid: string, text: string, review = false): void => ipcRenderer.send('agent:send', sid, text, review),
   /** 接上一个会话：补发 after 之后的事件，正在做的话接着推 */

@@ -3,9 +3,10 @@
  * 工作窗口：在这里给她编程任务。
  * 左边是会话（终端里用 aila 开的也在这里；能搜、改名、删除），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
  * 输入框下面的「审查改动」（或者输入 /review）让她只读地审一遍没提交的改动。
+ * 右边的「项目记忆」是她在这个项目里记下的约定（你也能加、删），下次在这个项目开任务时放进开头。
  */
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
 import { createAgentSource, type ProjectChoice } from './source'
@@ -55,6 +56,12 @@ const deleteDialog = ref<HTMLDialogElement>()
 const deleteTarget = ref<AgentSessionSummary | null>(null)
 const deleting = ref(false)
 let searchTimer = 0
+
+// 右边：项目记忆（按项目，不按会话）
+const notes = ref<AgentMemoryNote[]>([])
+const noteText = ref('')
+const noteBusy = ref(false)
+let notesFor = ''
 
 const running = computed(() => t.value.running)
 const pending = computed(() => t.value.pending)
@@ -151,6 +158,7 @@ async function open(sid: string): Promise<void> {
     picking.value = false
     ledger.value = null
     loadLedger()
+    void loadNotes()
     if (s.running && !streaming.has(sid)) {
       streaming.add(sid)
       source.watch(sid, tr.lastSeq) // 正在做（可能是终端里开的）：接上实时事件
@@ -253,6 +261,7 @@ async function deleteNow(): Promise<void> {
       current.value = null
       t.value = reactive(new Transcript())
       ledger.value = null
+      notes.value = []
     }
     await refreshList()
     if (!current.value) {
@@ -269,6 +278,50 @@ async function deleteNow(): Promise<void> {
 
 function closeMenus(): void {
   menuFor.value = ''
+}
+
+// ---------- 项目记忆 ----------
+
+async function loadNotes(): Promise<void> {
+  const cwd = current.value?.cwd
+  notesFor = cwd ?? ''
+  if (!cwd) {
+    notes.value = []
+    return
+  }
+  try {
+    const list = await source.memory(cwd)
+    if (notesFor === cwd) notes.value = list
+  } catch {
+    // 取不到就先不显示，下次打开会话再取
+  }
+}
+
+async function addNote(): Promise<void> {
+  const cwd = current.value?.cwd
+  const text = noteText.value.trim()
+  if (!cwd || !text || noteBusy.value) return
+  noteBusy.value = true
+  try {
+    await source.remember(cwd, text)
+    noteText.value = ''
+    await loadNotes()
+  } catch (err) {
+    error.value = (err as Error).message
+  } finally {
+    noteBusy.value = false
+  }
+}
+
+async function forgetNote(note: AgentMemoryNote): Promise<void> {
+  const cwd = current.value?.cwd
+  if (!cwd) return
+  try {
+    await source.forgetMemory(cwd, note.id)
+  } catch (err) {
+    error.value = (err as Error).message
+  }
+  await loadNotes()
 }
 
 // ---------- 说话、确认、打断 ----------
@@ -424,6 +477,7 @@ source.onEvent((sid, e) => {
   if (e.type === 'user' || e.type === 'undo' || e.type === 'branch_closed') closeUndoPreview()
   if (e.type === 'user' || e.type === 'usage' || e.type === 'turn_end' || e.type === 'undo' || e.type === 'budget') void refreshList()
   if (['usage', 'turn_end', 'compaction', 'tool', 'undo'].includes(e.type)) loadLedger()
+  if (e.type === 'tool' && e.memory) void loadNotes() // 她刚记了一条
   if (near) void nextTick(scrollToBottom)
 })
 source.onStreamEnd((sid, err) => {
@@ -703,6 +757,20 @@ onBeforeUnmount(() => {
           <li v-for="[path, n] in files" :key="path" :title="path">{{ path }}<span v-if="n > 1" class="dim"> ×{{ n }}</span></li>
         </ul>
         <p v-else class="dim">还没有</p>
+      </section>
+      <section class="memory">
+        <h3>项目记忆</h3>
+        <ul v-if="notes.length" class="notes">
+          <li v-for="n in notes" :key="n.id" :class="n.source" :title="n.source === 'agent' ? '她记的' : '你加的'">
+            <span>{{ n.text }}</span>
+            <button class="x" title="删掉这条" aria-label="删掉这条" @click="forgetNote(n)"><Icon name="close" :size="12" :stroke="2" /></button>
+          </li>
+        </ul>
+        <p v-else class="dim">她弄清了测试命令、代码约定这类事会记在这里，下次在这个项目开任务时带上。</p>
+        <form class="note-add" @submit.prevent="addNote">
+          <input v-model="noteText" maxlength="300" placeholder="自己加一条……" aria-label="加一条项目记忆" @keydown.stop />
+          <button type="submit" :disabled="!noteText.trim() || noteBusy">记下</button>
+        </form>
       </section>
       <section>
         <h3>上下文账本</h3>
@@ -1718,6 +1786,103 @@ code {
   font-family: var(--ui-mono);
   font-size: 12px;
   color: var(--text-2);
+}
+
+/* 项目记忆：一条一行，可以换行；左边小点分她记的（紫）和你加的（青） */
+.notes li {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 0 5px 12px;
+  overflow: visible;
+  white-space: normal;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.notes li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 11px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.notes li.user::before {
+  background: var(--ui-cyan);
+}
+
+.notes li span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notes .x {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ui-r-xs);
+  background: none;
+  color: var(--ui-faint);
+  opacity: 0;
+  transition: opacity var(--ui-fast), color var(--ui-fast);
+}
+
+.notes li:hover .x,
+.notes .x:focus-visible {
+  opacity: 1;
+}
+
+.notes .x:hover {
+  color: var(--bad);
+}
+
+.note-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.note-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r-s);
+  background: var(--ui-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.note-add input:focus {
+  border-color: var(--accent-line);
+}
+
+.note-add button {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r-s);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.note-add button:hover:enabled {
+  border-color: var(--accent-line);
+  background: var(--accent-bg);
+  color: var(--text);
 }
 
 .rate b {

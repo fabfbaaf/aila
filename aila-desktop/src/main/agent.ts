@@ -10,6 +10,7 @@ import type {
   AgentBudgetEvent,
   AgentEvent,
   AgentLedger,
+  AgentMemoryNote,
   AgentMode,
   AgentProgress,
   AgentSession,
@@ -100,6 +101,19 @@ export class AgentRelay {
       if (this.pendingConfirm?.sid === sid) this.clearPending()
     }
     return result
+  }
+
+  /** 项目记忆：按项目目录看、加、删（改动从下一个会话起放进开头） */
+  memory(cwd: string): Promise<AiResult<AgentMemoryNote[]>> {
+    return this.call('GET', `/agent/memory?cwd=${encodeURIComponent(cwd)}`)
+  }
+
+  addMemory(cwd: string, text: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> {
+    return this.call('POST', '/agent/memory', { cwd, text })
+  }
+
+  forgetMemory(cwd: string, id: string): Promise<AiResult<{ ok: boolean }>> {
+    return this.call('DELETE', '/agent/memory', { cwd, id })
   }
 
   /** 开一个会话并马上开始做（屏幕上的报错、星图交过来的任务） */
