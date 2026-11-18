@@ -82,6 +82,9 @@ class KeyWatcher:
 
 
 class SlashCompleter(Completer):
+    def __init__(self, computer: Callable[[], bool] = lambda: False) -> None:
+        self.computer = computer
+
     def get_completions(self, document, complete_event):  # noqa: ANN001, ANN201
         text = document.text_before_cursor
         if text.startswith("/") and " " not in text:
@@ -91,6 +94,8 @@ class SlashCompleter(Completer):
         elif text.startswith("/mode "):
             word = text[6:]
             for mode in MODES:
+                if self.computer() and mode == "auto":
+                    continue
                 if mode.startswith(word):
                     yield Completion(mode, start_position=-len(word), display_meta=MODE_LABELS[mode])
 
@@ -115,7 +120,7 @@ class Terminal:
         self._resume_ids: list[str] | None = None
         self.prompt: PromptSession[str] = PromptSession(
             history=FileHistory(str(history)) if history else InMemoryHistory(),
-            completer=SlashCompleter(),
+            completer=SlashCompleter(lambda: self.info.get("kind") == "computer"),
             complete_while_typing=True,
             key_bindings=self._bindings(),
             bottom_toolbar=self._toolbar,
@@ -135,7 +140,7 @@ class Terminal:
 
         @kb.add("s-tab")
         def _(event: Any) -> None:
-            mode = next_mode(self.info.get("mode", "ask")) or "ask"
+            mode = next_mode(self.info.get("mode", "ask"), computer=self.info.get("kind") == "computer") or "ask"
             self.info["mode"] = mode
             asyncio.ensure_future(self._quiet_set_mode(mode))
             event.app.invalidate()
@@ -239,6 +244,8 @@ class Terminal:
 
     async def _memory(self, arg: str) -> None:
         """/memory：看、加、删这个项目的记忆（新记的从下一个会话起带上）"""
+        if self.info.get("kind") == "computer":
+            raise BackendError("电脑任务不使用项目记忆。")
         cwd = str(self.info["cwd"])
         verb, _, rest = arg.strip().partition(" ")
         if verb == "add":
@@ -299,7 +306,8 @@ class Terminal:
     async def _confirm(self, e: dict[str, Any]) -> None:
         options = [("1", "可以")]
         if e.get("can_remember"):
-            what = {"edit": "这个会话里改文件", "mcp": "这个外部工具"}.get(str(e.get("kind")), "这条命令在这个项目里")
+            scope = "电脑任务" if self.info.get("kind") == "computer" else "这个项目"
+            what = {"edit": "这个会话里改文件", "mcp": "这个外部工具"}.get(str(e.get("kind")), f"这条命令在{scope}里")
             options.append(("2", f"可以，{what}以后都不用问"))
         options.append(("3" if e.get("can_remember") else "2", "不要（Esc）——停下来，告诉她怎么做"))
         self.console.print(Text("   ".join(f"{k} {v}" for k, v in options), style="yellow"))
@@ -328,9 +336,10 @@ class Terminal:
             if name == "/help":
                 self._help()
             elif name == "/mode":
-                mode = next_mode(self.info.get("mode", "ask"), arg)
+                mode = next_mode(self.info.get("mode", "ask"), arg, computer=self.info.get("kind") == "computer")
                 if mode is None:
-                    self.console.print(Text("可选：" + "、".join(f"{k}（{v}）" for k, v in MODE_LABELS.items()), style="dim"))
+                    self.console.print(Text("可选：" + "、".join(f"{k}（{v}）" for k, v in MODE_LABELS.items()
+                                                        if self.info.get("kind") != "computer" or k != "auto"), style="dim"))
                 else:
                     await self.backend.set_mode(self.sid, mode)
                     self.info["mode"] = mode
@@ -341,7 +350,8 @@ class Terminal:
                 self.renderer.stop_waiting()
                 self.console.print(Text("已压缩：之后用交接说明代替前面的对话", style="dim"))
             elif name == "/new":
-                self.info = {**await self.backend.create(self.info["cwd"], self.info.get("mode", "ask")),
+                self.info = {**await self.backend.create(self.info["cwd"], self.info.get("mode", "ask"),
+                                                       kind=self.info.get("kind", "project")),
                              "shell": self.info.get("shell", "")}
                 self.renderer.header(self.info, self.backend.label)
             elif name == "/resume":
@@ -359,7 +369,8 @@ class Terminal:
                     self.console.print(Text("没删，继续这个会话。", style="dim"))
                 else:
                     await self.backend.delete(self.sid)
-                    self.info = await self.backend.create(self.info["cwd"], self.info.get("mode", "ask"))
+                    self.info = await self.backend.create(self.info["cwd"], self.info.get("mode", "ask"),
+                                                          kind=self.info.get("kind", "project"))
                     self._resume_ids = None
                     self.console.print(Text("删掉了，已在这个目录开一个新会话。", style="dim"))
                     self.renderer.header(self.info, self.backend.label)
@@ -389,6 +400,8 @@ class Terminal:
             elif name == "/context":
                 self.console.print(ledger_view(await self.backend.context(self.sid)))
             elif name == "/init":
+                if self.info.get("kind") == "computer":
+                    raise BackendError("电脑任务不用写项目说明。直接说要做什么，或用 /plan 先出方案。")
                 await self.turn(INIT_PROMPT)
             elif name == "/review":
                 await self.turn(arg, review=True)
@@ -406,11 +419,13 @@ class Terminal:
                 self.info["branch"] = None
             elif name == "/rules":
                 groups = await self.backend.rules()
-                mine = next((group for group in groups if _same_dir(group["project"], self.info["cwd"])), None)
+                scope = "computer" if self.info.get("kind") == "computer" else self.info["cwd"]
+                mine = next((group for group in groups if _same_dir(group["project"], scope)), None)
                 commands = mine["commands"] if mine else []
                 if not arg:
                     if not commands:
-                        self.console.print(Text("这个项目还没有记住的命令。确认命令时选「以后都允许」才会记在这里。", style="dim"))
+                        place = "电脑任务" if self.info.get("kind") == "computer" else "这个项目"
+                        self.console.print(Text(f"{place}还没有记住的命令。确认命令时选「以后都允许」才会记在这里。", style="dim"))
                     for i, command in enumerate(commands, 1):
                         self.console.print(Text(f"{i:>2}. {command}"))
                     if commands:
@@ -493,6 +508,11 @@ class Terminal:
     def _help(self) -> None:
         table = Table(show_header=False, box=None, padding=(0, 2))
         for name, desc in COMMANDS.items():
+            if self.info.get("kind") == "computer":
+                if name in ("/init", "/review", "/memory", "/mcp", "/merge", "/discard"):
+                    continue
+                if name == "/mode":
+                    desc = "换权限模式：/mode read_only | ask；不带参数或 Shift+Tab 切换"
             table.add_row(Text(name, style="bold"), desc)
         table.add_row("", "")
         for key, desc in KEYS:
@@ -502,7 +522,8 @@ class Terminal:
     async def _resume(self, arg: str) -> None:
         searching = bool(arg and not arg.isdigit() and not SESSION_ID.fullmatch(arg))
         found = await self.backend.search_sessions(arg, self.info["cwd"]) if searching else await self.backend.sessions()
-        mine = [s for s in found if _same_dir(s.get("cwd", ""), self.info["cwd"])]
+        mine = [s for s in found if _same_dir(s.get("cwd", ""), self.info["cwd"])
+                and s.get("kind", "project") == self.info.get("kind", "project")]
         if not arg or searching:
             key = arg.casefold()
             matches = [s for s in mine if key in s["title"].casefold() or key in s.get("cwd", "").casefold()]
@@ -537,7 +558,8 @@ def _same_dir(a: str, b: str) -> bool:
 # ---------- 一次性模式 ----------
 
 
-async def headless(backend: Backend, sid: str, text: str, json_lines: bool = False, err: Console | None = None) -> int:
+async def headless(backend: Backend, sid: str, text: str, json_lines: bool = False, err: Console | None = None,
+                   *, computer: bool = False) -> int:
     """做完就退出。最后的回答 → 标准输出；过程 → 标准错误。要确认的操作没法问，一律不执行"""
     err = err or Console(stderr=True, highlight=False)
     renderer = Renderer(err, show_text=False)
@@ -551,7 +573,8 @@ async def headless(backend: Backend, sid: str, text: str, json_lines: bool = Fal
             if e["type"] == "confirm":
                 await backend.answer(e["id"], False)
                 if not json_lines:
-                    err.print(Text("-p 模式下没法问你，这个操作没有执行（需要的话加 --mode auto，或者用交互模式）", style="yellow"))
+                    hint = "用交互模式来确认" if computer else "需要的话加 --mode auto，或者用交互模式"
+                    err.print(Text(f"-p 模式下没法问你，这个操作没有执行（{hint}）", style="yellow"))
             elif e["type"] == "assistant" and e.get("text", "").strip():
                 final = e["text"]
             elif e["type"] == "turn_end":
@@ -568,7 +591,7 @@ async def headless(backend: Backend, sid: str, text: str, json_lines: bool = Fal
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog="aila", description="艾拉：在终端里帮你写代码")
+    p = argparse.ArgumentParser(prog="aila", description="艾拉：在终端里帮你写代码、操作电脑")
     p.add_argument("-p", "--prompt", help="做完这个任务就退出")
     p.add_argument("-c", "--continue", dest="cont", action="store_true", help="接着这个目录最近的会话")
     p.add_argument("-r", "--resume", nargs="?", const="", help="接着某个会话（不给 id 就列出来）")
@@ -579,8 +602,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     g.add_argument("--service", action="store_true", help="一定连 AI 服务（没开就报错）")
     p.add_argument("--json", action="store_true", help="-p 时按行输出 JSON 事件")
     p.add_argument("--branch", action="store_true", help="在新分支上做：你的代码不动，/merge 时跑测试、合并回来")
+    p.add_argument("--computer", action="store_true", help="开电脑任务：从用户目录开始，只读或先问再改")
     p.add_argument("--budget", type=_budget_arg, help="会话累计花费上限（元），不填就不限")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.computer and args.mode == "auto":
+        p.error("电脑任务只能选 read_only 或 ask。")
+    if args.computer and args.branch:
+        p.error("电脑任务不能在新分支上做。")
+    return args
 
 
 def _budget_arg(value: str) -> float:
@@ -592,12 +621,14 @@ def _budget_arg(value: str) -> float:
 
 async def open_session(backend: Backend, args: argparse.Namespace, console: Console) -> tuple[dict[str, Any], bool]:
     """返回（会话信息，是不是接着以前的）"""
-    cwd = str(Path(args.cwd).resolve())
+    kind = "computer" if args.computer else "project"
+    cwd = str(Path.home().resolve() if args.computer else Path(args.cwd).resolve())
     resumed: dict[str, Any] | None = None
     if args.resume:
         resumed = await backend.session(args.resume)
     elif args.cont or args.resume == "":
-        mine = [s for s in await backend.sessions() if _same_dir(s.get("cwd", ""), cwd)]
+        mine = [s for s in await backend.sessions() if _same_dir(s.get("cwd", ""), cwd)
+                and s.get("kind", "project") == kind]
         if args.resume == "" and mine:
             for i, s in enumerate(mine[:10], 1):
                 console.print(Text.assemble((f"{i:>2}. ", "bold"), s["title"], (f"  {s['id']}", "dim")))
@@ -613,7 +644,7 @@ async def open_session(backend: Backend, args: argparse.Namespace, console: Cons
             await backend.set_budget(resumed["id"], args.budget)
             resumed["budget"] = args.budget
         return resumed, True
-    return await backend.create(cwd, args.mode or "ask", args.branch, budget=args.budget), False
+    return await backend.create(cwd, args.mode or "ask", args.branch, budget=args.budget, kind=kind), False
 
 
 async def main(argv: list[str] | None = None) -> int:
@@ -631,7 +662,7 @@ async def main(argv: list[str] | None = None) -> int:
             console.print(Text(str(err), style="red"))
             return 1
         if args.prompt:
-            return await headless(backend, info["id"], args.prompt, args.json)
+            return await headless(backend, info["id"], args.prompt, args.json, computer=info.get("kind") == "computer")
         from ..deps import settings
 
         term = Terminal(backend, console, info, history=settings.data_dir / "cli_history")

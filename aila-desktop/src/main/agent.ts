@@ -9,13 +9,15 @@ import type {
   AgentActivity,
   AgentBudgetEvent,
   AgentEvent,
+  AgentKind,
   AgentLedger,
   AgentMemoryNote,
   AgentMode,
   AgentProgress,
   AgentSession,
   AgentSessionSummary,
-  AgentUndoEvent
+  AgentUndoEvent,
+  ComputerContext
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
@@ -66,8 +68,12 @@ export class AgentRelay {
     return this.remember(await this.call<AgentSession>('GET', `/agent/sessions/${encodeURIComponent(sid)}`))
   }
 
-  async create(cwd: string, mode: AgentMode, isolate = false, budget: number | null = null): Promise<AiResult<AgentSessionSummary>> {
-    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate, budget }))
+  async create(cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project'): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate, budget, kind }))
+  }
+
+  computerContext(): Promise<AiResult<ComputerContext>> {
+    return this.call('GET', '/agent/computer/context')
   }
 
   setBudget(sid: string, amount: number | null): Promise<AiResult<AgentBudgetEvent>> {

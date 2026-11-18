@@ -36,6 +36,7 @@ def read() -> dict[str, Any]:
                 "coderModel": s.coder_model, "coderFastModel": s.coder_fast_model},
         "search": {"provider": s.search_provider if s.search_provider in ("bocha", "tavily", "none") else "bocha",
                    "apiKeySet": bool(s.search_api_key)},
+        "computer": {"inventory": s.computer_inventory},
         "voice": {
             "enabled": s.voice,
             "ttsEngine": s.tts_engine,
@@ -62,6 +63,7 @@ class SettingsUpdate(BaseModel):
     coderModel: str | None = Field(default=None, max_length=100)
     # 查资料的子 Agent 用的模型；空字符串 = 和编程用的一样
     coderFastModel: str | None = Field(default=None, max_length=100)
+    computerInventory: bool | None = Field(default=None, strict=True)
     searchProvider: Literal["bocha", "tavily", "none"] | None = None
     searchApiKey: str | None = Field(default=None, max_length=300)
     ttsEngine: Literal["melo", "kokoro", "matcha"] | None = None
@@ -89,6 +91,7 @@ class SettingsUpdate(BaseModel):
 ENV_NAMES = {
     "llmBaseUrl": "LLM_BASE_URL", "llmModel": "LLM_MODEL", "llmApiKey": "LLM_API_KEY",
     "coderModel": "AILA_CODER_MODEL", "coderFastModel": "AILA_CODER_FAST_MODEL",
+    "computerInventory": "AILA_COMPUTER_INVENTORY",
     "searchProvider": "SEARCH_PROVIDER", "searchApiKey": "SEARCH_API_KEY",
     "ttsEngine": "AILA_TTS_ENGINE", "ttsSpeaker": "AILA_TTS_SPEAKER", "ttsSpeed": "AILA_TTS_SPEED",
     "wakeThreshold": "AILA_WAKE_THRESHOLD", "endSilence": "AILA_END_SILENCE", "asrLanguage": "AILA_ASR_LANGUAGE",

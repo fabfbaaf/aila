@@ -54,6 +54,10 @@ function find(target: ViewNode, test: (item: ViewNode) => boolean): ViewNode | u
 }
 const byId = (root: ViewNode, id: string): ViewNode => find(root, (item) => item.props.id === id)!
 const byClass = (root: ViewNode, name: string): ViewNode => find(root, (item) => typeof item.props.class === 'string' && item.props.class.split(' ').includes(name))!
+const viewText = (target: ViewNode): string => (target.tag === '#comment' ? '' : target.text) + target.children.map(viewText).join('')
+function all(target: ViewNode, test: (item: ViewNode) => boolean): ViewNode[] {
+  return [...(test(target) ? [target] : []), ...target.children.flatMap((child) => all(child, test))]
+}
 async function settle(): Promise<void> { for (let i = 0; i < 10; i++) await Promise.resolve(); await nextTick() }
 function keydown(target: ViewNode, key: string, global: (event: any) => void): void {
   let stopped = false
@@ -89,7 +93,8 @@ beforeEach(async () => {
   fixture.source = {
     list: vi.fn(async () => [summary()]),
     get: vi.fn(async () => ({ ...summary(), events: [{ type: 'start', seq: 0, budget: 0.01 }, { type: 'user', seq: 1, t: 1, text: '做任务' }] })),
-    setBudget: vi.fn(), watch: vi.fn(), projects: vi.fn(async () => []), models: vi.fn(async () => null),
+    setBudget: vi.fn(), create: vi.fn(), memory: vi.fn(async () => []), send: vi.fn(), plan: vi.fn(async () => {}),
+    watch: vi.fn(), projects: vi.fn(async () => []), models: vi.fn(async () => null),
     takeFocus: vi.fn(async () => null), confirm: vi.fn(async () => true), interrupt: vi.fn(async () => {}),
     onEvent: (cb: (sid: string, e: AgentEvent) => void) => { event = cb }, onStreamEnd: vi.fn(), onFocus: vi.fn()
   } as unknown as AgentSource
@@ -182,5 +187,82 @@ describe('任务页预算', () => {
     await settle()
     expect(debug.t.value.budget).toBe(0.5)
     expect(byClass(root, 'budget-button').props.title).toContain('上限 ¥0.50')
+  })
+})
+
+describe('电脑任务入口', () => {
+  it('电脑命令记住按钮写清跨电脑任务的范围，项目命令保留项目范围', async () => {
+    event('s1', { type: 'confirm', seq: 2, id: 'project-confirm', call_id: 'a', tool: 'run_command', can_remember: true })
+    await settle()
+    expect(viewText(root)).toContain('这条命令在这个项目里不用再问')
+    vi.mocked(fixture.source.get).mockResolvedValue({
+      ...summary(), id: 'computer-confirm', kind: 'computer', running: true,
+      events: [{ type: 'start', seq: 0, mode: 'ask', kind: 'computer' }]
+    })
+    await debug.open('computer-confirm')
+    event('computer-confirm', { type: 'confirm', seq: 1, id: 'computer-command', call_id: 'b', tool: 'run_command', can_remember: true })
+    await settle()
+    expect(viewText(root)).toContain('这条命令在电脑任务里不用再问')
+    expect(viewText(root)).not.toContain('这条命令在这个项目里不用再问')
+  })
+
+  it('从自动和新分支切到电脑后只留两种权限，创建时不夹带项目、自动或分支状态', async () => {
+    await byClass(root, 'new').props.onClick()
+    await settle()
+    const auto = find(root, (item) => item.tag === 'input' && item.props.value === 'auto')!
+    auto.props['onUpdate:modelValue']('auto')
+    byId(root, 'new-task-isolate').props['onUpdate:modelValue'](true)
+    byId(root, 'new-task-plan').props['onUpdate:modelValue'](true)
+    const computer = find(root, (item) => item.tag === 'input' && item.props.value === 'computer')!
+    computer.props['onUpdate:modelValue']('computer')
+    await settle()
+    const picker = byClass(root, 'picker')
+    expect(viewText(picker)).not.toContain('工作区内自动')
+    expect(find(picker, (item) => item.props.id === 'new-task-isolate')).toBeUndefined()
+    expect(viewText(picker)).toContain('先出方案再动手')
+    const computerSession: AgentSession = {
+      ...summary(), id: 'computer1', kind: 'computer', cwd: 'C:/Users/test', running: false,
+      events: [{ type: 'start', seq: 0, mode: 'ask', kind: 'computer' }]
+    }
+    vi.mocked(fixture.source.create).mockResolvedValue({ ...computerSession, events: 1 })
+    vi.mocked(fixture.source.get).mockResolvedValue(computerSession)
+    await byClass(root, 'computer-start').props.onClick()
+    await settle()
+    expect(fixture.source.create).toHaveBeenCalledWith(undefined, 'ask', false, null, 'computer')
+    expect(viewText(byClass(root, 'proj'))).toContain('电脑')
+    expect(all(byClass(root, 'mode'), (item) => item.tag === 'option').map(viewText)).toEqual(['只读', '先问再改'])
+    expect(find(root, (item) => item.tag === 'section' && item.props.class === 'memory')).toBeUndefined()
+    const composer = find(root, (item) => item.tag === 'textarea')!
+    composer.props['onUpdate:modelValue']('先整理测试文件夹')
+    await settle()
+    byClass(root, 'send').props.onClick()
+    expect(fixture.source.send).toHaveBeenCalledWith('computer1', '先整理测试文件夹', false, true)
+  })
+
+  it('电脑任务仍可查看和批准计划，阶段流显示在原任务页', async () => {
+    const planEvents: AgentEvent[] = [
+      { type: 'start', seq: 0, mode: 'ask', kind: 'computer' },
+      { type: 'user', seq: 1, text: '整理测试文件夹', plan_request: true },
+      { type: 'assistant', seq: 2, text: '', tool_calls: [{ id: 'p1', name: 'propose_plan', arguments: '{}' }] },
+      { type: 'tool', seq: 3, id: 'p1', name: 'propose_plan', status: 'ok',
+        plan: { goal: '整理测试文件夹', stages: [
+          { title: '列出文件', goal: '只读盘点', verify: '列出将要移动的文件' },
+          { title: '按类型整理', goal: '等待确认后移动', verify: '核对文件数量' }
+        ] } },
+      { type: 'turn_end', seq: 4, reason: 'done' }
+    ]
+    vi.mocked(fixture.source.get).mockResolvedValue({
+      ...summary(), id: 'c2', kind: 'computer', running: false, events: planEvents
+    })
+    await debug.open('c2')
+    await settle()
+    expect(viewText(byClass(root, 'plan-card'))).toContain('列出文件')
+    await byClass(root, 'go').props.onClick()
+    expect(fixture.source.plan).toHaveBeenCalledWith('c2', 'approve', false)
+    event('c2', { type: 'plan_decision', seq: 5, approved: true, pause_each: false })
+    event('c2', { type: 'user', seq: 6, text: '开始盘点', plan_stage: 0, title: '第 1/2 阶段：列出文件' })
+    await settle()
+    expect(viewText(byClass(root, 'stage-line'))).toContain('第 1/2 阶段：列出文件')
+    expect(viewText(byClass(root, 'plan-card'))).toContain('做到第 1/2 阶段')
   })
 })

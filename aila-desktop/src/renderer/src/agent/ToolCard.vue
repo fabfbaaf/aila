@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import type { ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
 
-const props = defineProps<{ item: ToolItem }>()
+const props = defineProps<{ item: ToolItem; computer?: boolean }>()
 const emit = defineEmits<{ answer: [approved: boolean, remember: boolean] }>()
 
 const DIFF_LINES = 80
@@ -56,7 +56,7 @@ const rememberLabel = computed(() =>
     ? '可以，这个会话里改文件不用再问'
     : props.item.confirm?.kind === 'mcp'
       ? '可以，这个外部工具以后都不用问'
-      : '可以，这条命令在这个项目里不用再问'
+      : props.computer ? '可以，这条命令在电脑任务里不用再问' : '可以，这条命令在这个项目里不用再问'
 )
 const answered = computed(() => {
   const c = props.item.confirm

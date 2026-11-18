@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 工作窗口：在这里给她编程任务。
+ * 工作窗口：在这里给她编程或电脑任务；电脑任务不挂项目，只提供只读和先问再改。
  * 左边是会话（终端里用 aila 开的也在这里；能搜、改名、删除），中间是她做事的过程，右边是这次任务的待办、改过的文件和用量。
  * 输入框下面的「审查改动」（或者输入 /review）让她只读地审一遍没提交的改动。
  * 右边的「项目记忆」是她在这个项目里记下的约定（你也能加、删），下次在这个项目开任务时放进开头。
@@ -8,7 +8,7 @@
  * 计划和进度从日志推出来（plan.ts），右边有计划进度和「接着做」。
  */
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { MODE_HINTS, MODE_LABELS, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { agentModes, MODE_HINTS, MODE_LABELS, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
 import { createAgentSource, type ProjectChoice } from './source'
@@ -20,7 +20,7 @@ import UndoResult from './UndoResult.vue'
 import BudgetControls from './BudgetControls.vue'
 import { parseBudget, validBudget } from '../../../shared/budget'
 import Icon from '../theme/Icon.vue'
-import { deleteNotice, groupSessions } from './sessions'
+import { deleteNotice, groupSessions, sessionLabel } from './sessions'
 import { canContinue, planState } from './plan'
 import PlanCard from './PlanCard.vue'
 
@@ -33,6 +33,16 @@ const error = ref('')
 const picking = ref(false)
 const projects = ref<ProjectChoice[]>([])
 const newMode = ref<AgentMode>('ask')
+const newKind = ref<AgentKind>('project')
+const creating = ref(false)
+const newModes = computed(() => agentModes(newKind.value))
+const currentModes = computed(() => agentModes(current.value?.kind))
+watch(newKind, (kind) => {
+  if (kind === 'computer') {
+    if (newMode.value === 'auto') newMode.value = 'ask'
+    newIsolate.value = false
+  }
+})
 /** 新任务在新分支上做（git worktree，测试通过才合并回来） */
 const newIsolate = ref(false)
 const newBudget = ref('')
@@ -128,7 +138,7 @@ const modelLabel = computed(() => {
 const choices = computed<ProjectChoice[]>(() => {
   const seen = new Set<string>()
   const out: ProjectChoice[] = []
-  for (const p of [...sessions.value.map((s) => ({ name: basename(s.cwd), path: s.cwd })), ...projects.value]) {
+  for (const p of [...sessions.value.filter((s) => s.kind !== 'computer').map((s) => ({ name: basename(s.cwd), path: s.cwd })), ...projects.value]) {
     const key = p.path.toLowerCase().replace(/[\\/]+$/, '')
     if (!seen.has(key)) {
       seen.add(key)
@@ -193,19 +203,25 @@ async function open(sid: string): Promise<void> {
   }
 }
 
-async function startNew(path: string): Promise<void> {
+async function startNew(path?: string): Promise<void> {
+  if (creating.value) return
   error.value = ''
   newBudgetError.value = ''
   let budget: number | null
   try { budget = parseBudget(newBudget.value) }
   catch (err) { newBudgetError.value = (err as Error).message; return }
+  creating.value = true
   try {
-    const s = await source.create(path, newMode.value, newIsolate.value, budget)
+    const computer = newKind.value === 'computer'
+    const mode = computer && newMode.value === 'auto' ? 'ask' : newMode.value
+    const s = await source.create(computer ? undefined : path, mode, computer ? false : newIsolate.value, budget, newKind.value)
     await refreshList()
     await open(s.id)
     planNext.value = newPlan.value
   } catch (err) {
     error.value = (err as Error).message
+  } finally {
+    creating.value = false
   }
 }
 
@@ -304,7 +320,7 @@ function closeMenus(): void {
 // ---------- 项目记忆 ----------
 
 async function loadNotes(): Promise<void> {
-  const cwd = current.value?.cwd
+  const cwd = current.value?.kind === 'computer' ? undefined : current.value?.cwd
   notesFor = cwd ?? ''
   if (!cwd) {
     notes.value = []
@@ -319,6 +335,7 @@ async function loadNotes(): Promise<void> {
 }
 
 async function addNote(): Promise<void> {
+  if (current.value?.kind === 'computer') return
   const cwd = current.value?.cwd
   const text = noteText.value.trim()
   if (!cwd || !text || noteBusy.value) return
@@ -335,6 +352,7 @@ async function addNote(): Promise<void> {
 }
 
 async function forgetNote(note: AgentMemoryNote): Promise<void> {
+  if (current.value?.kind === 'computer') return
   const cwd = current.value?.cwd
   if (!cwd) return
   try {
@@ -435,6 +453,7 @@ async function interrupt(): Promise<void> {
 
 async function setMode(mode: AgentMode): Promise<void> {
   if (!current.value) return
+  if (!currentModes.value.includes(mode)) return
   try {
     await source.setMode(current.value.id, mode)
     if (!streaming.has(current.value.id)) t.value.apply({ type: 'mode', mode }) // 没有事件流时自己记一笔
@@ -673,7 +692,7 @@ onBeforeUnmount(() => {
             <template v-else>
               <div class="title"><i v-if="s.running" class="live" title="她在做"></i>{{ s.title }}</div>
               <div class="meta">
-                <span>{{ basename(s.cwd) }}</span>
+                <span>{{ sessionLabel(s) }}</span>
                 <span v-if="s.branch" class="meta-branch" :title="`在分支 ${s.branch} 上做`"><Icon name="branch" :size="12" /></span>
                 <span class="dot">·</span>
                 <span>{{ when(s.updated) }}</span>
@@ -694,13 +713,13 @@ onBeforeUnmount(() => {
     <main class="main">
       <header v-if="current" class="top">
         <div class="proj" :title="current.cwd">
-          <b>{{ basename(current.cwd) }}</b>
+          <b>{{ sessionLabel(current) }}</b>
           <span class="path">{{ current.cwd }}</span>
         </div>
         <span v-if="t.branch" class="branch-badge" title="她在这个分支的临时目录里改，你的代码一个字都没动"><Icon name="branch" :size="13" />{{ t.branch }}</span>
         <BudgetControls class="task-budget" :sid="current.id" :cost="current.cost" :budget="t.budget" :change="source.setBudget" @changed="changedBudget" />
-        <select class="mode" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
-          <option v-for="(label, m) in MODE_LABELS" :key="m" :value="m">{{ label }}</option>
+        <select class="mode" aria-label="当前任务的权限模式" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
+          <option v-for="m in currentModes" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
         <span class="model" title="编程用的模型：在「设置 → 对话」里改" @click="source.openSettings()">{{ modelLabel }}</span>
         <div class="tabs">
@@ -715,8 +734,14 @@ onBeforeUnmount(() => {
       <div v-else ref="scroller" class="scroll">
         <div v-if="current" class="transcript">
           <div v-if="!t.items.length" class="hello">
-            <p>在 <b>{{ basename(current.cwd) }}</b> 里，要她做什么？</p>
-            <p class="dim">比如「这个项目是做什么的」「给购物车加一个打折函数，写好测试并跑通」「看看为什么 npm test 失败」</p>
+            <template v-if="current.kind === 'computer'">
+              <p>要她在电脑上做什么？</p>
+              <p class="dim">比如「先看看测试文件夹里有哪些文件，给我一份按类型整理的方案」「用 PowerShell 读一个 Excel」。她通过命令和脚本操作，改动前会问你。</p>
+            </template>
+            <template v-else>
+              <p>在 <b>{{ basename(current.cwd) }}</b> 里，要她做什么？</p>
+              <p class="dim">比如「这个项目是做什么的」「给购物车加一个打折函数，写好测试并跑通」「看看为什么 npm test 失败」</p>
+            </template>
           </div>
           <template v-for="item in t.items" :key="item.key">
             <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>只读</span></div>
@@ -732,7 +757,7 @@ onBeforeUnmount(() => {
               @approve="(pause: boolean) => planAction('approve', pause)"
               @reject="planAction('reject')"
             />
-            <ToolCard v-else-if="item.kind === 'tool'" :item="item" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
+            <ToolCard v-else-if="item.kind === 'tool'" :item="item" :computer="current?.kind === 'computer'" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
             <div v-else-if="item.kind === 'merge'" class="merge" :class="{ ok: item.merged }">
               <div class="merge-head">{{ item.merged ? '✓ 合并了' : '■ 没有合并' }}</div>
               <div>{{ item.reason }}</div>
@@ -761,7 +786,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="hello big">
           <div class="hello-mark" aria-hidden="true">&gt;_</div>
-          <p>给她一个编程任务：她会读代码、改文件、跑命令和测试，直到做完。</p>
+          <p>给她一个编程或电脑任务：她会读文件、跑命令，改动前按你选的权限来。</p>
           <button class="new" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
         </div>
       </div>
@@ -791,7 +816,7 @@ onBeforeUnmount(() => {
               class="chip"
               :class="{ on: planNext }"
               :disabled="running || undoBusy || opening || t.closed"
-              title="大活先出方案：她只读地看一遍代码，交一份分阶段的计划给你批准，再一阶段一阶段做。也可以输入「/plan 目标」"
+              title="大活先出方案：她只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做。也可以输入「/plan 目标」"
               @click="proposePlan(text)"
             >
               <Icon name="plan" :size="15" />出方案
@@ -857,7 +882,7 @@ onBeforeUnmount(() => {
         </ul>
         <p v-else class="dim">还没有</p>
       </section>
-      <section class="memory">
+      <section v-if="current?.kind !== 'computer'" class="memory">
         <h3>项目记忆</h3>
         <ul v-if="notes.length" class="notes">
           <li v-for="n in notes" :key="n.id" :class="n.source" :title="n.source === 'agent' ? '她记的' : '你加的'">
@@ -925,31 +950,36 @@ onBeforeUnmount(() => {
 
     <div v-if="picking" class="overlay" @click.self="current && (picking = false)">
       <div class="picker">
-        <h2>在哪个项目里做？</h2>
-        <div class="choices">
-          <button v-for="p in choices" :key="p.path" class="choice" :title="p.path" @click="startNew(p.path)">
+        <h2>开一个新任务</h2>
+        <fieldset class="task-kinds" :disabled="creating" @keydown.stop>
+          <legend>在哪里做？</legend>
+          <label :class="{ on: newKind === 'project' }"><input v-model="newKind" type="radio" value="project" name="task-kind" />在项目里编程</label>
+          <label :class="{ on: newKind === 'computer' }"><input v-model="newKind" type="radio" value="computer" name="task-kind" />不选项目，操作电脑</label>
+        </fieldset>
+        <div v-if="newKind === 'project'" class="choices">
+          <button v-for="p in choices" :key="p.path" class="choice" :title="p.path" :disabled="creating" @click="startNew(p.path)">
             <b>{{ p.name }}</b><span>{{ p.path }}</span>
           </button>
-          <button class="choice other" @click="pickOther">选择其他文件夹…</button>
+          <button class="choice other" :disabled="creating" @click="pickOther">选择其他文件夹…</button>
         </div>
-        <label class="isolate" :class="{ on: newIsolate }">
-          <input v-model="newIsolate" type="checkbox" />
+        <label v-if="newKind === 'project'" class="isolate" :class="{ on: newIsolate }">
+          <input id="new-task-isolate" v-model="newIsolate" type="checkbox" :disabled="creating" @keydown.stop />
           <span>
             <b>在新分支上做</b>
             她在一个临时的 git 分支里改，你的代码一个字都不动；你说合并时先跑测试，全过才写回来（要是 git 仓库）
           </span>
         </label>
-        <div class="modes">
-          <label v-for="(label, m) in MODE_LABELS" :key="m" :class="{ on: newMode === m }">
-            <input v-model="newMode" type="radio" :value="m" />
-            <b>{{ label }}</b><span>{{ MODE_HINTS[m] }}</span>
+        <div class="modes" :class="{ computer: newKind === 'computer' }" @keydown.stop>
+          <label v-for="m in newModes" :key="m" :class="{ on: newMode === m }">
+            <input v-model="newMode" type="radio" :value="m" name="new-task-mode" :disabled="creating" />
+            <b>{{ MODE_LABELS[m] }}</b><span>{{ MODE_HINTS[m] }}</span>
           </label>
         </div>
         <label class="isolate" :class="{ on: newPlan }">
-          <input v-model="newPlan" type="checkbox" />
+          <input id="new-task-plan" v-model="newPlan" type="checkbox" :disabled="creating" @keydown.stop />
           <span>
             <b>先出方案再动手</b>
-            大活用这个：她先只读地看一遍代码，交一份分阶段的计划给你批准，再一阶段一阶段做下去，不受一轮步数的限制
+            大活用这个：她先只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做下去，不受一轮步数的限制
           </span>
         </label>
         <div class="new-budget">
@@ -966,8 +996,11 @@ onBeforeUnmount(() => {
           <p id="new-task-budget-help" class="dim">未知价格的用量无法完整计价。达到上限后在下一步前停下，单步可能超出上限。</p>
           <p v-if="newBudgetError" id="new-task-budget-error" class="budget-error" role="alert">{{ newBudgetError }}</p>
         </div>
-        <p class="dim">她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。</p>
-        <button v-if="current" class="ghost" @click="picking = false">取消</button>
+        <p v-if="newKind === 'computer'" class="dim">从你的用户目录开始，通过命令和脚本操作。没有自动权限；危险命令和受保护位置每次都要问。批量操作先列方案，移动、改名等命令无法靠「撤销这一轮」恢复。</p>
+        <p v-else class="dim">她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。</p>
+        <p v-if="error" class="budget-error" role="alert">{{ error }}</p>
+        <button v-if="newKind === 'computer'" class="new computer-start" :disabled="creating" @click="startNew()">{{ creating ? '正在开任务…' : '开电脑任务' }}</button>
+        <button v-if="current" class="ghost" :disabled="creating" @click="picking = false">取消</button>
       </div>
     </div>
   </div>
@@ -2219,6 +2252,22 @@ code {
   gap: 6px;
 }
 
+.task-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+.task-kinds legend { margin-bottom: 8px; color: var(--text-2); font-size: 13px; }
+.task-kinds label { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--ui-r); cursor: pointer; }
+.task-kinds label.on { border-color: var(--accent); background: var(--accent-bg); }
+.task-kinds input { accent-color: var(--accent); }
+.task-kinds label:focus-within, .modes label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.computer-start { margin-right: 12px; }
+.modes.computer { grid-template-columns: repeat(2, 1fr); }
+
 .choice {
   display: flex;
   flex-direction: column;
@@ -2309,7 +2358,10 @@ code {
 }
 
 .modes input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
 }
 
 .modes span {

@@ -71,10 +71,16 @@ class Session:
     # ---------- 读 ----------
 
     @property
+    def kind(self) -> str:
+        """旧日志没有任务类型，按项目会话处理。"""
+        return "computer" if self.events[0].get("kind") == "computer" else "project"
+
+    @property
     def mode(self) -> str:
         for e in reversed(self.events):
             if e["type"] in ("mode", "start") and e.get("mode"):
-                return str(e["mode"])
+                mode = str(e["mode"])
+                return "ask" if self.kind == "computer" and mode == "auto" else mode
         return "ask"
 
     @property
@@ -184,6 +190,7 @@ class Session:
         return {
             "id": self.id,
             "cwd": str(self.cwd),
+            "kind": self.kind,
             "title": self.title,
             "mode": self.mode,
             "model": self.events[0].get("model", ""),
@@ -304,6 +311,7 @@ class SessionStore:
         path = self.root / f"{sid}.jsonl"
         event: Event = {
             "type": "start",
+            "kind": "project",
             "id": sid,
             "cwd": str(cwd),
             "mode": mode,

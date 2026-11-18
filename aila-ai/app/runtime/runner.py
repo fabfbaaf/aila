@@ -11,9 +11,12 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
 
 from ..code import CodeProjects
 from ..code.fix import FixError, git
+from ..computer import build_computer_context, computer_shell
+from ..config import ENV_FILE
 from ..confirm import Confirmations
 from ..llm import CoderModel
 from .branch import BranchError, BranchInfo, open_branch
@@ -25,7 +28,7 @@ from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, remember_tool
 from .planning import MAX_CONTINUES, PLAN_PROMPT, plan_state, plan_title, plan_tools, stage_message
 from .loop import Agent, AgentConfig, Hooks
-from .permissions import MODES, Mode, Policy, Rules
+from .permissions import MODES, ComputerPolicy, Mode, Policy, Rules
 from .pricing import validate_budget
 from .prompt import build_context
 from .review import ReviewError, review_request, review_title
@@ -34,7 +37,7 @@ from .shell import Shell, find_shell
 from .snapshots import Snapshots
 from .subagent import Explorer
 from .tools import CodingTools
-from .workspace import Workspace
+from .workspace import ComputerWorkspace, Workspace
 
 log = logging.getLogger("aila.runtime")
 
@@ -45,6 +48,15 @@ BRANCH_NOTE = (
     "这里的改动不会直接影响用户的代码（{project}）：用户确认后才会跑测试、合并回去。"
     "不要自己合并、推送或切换分支。\n</分支>"
 )
+COMPUTER_PLAN_PROMPT = """先为下面这个电脑任务出一份分阶段的计划。这一轮只读，可以查看相关文件和运行查看类的命令。
+
+目标：{goal}
+
+1. 按目标查看电脑现状、相关文件和可用的命令或脚本接口，只查看完成目标需要的信息。
+2. 用 propose_plan 交 2～8 个阶段，每阶段写清目标和可检查的验收结果。
+3. 批量操作的阶段先列出每个文件的原路径、目标路径和具体改动清单，等用户看过并确认后再执行。
+4. 移动、改名和其他命令副作用无法用「撤销这一轮」恢复，提前向用户说明。
+5. 交完计划用一两句话说明思路和风险，等用户批准。"""
 
 
 class RuntimeError_(Exception):
@@ -62,6 +74,7 @@ class Runtime:
         code_projects: Callable[[], CodeProjects] | None = None,
         fast_factory: Callable[[], CoderModel] | None = None,
         mcp_config: Path | None = None,
+        computer_inventory: bool = True,
     ) -> None:
         self.store = SessionStore(data_dir / "sessions")
         # 「在新分支上做」的临时目录（git worktree）
@@ -69,6 +82,9 @@ class Runtime:
         # 代码库（代码 RAG + 调用图）：给了就让她能按意思搜、按报错定位、看调用关系
         self.code_projects = code_projects
         self.rules = Rules(data_dir / "agent_rules.json")
+        self.computer_rules = Rules(data_dir / "computer_rules.json")
+        self.computer_inventory = computer_inventory
+        self.data_dir = data_dir
         # 项目记忆：她学到的项目约定，下次在这个项目开会话时放进环境说明
         self.memory = ProjectMemory(data_dir / "project_memory.json")
         # MCP 外部工具服务（和对话共用 aila-ai/mcp.json，你在设置页加）：第一次用到时在后台开起来
@@ -90,21 +106,33 @@ class Runtime:
 
     # ---------- 会话 ----------
 
-    def create(self, cwd: str, mode: Mode = "ask", isolate: bool = False,
-               budget: float | None = None) -> Session:
+    def create(self, cwd: str | None = None, mode: Mode = "ask", isolate: bool = False,
+               budget: float | None = None, *, kind: Literal["project", "computer"] = "project") -> Session:
         """isolate：在新分支上做（git worktree），合并之前你的代码一个字都不动"""
         try:
             budget = validate_budget(budget)
         except ValueError as err:
             raise RuntimeError_(str(err)) from err
-        root = Path(cwd).expanduser()
+        if kind not in ("project", "computer"):
+            raise RuntimeError_("不认识的任务类型。")
+        if kind == "computer" and mode == "auto":
+            raise RuntimeError_("电脑任务只能选只读或先问再改。")
+        if kind == "computer" and isolate:
+            raise RuntimeError_("电脑任务不能在新分支上做。")
+        if kind == "project" and not cwd:
+            raise RuntimeError_("要告诉我在哪个项目里做。")
+        root = Path.home() if kind == "computer" else Path(cwd).expanduser()  # type: ignore[arg-type]
         if not root.is_dir():
             raise RuntimeError_(f"{cwd} 不是一个目录。")
         if mode not in MODES:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         root = root.resolve()
         model = self.model_factory()
-        if not isolate:
+        if kind == "computer":
+            session = self.store.create(root, mode, model.name,
+                                        build_computer_context(root, computer_shell().label, self.computer_inventory),
+                                        {"kind": "computer"})
+        elif not isolate:
             session = self.store.create(root, mode, model.name, build_context(root, self.shell.label) + self.memory.context(root))
         else:
             try:
@@ -127,19 +155,27 @@ class Runtime:
         if session is None:
             raise RuntimeError_("没有这个会话。")
         # 在新分支上做时，她在临时目录里干活；代码库索引、记住的命令还是按你原来的项目
-        workspace = Workspace(session.workdir if session.workdir.is_dir() else session.cwd)
+        computer = session.kind == "computer"
+        root = session.workdir if session.workdir.is_dir() else session.cwd
+        workspace = (ComputerWorkspace(root, data_dir=self.data_dir, env_file=ENV_FILE) if computer else Workspace(root))
         mode = session.mode if session.mode in MODES else "ask"
-        extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
-        explorer = Explorer(session, workspace.root, self.shell, extra, self.rules, self.fast_factory,
-                            self.config.context_window)
+        if computer:
+            extra = plan_tools(session.events)
+            policy = ComputerPolicy(session.cwd, self.computer_rules, mode, data_dir=self.data_dir, env_file=ENV_FILE)
+        else:
+            extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
+            explorer = Explorer(session, workspace.root, self.shell, extra, self.rules, self.fast_factory,
+                                self.config.context_window)
+            extra = [*extra, explorer.tool(), *plan_tools(session.events),
+                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp)]
+            policy = Policy(session.cwd, self.rules, mode, self.mcp)
         agent = Agent(
             session,
             self.model_factory(),
             # 记忆按你原来的项目记（在新分支上做时也是）
-            CodingTools(workspace, self.shell, [*extra, explorer.tool(), *plan_tools(session.events),
-                                                remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp)],
+            CodingTools(workspace, computer_shell() if computer else self.shell, extra,
                         snapshots=Snapshots(session.path.with_suffix(".snap"))),
-            Policy(session.cwd, self.rules, mode, self.mcp),  # type: ignore[arg-type]
+            policy,  # type: ignore[arg-type]
             self.confirms,
             self.config,
             self.hooks,
@@ -158,6 +194,8 @@ class Runtime:
         if mode not in MODES:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         agent = self.agent(sid)
+        if agent.session.kind == "computer" and mode == "auto":
+            raise RuntimeError_("电脑任务只能选只读或先问再改。")
         if sid in self._reviewing:
             # /review 这一轮必须只读：先记下，这一轮结束后再换
             self._reviewing[sid] = mode
@@ -241,9 +279,9 @@ class Runtime:
         self._begin(sid, agent, request, extra)
         return stream
 
-    def start(self, sid: str, text: str) -> None:
+    def start(self, sid: str, text: str, *, plan: bool = False) -> None:
         """开始一轮，不订阅（从对话、屏幕上的报错、星图交过来的任务：工作窗口打开后自己接上）"""
-        agent, request, extra = self._ready(sid, text)
+        agent, request, extra = self._ready(sid, text, plan=plan)
         self._begin(sid, agent, request, extra)
 
     def _ready(self, sid: str, text: str, review: bool = False, plan: bool = False) -> tuple[Agent, str, dict]:
@@ -257,9 +295,12 @@ class Runtime:
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
         if plan:
-            return agent, PLAN_PROMPT.format(goal=text.strip()), {"plan_request": True, "title": plan_title(text)}
+            prompt = COMPUTER_PLAN_PROMPT if agent.session.kind == "computer" else PLAN_PROMPT
+            return agent, prompt.format(goal=text.strip()), {"plan_request": True, "title": plan_title(text)}
         if not review:
             return agent, text, {}
+        if agent.session.kind == "computer":
+            raise RuntimeError_("电脑任务没有项目改动可审查。直接说要检查什么，或用 /plan 先出方案。")
         # 在新分支上做时审的是分支临时目录里的改动
         root = agent.session.workdir if agent.session.workdir.is_dir() else agent.session.cwd
         try:
@@ -431,8 +472,9 @@ class Runtime:
 
     async def _with_mcp(self, agent: Agent, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
         """一轮开始前对齐 MCP 工具：等还在启动的服务一会儿，工具变了才换（一轮里不变，前缀缓存稳定）"""
-        await self.mcp.wait_ready()
-        agent.tools.replace_prefixed(TOOL_PREFIX, bridge_tools(self.mcp))
+        if agent.session.kind == "project":
+            await self.mcp.wait_ready()
+            agent.tools.replace_prefixed(TOOL_PREFIX, bridge_tools(self.mcp))
         async for event in events:
             yield event
 
@@ -461,6 +503,8 @@ class Runtime:
             for p in self.code_projects().all():
                 seen.setdefault(str(Path(p.root).resolve()).lower(), p.root)
         for s in self.store.list(limit=100):
+            if s.get("kind") == "computer":
+                continue
             seen.setdefault(str(Path(s["cwd"]).resolve()).lower(), s["cwd"])
         found = [(Path(path).name or path, path) for path in seen.values()]
         key = name.strip().lower()

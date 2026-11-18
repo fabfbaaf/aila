@@ -38,6 +38,7 @@ class Settings:
     coder_fast_model: str = ""
     coder_context: int = 128_000
     coder_max_steps: int = 60
+    computer_inventory: bool = True
 
     @property
     def mock(self) -> bool:
@@ -71,4 +72,5 @@ def load_settings() -> Settings:
         coder_fast_model=os.getenv("AILA_CODER_FAST_MODEL", "").strip(),
         coder_context=int(os.getenv("AILA_CODER_CONTEXT", "128000")),
         coder_max_steps=int(os.getenv("AILA_CODER_MAX_STEPS", "60")),
+        computer_inventory=os.getenv("AILA_COMPUTER_INVENTORY", "on").strip().lower() not in ("off", "0", "false"),
     )

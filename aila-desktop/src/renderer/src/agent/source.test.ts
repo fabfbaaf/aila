@@ -12,7 +12,7 @@ describe('任务页预算来源', () => {
     const source = createAgentSource()
     await source.create('C:/shop', 'ask', false, 0)
     expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0 })
+      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0, kind: 'project' })
     }))
     expect((await source.setBudget('s /1', null)).amount).toBeNull()
     expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions/s%20%2F1/budget', expect.objectContaining({
@@ -27,8 +27,24 @@ describe('任务页预算来源', () => {
     const { createAgentSource } = await import('./source')
     const source = createAgentSource()
     await source.create('C:/shop', 'ask', false, 0)
-    expect(agentCreate).toHaveBeenCalledWith('C:/shop', 'ask', false, 0)
+    expect(agentCreate).toHaveBeenCalledWith('C:/shop', 'ask', false, 0, 'project')
     await expect(source.setBudget('s1', 0.5)).rejects.toThrow('上限没有保存')
     expect(agentSetBudget).toHaveBeenCalledWith('s1', 0.5)
+  })
+
+  it('浏览器创建电脑任务时没有项目路径，长任务仍沿用 plan 参数', async () => {
+    vi.stubGlobal('window', {})
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 'c1', kind: 'computer' })))
+    vi.stubGlobal('fetch', fetchMock)
+    const { createAgentSource } = await import('./source')
+    const source = createAgentSource()
+    await source.create(undefined, 'ask', false, null, 'computer')
+    expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ mode: 'ask', isolate: false, budget: null, kind: 'computer' })
+    }))
+    source.send('c1', '整理测试文件夹', false, true)
+    expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions/c1/messages', expect.objectContaining({
+      body: JSON.stringify({ text: '整理测试文件夹', plan: true })
+    }))
   })
 })
