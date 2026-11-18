@@ -1,0 +1,20 @@
+{
+  "id": "fix-memoize-kwargs",
+  "title": "缓存装饰器要区分关键字参数",
+  "fixture": "repo",
+  "prompt": "memoize 装饰器没管关键字参数：price(1, scale=2) 之后再调 price(1, scale=3) 拿到的是旧结果。修好 cache.py：关键字参数参与缓存（顺序不同算同一次调用），同样的参数只算一次；被包的函数保留原来的名字和文档字符串。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_cache.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python"
+  ]
+}

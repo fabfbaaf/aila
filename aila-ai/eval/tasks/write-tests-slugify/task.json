@@ -1,0 +1,20 @@
+{
+  "id": "write-tests-slugify",
+  "title": "给没有测试的函数写测试",
+  "fixture": "repo",
+  "prompt": "slug.py 的 slugify 还没有测试。新建 test_slug.py，把这些行为都测到：转小写；空格、标点、下划线变成一个连字符（连着好几个也只算一个）；首尾的连字符去掉；中文原样保留；空字符串返回空字符串。不要改 slug.py。跑测试确认。",
+  "check": {
+    "command": "python check_tests.py",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "slug.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "tests",
+    "python"
+  ]
+}

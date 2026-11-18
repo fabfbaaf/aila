@@ -1,0 +1,21 @@
+{
+  "id": "move-date-helpers",
+  "title": "把日期函数从 utils 挪到新模块",
+  "fixture": "repo",
+  "prompt": "utils.py 什么都往里放，太杂了。把 parse_date 和 format_date 挪到新模块 dates.py，所有用到它们的地方改成从 dates 导入，utils.py 里不要再留这两个函数（也不要留转发）。行为不变，跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_events.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "refactor",
+    "multi-file",
+    "python"
+  ]
+}

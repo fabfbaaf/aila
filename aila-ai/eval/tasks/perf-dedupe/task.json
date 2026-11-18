@@ -1,0 +1,21 @@
+{
+  "id": "perf-dedupe",
+  "title": "去重太慢：两万条要一秒内",
+  "fixture": "repo",
+  "prompt": "unique 去重两万条数据要好几秒。改 dedupe.py，保持原来的顺序（第一次出现的位置），两万条在半秒内完成。元素都是可哈希的。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_dedupe.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "performance",
+    "python"
+  ]
+}

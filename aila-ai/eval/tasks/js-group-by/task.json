@@ -1,0 +1,17 @@
+{
+  "id": "js-group-by",
+  "title": "JS：实现 groupBy",
+  "fixture": "repo",
+  "prompt": "在 utils.js 里实现并导出 groupBy(list, key)：key 是属性名（字符串）或者一个函数；返回普通对象 { 分组值: [元素…] }，每组里保持原来的顺序；list 为空返回 {}。补上测试，用 node --test 跑全部测试。",
+  "check": {
+    "command": "node --test",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "feature",
+    "javascript"
+  ]
+}

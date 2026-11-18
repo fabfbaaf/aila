@@ -1,0 +1,22 @@
+{
+  "id": "explain-order-flow",
+  "title": "只读：下单流程依次经过哪些函数",
+  "fixture": "repo",
+  "prompt": "只读查看，不要改任何文件：下单从 handle_order 开始，到把订单写进数据库为止，依次经过了哪几个函数？按调用顺序列出函数名。",
+  "answer_contains": [
+    "handle_order",
+    "place_order",
+    "validate_order",
+    "reserve_stock",
+    "save_order"
+  ],
+  "expect_unchanged": true,
+  "max_steps": 15,
+  "timeout_s": 300,
+  "tags": [
+    "read-only",
+    "locate",
+    "multi-file",
+    "python"
+  ]
+}

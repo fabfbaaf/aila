@@ -1,0 +1,17 @@
+{
+  "id": "add-cli-limit",
+  "title": "命令行加 --limit 参数",
+  "fixture": "repo",
+  "prompt": "给 todo_cli.py 加 --limit N：最多列出 N 条。N 必须是正整数，否则和 argparse 别的参数出错一样退出（SystemExit，退出码 2）。和 --done 一起用时先筛再截。补上测试，跑全部测试。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "feature",
+    "python"
+  ]
+}

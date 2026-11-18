@@ -1,0 +1,20 @@
+{
+  "id": "add-retry",
+  "title": "实现带指数退避的重试",
+  "fixture": "repo",
+  "prompt": "实现 client.py 里的 call_with_retry(fn, attempts=3, base_delay=0.5, sleep=time.sleep)：fn 抛 TransientError 时重试，每次重试前等 base_delay、2×base_delay、4×base_delay……（用传进来的 sleep 等，测试里不真的等）；别的异常直接抛出、不重试；次数用完把最后一次的 TransientError 抛出去；成功就返回 fn 的结果。attempts 小于 1 抛 ValueError。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_client.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "feature",
+    "python"
+  ]
+}

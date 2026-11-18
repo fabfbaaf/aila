@@ -1,0 +1,19 @@
+{
+  "id": "locate-env-var",
+  "title": "只读：环境变量在哪读、默认值是什么",
+  "fixture": "repo",
+  "prompt": "只读查看，不要改任何文件：DATABASE_URL 这个环境变量是在哪个文件的哪个函数里读的？没设置时用的默认值是什么？",
+  "answer_contains": [
+    "connection.py",
+    "database_url_from_env",
+    "sqlite:///local.db"
+  ],
+  "expect_unchanged": true,
+  "max_steps": 15,
+  "timeout_s": 300,
+  "tags": [
+    "read-only",
+    "locate",
+    "python"
+  ]
+}

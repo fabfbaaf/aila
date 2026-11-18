@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import shutil
 import sys
+from collections import Counter
 from decimal import Decimal
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import pytest
 
 from app.llm import Usage
 from app.runtime.mock import MockCoderModel
-from app.runtime.shell import Shell
+from app.runtime.shell import Shell, find_shell, run
 from scripts.eval_agent import (
     TASKS, EvalResult, Prices, evaluate, evaluate_task, load_task, load_tasks, main,
     python_command, read_prices, summary, totals,
@@ -153,13 +155,106 @@ def test_python_replacement_uses_current_interpreter_without_touching_arguments(
 
 
 @pytest.mark.anyio
-async def test_mock_completes_all_five_tasks_and_writes_each_result(tmp_path: Path) -> None:
+async def test_hidden_tests_catch_a_fix_that_only_passes_visible_tests(tmp_path: Path) -> None:
+    path = case_file(tmp_path, hidden="hidden")
+    hidden = path.parent / "hidden"
+    hidden.mkdir()
+    (hidden / "test_hidden.py").write_text(
+        "from cart import total\n\ndef test_other():\n    assert total([1], 2) == 3\n", encoding="utf-8")
+    task = load_task(path)
+    # 只对着看得到的测试凑答案：35
+    cheat = Scripted([[call("read_file", path="cart.py")], [call("edit_file", path="cart.py", old_string="return sum(items)", new_string="return 35")], ["好了"]])
+    result = await evaluate_task(task, lambda: cheat)
+    assert not result.success and result.reason == "检查没通过" and "1 failed" in result.check_output
+    assert result.changed == ["cart.py"]  # 隐藏测试是检查前才放进去的，不算她改的
+    honest = Scripted([[call("read_file", path="cart.py")], [call("edit_file", path="cart.py", old_string="return sum(items)",
+                             new_string="return sum(items) + shipping")], ["好了"]])
+    assert (await evaluate_task(task, lambda: honest)).success
+
+
+@pytest.mark.anyio
+async def test_editing_protected_tests_is_not_a_fix(tmp_path: Path) -> None:
+    task = load_task(case_file(tmp_path, protect=["test_*.py"]))
+    model = Scripted([[call("read_file", path="test_cart.py")], [call("edit_file", path="test_cart.py", old_string="== 35", new_string="== 30")], ["测试过了"]])
+    result = await evaluate_task(task, lambda: model)
+    assert not result.success and result.reason == "改了不许改的文件"
+    assert result.protected_changed == ["test_cart.py"]
+
+
+@pytest.mark.anyio
+async def test_read_only_task_fails_when_files_change(tmp_path: Path) -> None:
+    task = load_task(case_file(tmp_path, check=None, answer_contains=["total"], expect_unchanged=True))
+    sneaky = Scripted([[call("write_file", path="notes.md", content="草稿")], ["在 total 里"]])
+    result = await evaluate_task(task, lambda: sneaky)
+    assert not result.success and result.reason == "只读任务改了文件" and result.changed == ["notes.md"]
+    assert (await evaluate_task(task, lambda: Scripted([["在 total 里"]]))).success
+
+
+@pytest.mark.anyio
+async def test_report_keeps_session_logs_and_groups_by_tag(tmp_path: Path) -> None:
+    task = load_task(case_file(tmp_path, tags=["bugfix", "python"]))
+    model = Scripted([[call("read_file", path="cart.py")], [call("edit_file", path="cart.py", old_string="return sum(items)",
+                            new_string="return sum(items) + shipping")], ["好了"]])
+    destination = tmp_path / "report"
+    prices = Prices(Decimal("1"), Decimal("2"), Decimal("3"))
+    [result] = await evaluate([task], lambda: model, destination, prices=prices)
+    assert result.log == "sessions/cart-1.jsonl"
+    log = [json.loads(line) for line in (destination / result.log).read_text(encoding="utf-8").splitlines()]
+    assert any(e["type"] == "tool" and e["name"] == "edit_file" for e in log)
+    report = (destination / "summary.md").read_text(encoding="utf-8")
+    assert "## 按类别" in report and "| bugfix | 1 / 1 | 100.0% |" in report
+    assert "## 每一次" in report and "[看](sessions/cart-1.jsonl)" in report and "cart.py" in report
+    assert "每做成一个任务平均花费" in report
+
+
+def test_hidden_and_protect_are_validated(tmp_path: Path) -> None:
+    path = case_file(tmp_path)
+    data = json.loads(path.read_text())
+    for changes in ({"hidden": "repo"}, {"hidden": "missing"}, {"hidden": "..", "check": data["check"]},
+                    {"protect": ["../x"]}, {"protect": "test_*.py"}, {"expect_unchanged": "yes"}):
+        path.write_text(json.dumps({**data, **changes}), encoding="utf-8")
+        with pytest.raises(ValueError):
+            load_task(path)
+
+
+def _check(task_dir: Path, task, project: Path, with_solution: bool) -> int:  # type: ignore[no-untyped-def]
+    """把起点（可选：加上参考答案）和隐藏测试放进一个目录，跑检查命令"""
+    shutil.copytree(task.fixture, project)
+    if with_solution:
+        shutil.copytree(task_dir / "solution", project, dirs_exist_ok=True)
+    if task.hidden:
+        shutil.copytree(task.hidden, project, dirs_exist_ok=True)
+    shell = find_shell()
+    return asyncio.run(run(shell, python_command(task.check_command, shell), project, 120)).exit_code  # type: ignore[return-value]
+
+
+@pytest.mark.parametrize("task_dir", sorted(p.parent for p in TASKS.glob("*/task.json")), ids=lambda p: p.name)
+def test_bundled_task_is_unsolved_at_start_and_solvable(task_dir: Path, tmp_path: Path) -> None:
+    """每个任务：起点过不了检查（不是白送的），参考答案过得了（不是做不到的）；只读任务不带检查"""
+    task = load_task(task_dir / "task.json")
+    if task.check_command is None:
+        assert task.answer_contains and task.expect_unchanged
+        return
+    assert (task_dir / "solution").is_dir(), "要有参考答案 solution/"
+    assert _check(task_dir, task, tmp_path / "start", False) != task.expect_exit
+    assert _check(task_dir, task, tmp_path / "solved", True) == task.expect_exit
+
+
+def test_task_set_is_big_and_varied_enough() -> None:
     tasks = load_tasks(TASKS)
-    assert len(tasks) == 5
+    tags = Counter(t for task in tasks for t in task.tags)
+    assert len(tasks) >= 20
+    for kind in ("bugfix", "feature", "refactor", "read-only", "traceback", "tests", "javascript"):
+        assert tags[kind] >= 1, kind
+
+
+@pytest.mark.anyio
+async def test_mock_runs_every_task_and_writes_each_result(tmp_path: Path) -> None:
+    tasks = load_tasks(TASKS, ["fix-cart-total", "locate-refund", "js-sort-prices"])
     destination = tmp_path / "report"
     results = await evaluate(tasks, lambda: MockCoderModel(delay=0), destination)
     rows = [json.loads(line) for line in (destination / "results.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(results) == len(rows) == 5
+    assert len(results) == len(rows) == 3
     assert {row["id"] for row in rows} == {task.id for task in tasks}
     assert all(row["turn_reason"] == "done" and row["reason"] != "error" for row in rows)
     assert all("cost_yuan" not in row for row in rows)

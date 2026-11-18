@@ -1,0 +1,20 @@
+{
+  "id": "fix-mutable-default",
+  "title": "标签列表不要在两次调用之间串起来",
+  "fixture": "repo",
+  "prompt": "add_tag 连续调用时标签会串到一起（上一次的还在）。修好 tags.py：没传 tags 时每次都是新列表；传了就加到传进来的那个列表里并返回它；已经有的标签不重复加。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_tags.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python"
+  ]
+}
