@@ -1,9 +1,16 @@
 /**
- * 代码星图：文件是星球，文件之间的调用是光线（光点沿调用方向流动）。
+ * 代码星图：三层——星系（子项目）→ 星座（目录 / 模块）→ 星球（文件）。
  *
- * - 布局：d3-force-3d 力导向。光线把相关的文件拉近，星球之间互相排斥；每个子项目被拉向自己的「星系」中心
- * - 画：Three.js。星球 = 球体 + 叠加发光的光晕；光线 = 一批线段（一次绘制）；光点 = 一批点（一次绘制）；
- *   最后过一遍泛光（UnrealBloom），出全息的感觉
+ * - 远近两种看法：看全部时每个模块是一颗带名字的大星，模块之间是汇总后的光线，看得出代码库的结构；
+ *   拉近以后大星淡去，星座散开成一个个文件，文件之间的调用是光线（光点沿调用方向流动）。中间平滑过渡
+ * - 每个模块外面罩一层淡淡的星云，名字写在星云上；子项目的名字写在星系上方
+ * - 跨进程的光线画成弧线：淡金是 HTTP 接口（桌面端 → AI 服务、桌面端 → 云端），淡青是 IPC 消息（预加载 → 主进程）。
+ *   函数调用只在同一类语言里连得上，这几条弧线把前后端连起来
+ * - 测试文件调暗（也可以在界面上隐藏）
+ * - 名字防重叠：每隔几帧按优先级重新摆一遍，挡住的先不显示
+ * - 布局：d3-force-3d 力导向。光线把相关的文件拉近，星球之间互相排斥；每个文件被拉向自己模块的中心，
+ *   模块的中心排在子项目的「星系」周围
+ * - 画：Three.js。星球 = 球体 + 叠加发光的光晕；光线、光点各一批（一次绘制）；最后过一遍泛光（UnrealBloom）
  * - 报错：出错的星球变红、一跳一跳的，调用链上的变橙，它们之间的光线变亮，其余的暗下去
  *
  * 只用项目里已有的 three（和 VRM 角色同一份），不引入另一份 three。
@@ -16,18 +23,32 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, forceZ, type Simulation } from 'd3-force-3d'
-import type { CodeGraph, GraphNode } from '../../../shared/workbench'
+import type { CodeGraph, GraphNode, LinkKind } from '../../../shared/workbench'
 import {
   CHAIN_COLOR,
+  HTTP_COLOR,
+  IPC_COLOR,
   READ_COLOR,
   TOUCH_COLOR,
   ERROR_COLOR,
+  buildModules,
   groupAnchors,
   groupColors,
+  kindOf,
   labelled,
   linkKey,
+  moduleAnchors,
+  moduleOf,
+  moduleRadius,
   nodeRadius,
-  type Highlight
+  placeLabels,
+  textWidth,
+  zoomLevel,
+  type Highlight,
+  type LabelBox,
+  type ModuleInfo,
+  type ModuleLink,
+  type Vec3
 } from './layout'
 
 interface Star extends GraphNode {
@@ -36,6 +57,10 @@ interface Star extends GraphNode {
   z?: number
   radius: number
   color: THREE.Color
+  mod: string
+  anchor: Vec3
+  /** 画在哪：拉远时往模块中心收拢（力导向算的是 x、y、z，这里是画出来的位置） */
+  at: THREE.Vector3
 }
 
 interface Ray {
@@ -43,6 +68,7 @@ interface Ray {
   target: Star | string
   weight: number
   key: string
+  kind: LinkKind
 }
 
 interface Planet {
@@ -50,18 +76,49 @@ interface Planet {
   mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>
   halo: THREE.Sprite
   label: CSS2DObject | null
+  /** 报错、调用链、选中、改过、悬停：拉远时也不淡下去 */
+  lit: boolean
+  /** 按选中、报错算出来的透明度；拉远时再乘上淡出的比例 */
+  base: { mesh: number; halo: number }
+}
+
+/** 一个模块：拉远时是一颗大星，拉近时只剩一层星云和名字 */
+interface Cluster {
+  info: ModuleInfo
+  color: THREE.Color
+  stars: Star[]
+  center: THREE.Vector3
+  extent: number
+  radius: number
+  sun: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>
+  halo: THREE.Sprite
+  nebula: THREE.Sprite
+  label: CSS2DObject
+}
+
+interface Galaxy {
+  group: string
+  stars: Star[]
+  label: CSS2DObject
 }
 
 const BACKGROUND = 0x04060d
 const DIM = 0.22 // 有报错高亮时，其余的星球暗到多少
+const TEST_DIM = 0.5 // 测试文件暗到多少
 const FLY_MS = 900
 const FLASH_MS = 1200
+const COLLAPSE = 0.72 // 拉到最远时，文件往模块中心收拢多少
+const BRIDGE_SEGMENTS = 18 // 一条弧线分几段画
+const LABEL_EVERY = 4 // 每隔几帧重新摆一次名字
+const SWAY = 0.32 // 没人动时左右晃多少（弧度，约 18°）
 
 export class StarMap {
   /** 点了星球（点空白处是 null） */
   onSelect: (node: GraphNode | null) => void = () => {}
   /** 鼠标移到星球上（移开是 null）；坐标是相对画布的 */
   onHover: (node: GraphNode | null, x: number, y: number) => void = () => {}
+  /** 鼠标移到模块的大星上（移开是 null） */
+  onHoverModule: (m: ModuleInfo | null, x: number, y: number) => void = () => {}
 
   private renderer: THREE.WebGLRenderer
   /** 名字用 HTML 叠在上面：字清楚，也不会被泛光糊掉 */
@@ -74,15 +131,27 @@ export class StarMap {
   private glow = makeGlowTexture()
   private sphere = new THREE.SphereGeometry(1, 28, 18)
   private planets = new Map<string, Planet>()
+  private clusters = new Map<string, Cluster>()
+  private galaxies: Galaxy[] = []
   private stars: Star[] = []
+  /** 函数调用（文件之间） */
   private rays: Ray[] = []
+  /** 跨进程：HTTP、IPC（画成弧线） */
+  private bridges: Ray[] = []
+  private moduleRays: ModuleLink[] = []
   private lines: THREE.LineSegments | null = null
   private sparks: THREE.Points | null = null
   private sparkPhase: Float32Array = new Float32Array(0)
+  private arcs: THREE.LineSegments | null = null
+  private arcSparks: THREE.Points | null = null
+  private arcPhase: Float32Array = new Float32Array(0)
+  private moduleLines: THREE.LineSegments | null = null
+  private center = new THREE.Vector3()
   private sim: Simulation<Star> | null = null
   private highlight: Highlight | null = null
   private selected: string | null = null
   private hovered: string | null = null
+  private hoveredModule: string | null = null
   private showLabels = new Set<string>()
   private fly: { from: THREE.Vector3; to: THREE.Vector3; aimFrom: THREE.Vector3; aimTo: THREE.Vector3; start: number } | null = null
   private raycaster = new THREE.Raycaster()
@@ -90,8 +159,15 @@ export class StarMap {
   private pressed: { x: number; y: number } | null = null
   private clock = new THREE.Clock()
   private frame = 0
+  private frames = 0
+  /** 0 = 近（看文件），1 = 远（看模块） */
+  private zoom = 1
+  /** 「看全部」时镜头离中心多远：远近按它来算 */
+  private fitDistance = 260
   /** 用户自己转过、缩放过镜头：布局稳定后就不再自动取景 */
   private userMoved = false
+  /** 自己左右晃：从哪个方位角、哪个时刻开始晃（用户动了镜头就是 null） */
+  private sway: { theta: number; start: number } | null = null
   /** 正在放的特效（法阵、光环） */
   private effects: { obj: THREE.Object3D; start: number; ms: number; step: (obj: THREE.Object3D, f: number) => number }[] = []
   /** 工作窗口里她这次改过的文件（变绿、显示名字） */
@@ -114,10 +190,8 @@ export class StarMap {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.08
-    this.controls.autoRotate = true
-    this.controls.autoRotateSpeed = 0.35
     this.controls.addEventListener('start', () => {
-      this.controls.autoRotate = false // 用户动手了就不自己转了
+      this.sway = null // 用户动手了就不自己晃了
       this.fly = null
       this.userMoved = true
     })
@@ -148,46 +222,66 @@ export class StarMap {
     this.clear()
     const colors = groupColors(graph.nodes)
     const groups = [...colors.keys()]
-    const anchors = groupAnchors(groups)
-    this.showLabels = labelled(graph.nodes)
+    const sizes = groups.map((g) => graph.nodes.filter((n) => n.group === g).length)
+    const anchors = groupAnchors(groups, sizes)
+    const { modules, links: moduleLinks } = buildModules(graph)
+    const placed = moduleAnchors(modules, anchors)
+    this.showLabels = labelled(graph.nodes, 40)
 
     this.stars = graph.nodes.map((n) => {
-      const [ax, ay, az] = anchors.get(n.group) ?? [0, 0, 0]
+      const mod = moduleOf(n)
+      const anchor = placed.get(mod) ?? anchors.get(n.group) ?? [0, 0, 0]
       const base = new THREE.Color(colors.get(n.group) ?? '#8fa8ff')
-      // 没提交的改动亮一点（往白色混一些）
-      const color = n.modified ? base.clone().lerp(new THREE.Color('#ffffff'), 0.28) : base
+      // 没提交的改动亮一点（往白色混一些）；测试文件往灰色混
+      let color = n.modified ? base.clone().lerp(new THREE.Color('#ffffff'), 0.28) : base
+      if (n.test) color = color.clone().lerp(new THREE.Color('#5d6782'), 0.55)
       return {
         ...n,
-        radius: nodeRadius(n.lines),
+        mod,
+        anchor,
+        radius: nodeRadius(n.lines) * (n.test ? 0.8 : 1),
         color,
-        x: ax + (Math.random() - 0.5) * 40,
-        y: ay + (Math.random() - 0.5) * 40,
-        z: az + (Math.random() - 0.5) * 40
+        at: new THREE.Vector3(),
+        x: anchor[0] + (Math.random() - 0.5) * 20,
+        y: anchor[1] + (Math.random() - 0.5) * 20,
+        z: anchor[2] + (Math.random() - 0.5) * 20
       }
     })
     const known = new Set(this.stars.map((s) => s.id))
-    this.rays = graph.links
-      .filter((l) => known.has(l.source) && known.has(l.target))
-      .map((l) => ({ source: l.source, target: l.target, weight: l.weight, key: linkKey(l) }))
+    const kept = graph.links.filter((l) => known.has(l.source) && known.has(l.target))
+    const toRay = (l: (typeof kept)[number]): Ray => ({
+      source: l.source,
+      target: l.target,
+      weight: l.weight,
+      key: linkKey(l),
+      kind: kindOf(l)
+    })
+    this.rays = kept.filter((l) => kindOf(l) === 'call').map(toRay)
+    this.bridges = kept.filter((l) => kindOf(l) !== 'call').map(toRay)
+    this.moduleRays = moduleLinks.filter((l) => l.kind === 'call')
 
     for (const star of this.stars) this.addPlanet(star)
+    for (const m of modules) this.addCluster(m, new THREE.Color(colors.get(m.group) ?? '#8fa8ff'))
+    for (const g of groups) this.addGalaxy(g, colors.get(g) ?? '#8fa8ff')
     this.buildRays()
 
+    // 弧线也参与布局：拉得比函数调用松一些（前后端本来就在两个星系里）
+    const pulls = [...this.rays, ...this.bridges]
     this.sim = forceSimulation<Star>(this.stars, 3)
       .force(
         'link',
-        forceLink<Star, Ray>(this.rays)
+        forceLink<Star, Ray>(pulls)
           .id((s) => s.id)
-          .distance((r) => 16 + 26 / Math.sqrt(r.weight))
-          .strength(0.25)
+          .distance((r) => (r.kind === 'call' ? 16 + 26 / Math.sqrt(r.weight) : 120))
+          .strength((r) => (r.kind === 'call' ? 0.22 : 0.01))
       )
-      .force('charge', forceManyBody<Star>().strength(-38).distanceMax(220))
+      .force('charge', forceManyBody<Star>().strength(-34).distanceMax(160))
       .force('collide', forceCollide<Star>((s) => s.radius + 1.5).strength(0.8))
-      .force('x', forceX<Star>((s) => anchors.get(s.group)?.[0] ?? 0).strength(0.05))
-      .force('y', forceY<Star>((s) => anchors.get(s.group)?.[1] ?? 0).strength(0.05))
-      .force('z', forceZ<Star>((s) => anchors.get(s.group)?.[2] ?? 0).strength(0.05))
+      .force('x', forceX<Star>((s) => s.anchor[0]).strength(0.09))
+      .force('y', forceY<Star>((s) => s.anchor[1]).strength(0.09))
+      .force('z', forceZ<Star>((s) => s.anchor[2]).strength(0.09))
       .stop()
-    this.sim.tick(300) // 先在后台排好大半，一打开就是差不多的样子（一两百个文件不到 0.1 秒）；剩下的几秒慢慢稳定
+    this.sim.tick(300) // 先在后台排好大半，一打开就是差不多的样子；剩下的几秒慢慢稳定
     this.sync()
     this.userMoved = false
     this.frameAll()
@@ -275,15 +369,16 @@ export class StarMap {
   /** 窗口比例坐标下的星球（手势光标用） */
   pickAt(x: number, y: number): GraphNode | null {
     const rect = this.renderer.domElement.getBoundingClientRect()
-    return this.pick(rect.left + x * rect.width, rect.top + y * rect.height)?.star ?? null
+    const hit = this.pick(rect.left + x * rect.width, rect.top + y * rect.height)
+    return hit && 'star' in hit ? hit.star : null
   }
 
   /** 手势光标移到星球上：和鼠标悬停一样显示名字 */
   hoverAt(p: { x: number; y: number } | null): void {
     if (!p) return this.setHovered(null, 0, 0)
     const rect = this.renderer.domElement.getBoundingClientRect()
-    const planet = this.pick(rect.left + p.x * rect.width, rect.top + p.y * rect.height)
-    this.setHovered(planet, p.x * rect.width, p.y * rect.height)
+    const hit = this.pick(rect.left + p.x * rect.width, rect.top + p.y * rect.height)
+    this.setHovered(hit, p.x * rect.width, p.y * rect.height)
   }
 
   /** 唤出：镜头中心展开一个旋转的法阵，然后淡掉 */
@@ -332,21 +427,25 @@ export class StarMap {
   }
 
   private takeOver(): void {
-    this.controls.autoRotate = false
+    this.sway = null
     this.fly = null
     this.userMoved = true
   }
 
-  /** 镜头拉远，看整个星图 */
+  /** 镜头拉远，看整个星图（这时看到的是模块） */
   frameAll(): void {
     const box = new THREE.Box3()
-    for (const p of this.planets.values()) box.expandByPoint(p.mesh.position)
+    for (const s of this.stars) box.expandByPoint(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0))
     if (box.isEmpty()) return
     const center = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3()).length()
-    this.camera.position.copy(center).add(new THREE.Vector3(0, size * 0.25, size * 0.95 + 60))
+    const offset = new THREE.Vector3(0, size * 0.18, size * 0.62 + 50)
+    this.fly = null
+    this.camera.position.copy(center).add(offset)
     this.controls.target.copy(center)
     this.controls.update()
+    this.fitDistance = offset.length()
+    if (!this.userMoved) this.sway = { theta: new THREE.Spherical().setFromVector3(offset).theta, start: this.clock.elapsedTime }
   }
 
   dispose(): void {
@@ -369,24 +468,36 @@ export class StarMap {
   private clear(): void {
     this.sim?.stop()
     this.sim = null
+    const dropLabel = (label: CSS2DObject | null): void => {
+      if (!label) return
+      this.scene.remove(label)
+      label.element.remove()
+    }
     for (const p of this.planets.values()) {
       this.scene.remove(p.mesh, p.halo)
       p.mesh.material.dispose()
       p.halo.material.dispose()
-      if (p.label) {
-        this.scene.remove(p.label)
-        p.label.element.remove()
-      }
+      dropLabel(p.label)
     }
     this.planets.clear()
-    for (const obj of [this.lines, this.sparks]) {
+    for (const c of this.clusters.values()) {
+      this.scene.remove(c.sun, c.halo, c.nebula)
+      c.sun.material.dispose()
+      c.halo.material.dispose()
+      c.nebula.material.dispose()
+      dropLabel(c.label)
+    }
+    this.clusters.clear()
+    for (const g of this.galaxies) dropLabel(g.label)
+    this.galaxies = []
+    for (const obj of [this.lines, this.sparks, this.arcs, this.arcSparks, this.moduleLines]) {
       if (!obj) continue
       this.scene.remove(obj)
       obj.geometry.dispose()
       ;(obj.material as THREE.Material).dispose()
     }
-    this.lines = this.sparks = null
-    this.selected = this.hovered = null
+    this.lines = this.sparks = this.arcs = this.arcSparks = this.moduleLines = null
+    this.selected = this.hovered = this.hoveredModule = null
     this.touched.clear()
     for (const f of this.flashes) {
       this.scene.remove(f.sprite)
@@ -400,73 +511,87 @@ export class StarMap {
     const mesh = new THREE.Mesh(this.sphere, new THREE.MeshBasicMaterial({ color: star.color, transparent: true }))
     mesh.scale.setScalar(star.radius)
     mesh.userData.id = star.id
-    const halo = new THREE.Sprite(
+    const halo = this.glowSprite(star.color, 0.55)
+    halo.scale.setScalar(star.radius * 4.2)
+    this.scene.add(mesh, halo)
+    this.planets.set(star.id, { star, mesh, halo, label: null, lit: false, base: { mesh: 1, halo: 0.55 } })
+  }
+
+  private addCluster(info: ModuleInfo, groupColor: THREE.Color): void {
+    const color = info.test ? groupColor.clone().lerp(new THREE.Color('#5d6782'), 0.55) : groupColor.clone()
+    const radius = moduleRadius(info.lines) * (info.test ? 0.8 : 1)
+    const sun = new THREE.Mesh(this.sphere, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 }))
+    sun.userData.module = info.id
+    sun.scale.setScalar(radius)
+    const halo = this.glowSprite(color, 0)
+    halo.scale.setScalar(radius * 5)
+    // 星云：只是一层很淡的光，不参与泛光（亮度低于泛光门槛）
+    const nebula = this.glowSprite(color, 0.07)
+    nebula.renderOrder = -1
+    const label = makeModuleLabel(info.label, `#${color.getHexString()}`)
+    this.scene.add(nebula, sun, halo, label)
+    const stars = this.stars.filter((s) => s.mod === info.id)
+    this.clusters.set(info.id, { info, color, stars, center: new THREE.Vector3(), extent: 10, radius, sun, halo, nebula, label })
+  }
+
+  private addGalaxy(group: string, color: string): void {
+    const label = makeGalaxyLabel(group, color)
+    this.scene.add(label)
+    this.galaxies.push({ group, stars: this.stars.filter((s) => s.group === group), label })
+  }
+
+  private glowSprite(color: THREE.Color, opacity: number): THREE.Sprite {
+    return new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: this.glow,
-        color: star.color,
+        color,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         transparent: true,
-        opacity: 0.55
+        opacity
       })
     )
-    halo.scale.setScalar(star.radius * 4.2)
-    this.scene.add(mesh, halo)
-    this.planets.set(star.id, { star, mesh, halo, label: null })
   }
 
   private buildRays(): void {
-    const n = this.rays.length
-    const lineGeo = new THREE.BufferGeometry()
-    lineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 6), 3))
-    lineGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 6), 3))
+    const additive = { transparent: true, blending: THREE.AdditiveBlending, depthWrite: false } as const
+    // 函数调用：一条一段
     this.lines = new THREE.LineSegments(
-      lineGeo,
-      new THREE.LineBasicMaterial({
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.5,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      })
+      lineGeometry(this.rays.length * 2),
+      new THREE.LineBasicMaterial({ vertexColors: true, opacity: 0.5, ...additive })
     )
     // 光点：每条光线一个，调用多的两个，沿调用方向流动
-    const counts = this.rays.map((r) => (r.weight > 3 ? 2 : 1))
-    const total = counts.reduce((a, b) => a + b, 0)
-    const sparkGeo = new THREE.BufferGeometry()
-    sparkGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(total * 3), 3))
-    sparkGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(total * 3), 3))
-    this.sparkPhase = new Float32Array(total)
-    const owner = new Uint32Array(total)
-    let k = 0
-    counts.forEach((c, i) => {
-      for (let j = 0; j < c; j++) {
-        owner[k] = i
-        this.sparkPhase[k] = Math.random()
-        k++
-      }
-    })
-    sparkGeo.userData.owner = owner
+    const built = sparkGeometry(this.rays.map((r) => (r.weight > 3 ? 2 : 1)))
+    this.sparkPhase = built.phase
     this.sparks = new THREE.Points(
-      sparkGeo,
-      new THREE.PointsMaterial({
-        size: 2.2,
-        map: this.glow,
-        vertexColors: true,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      })
+      built.geometry,
+      new THREE.PointsMaterial({ size: 2.2, map: this.glow, vertexColors: true, ...additive })
     )
-    this.scene.add(this.lines, this.sparks)
+    // 跨进程：每条弧线分 BRIDGE_SEGMENTS 段，光点大一些
+    this.arcs = new THREE.LineSegments(
+      lineGeometry(this.bridges.length * BRIDGE_SEGMENTS * 2),
+      new THREE.LineBasicMaterial({ vertexColors: true, opacity: 0.8, ...additive })
+    )
+    const arcBuilt = sparkGeometry(this.bridges.map((r) => Math.min(4, 1 + r.weight)))
+    this.arcPhase = arcBuilt.phase
+    this.arcSparks = new THREE.Points(
+      arcBuilt.geometry,
+      new THREE.PointsMaterial({ size: 3.6, map: this.glow, vertexColors: true, ...additive })
+    )
+    // 模块之间（拉远时）
+    this.moduleLines = new THREE.LineSegments(
+      lineGeometry(this.moduleRays.length * 2),
+      new THREE.LineBasicMaterial({ vertexColors: true, opacity: 0, ...additive })
+    )
+    this.scene.add(this.lines, this.sparks, this.arcs, this.arcSparks, this.moduleLines)
     this.applyStyles()
   }
 
-  /** 按现在的选中、悬停、报错高亮，给星球、光线、光点上色 */
+  /** 按现在的选中、悬停、报错高亮，给星球、光线、光点上色；透明度再由远近（applyZoom）决定 */
   private applyStyles(): void {
     const h = this.highlight
-    const lit = (id: string): boolean =>
-      !h || h.error.has(id) || h.chain.has(id) || id === this.selected || this.touched.has(id)
+    const special = (id: string): boolean =>
+      !!h?.error.has(id) || !!h?.chain.has(id) || id === this.selected || this.touched.has(id) || id === this.hovered
     for (const p of this.planets.values()) {
       const id = p.star.id
       const color = h?.error.has(id)
@@ -478,31 +603,28 @@ export class StarMap {
             : p.star.color
       p.mesh.material.color.copy(color)
       p.halo.material.color.copy(color)
-      const on = lit(id)
-      p.mesh.material.opacity = on ? 1 : DIM
-      p.halo.material.opacity = on ? (id === this.selected ? 0.95 : 0.55) : DIM * 0.6
-      const labelOn = id === this.selected || id === this.hovered || !!h?.error.has(id) || !!h?.chain.has(id) ||
-        this.touched.has(id) || (!h && this.showLabels.has(id))
-      if (labelOn && !p.label) {
+      p.lit = special(id)
+      const on = !h || p.lit
+      const test = p.star.test && !p.lit ? TEST_DIM : 1
+      p.base.mesh = (on ? 1 : DIM) * test
+      p.base.halo = (on ? (id === this.selected ? 0.95 : 0.55) : DIM * 0.6) * test
+      if (!p.label && (p.lit || (!h && this.showLabels.has(id)))) {
         p.label = makeLabel(p.star.name)
-        p.label.position.copy(p.mesh.position).y += p.star.radius + 2
+        p.label.visible = false
         this.scene.add(p.label)
       }
-      if (p.label) {
-        p.label.visible = labelOn
-        p.label.element.classList.toggle('error', !!h?.error.has(id))
-      }
+      p.label?.element.classList.toggle('error', !!h?.error.has(id))
     }
 
+    const near = (r: Ray): boolean =>
+      !!this.selected && (starId(r.source) === this.selected || starId(r.target) === this.selected)
     if (this.lines) {
       const colors = this.lines.geometry.getAttribute('color') as THREE.BufferAttribute
       this.rays.forEach((r, i) => {
         const hot = h?.links.has(r.key)
         const src = this.planets.get(starId(r.source))
-        const near = this.selected && (starId(r.source) === this.selected || starId(r.target) === this.selected)
         const c = hot ? new THREE.Color(ERROR_COLOR) : (src?.star.color ?? new THREE.Color('#8fa8ff')).clone()
-        const k = hot ? 1 : h ? 0.08 : near ? 1 : 0.5
-        c.multiplyScalar(k)
+        c.multiplyScalar(hot ? 1 : h ? 0.08 : near(r) ? 1 : src?.star.test ? 0.22 : 0.5)
         colors.setXYZ(i * 2, c.r, c.g, c.b)
         colors.setXYZ(i * 2 + 1, c.r, c.g, c.b)
       })
@@ -514,12 +636,70 @@ export class StarMap {
       owner.forEach((i, k) => {
         const r = this.rays[i]
         const hot = h?.links.has(r.key)
-        const c = hot ? new THREE.Color(CHAIN_COLOR) : (this.planets.get(starId(r.source))?.star.color ?? new THREE.Color('#ffffff')).clone()
-        c.multiplyScalar(hot ? 1.2 : h ? 0.1 : 0.85)
+        const src = this.planets.get(starId(r.source))
+        const c = hot ? new THREE.Color(CHAIN_COLOR) : (src?.star.color ?? new THREE.Color('#ffffff')).clone()
+        c.multiplyScalar(hot ? 1.2 : h ? 0.1 : src?.star.test ? 0.35 : 0.85)
         colors.setXYZ(k, c.r, c.g, c.b)
       })
       colors.needsUpdate = true
     }
+    const bridgeColor = (r: Ray, boost: number): THREE.Color => {
+      const test = this.planets.get(starId(r.source))?.star.test
+      const k = near(r) ? 1.25 : h ? (h.links.has(r.key) ? 1 : 0.12) : test ? 0.1 : 0.62
+      return new THREE.Color(r.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR).multiplyScalar(k * boost)
+    }
+    if (this.arcs) {
+      const colors = this.arcs.geometry.getAttribute('color') as THREE.BufferAttribute
+      this.bridges.forEach((r, i) => {
+        const c = bridgeColor(r, 1)
+        for (let s = 0; s < BRIDGE_SEGMENTS * 2; s++) colors.setXYZ(i * BRIDGE_SEGMENTS * 2 + s, c.r, c.g, c.b)
+      })
+      colors.needsUpdate = true
+    }
+    if (this.arcSparks) {
+      const colors = this.arcSparks.geometry.getAttribute('color') as THREE.BufferAttribute
+      const owner = this.arcSparks.geometry.userData.owner as Uint32Array
+      owner.forEach((i, k) => {
+        const c = bridgeColor(this.bridges[i], 1.3)
+        colors.setXYZ(k, c.r, c.g, c.b)
+      })
+      colors.needsUpdate = true
+    }
+    if (this.moduleLines) {
+      const colors = this.moduleLines.geometry.getAttribute('color') as THREE.BufferAttribute
+      this.moduleRays.forEach((r, i) => {
+        const src = this.clusters.get(r.source)
+        const c = (src?.color ?? new THREE.Color('#8fa8ff')).clone()
+        c.multiplyScalar((h ? 0.15 : src?.info.test ? 0.25 : 0.4) + Math.min(0.6, Math.log2(r.weight + 1) * 0.12))
+        colors.setXYZ(i * 2, c.r, c.g, c.b)
+        colors.setXYZ(i * 2 + 1, c.r, c.g, c.b)
+      })
+      colors.needsUpdate = true
+    }
+    this.applyZoom()
+    if (this.sim) this.sync() // 选中、报错的文件拉远时也不收拢：位置马上跟着变
+  }
+
+  /** 远近：文件淡下去、模块的大星和模块之间的光线亮起来（中间平滑过渡） */
+  private applyZoom(): void {
+    const t = this.zoom
+    const fade = 1 - 0.8 * t
+    for (const p of this.planets.values()) {
+      p.mesh.material.opacity = p.lit ? p.base.mesh : p.base.mesh * fade
+      p.halo.material.opacity = p.lit ? p.base.halo : p.base.halo * fade
+    }
+    const h = this.highlight
+    for (const c of this.clusters.values()) {
+      const hot = !h || c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))
+      const k = (hot ? 1 : 0.3) * (c.info.test ? TEST_DIM : 1) * (c.info.id === this.hoveredModule ? 1.3 : 1)
+      c.sun.material.opacity = Math.min(1, 0.95 * t * k)
+      c.halo.material.opacity = Math.min(1, 0.5 * t * k)
+      c.nebula.material.opacity = (0.05 + 0.04 * (1 - t)) * (hot ? 1 : 0.5) * (c.info.test ? 0.6 : 1)
+      c.sun.visible = c.halo.visible = t > 0.02
+    }
+    if (this.lines) (this.lines.material as THREE.LineBasicMaterial).opacity = 0.5 * (1 - 0.85 * t)
+    if (this.sparks) (this.sparks.material as THREE.PointsMaterial).opacity = 1 - 0.9 * t
+    if (this.moduleLines) (this.moduleLines.material as THREE.LineBasicMaterial).opacity = 0.75 * t
   }
 
   // ---------- 每一帧 ----------
@@ -528,65 +708,162 @@ export class StarMap {
     this.frame = requestAnimationFrame(this.loop)
     const dt = Math.min(this.clock.getDelta(), 0.05)
     const t = this.clock.elapsedTime
+    let moved = false
     if (this.sim && this.sim.alpha() > this.sim.alphaMin()) {
       this.sim.tick()
-      this.sync()
+      moved = true
       // 刚稳定下来：星图还在往外散的时候取的景不准，再取一次（用户动过镜头、正在飞向某颗星就不管）
       if (this.sim.alpha() <= this.sim.alphaMin() && !this.userMoved && !this.fly && !this.selected) this.frameAll()
     }
+    this.flyStep()
+    this.swayStep(t)
+    this.controls.update()
+    const zoom = zoomLevel(this.camera.position.distanceTo(this.controls.target), this.fitDistance)
+    if (Math.abs(zoom - this.zoom) > 0.002) {
+      this.zoom = zoom
+      moved = true
+      this.applyZoom()
+    }
+    if (moved) this.sync()
     this.flowSparks(dt)
     this.pulse(t)
-    this.flyStep()
-    this.controls.update()
     this.runEffects()
     this.runFlashes()
+    if (this.frames++ % LABEL_EVERY === 0) this.placeAllLabels()
     this.composer.render()
     this.labels.render(this.scene, this.camera)
   }
 
-  /** 把力导向算出来的位置放到场景里 */
+  /** 把力导向算出来的位置放到场景里：先算每个模块的中心，拉远时文件往模块中心收拢 */
   private sync(): void {
+    const collapse = COLLAPSE * this.zoom
+    this.center.set(0, 0, 0)
+    for (const s of this.stars) this.center.add(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0))
+    if (this.stars.length) this.center.divideScalar(this.stars.length)
+    for (const c of this.clusters.values()) {
+      c.center.set(0, 0, 0)
+      for (const s of c.stars) c.center.add(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0))
+      if (c.stars.length) c.center.divideScalar(c.stars.length)
+      let far = 0
+      for (const s of c.stars) far = Math.max(far, Math.hypot((s.x ?? 0) - c.center.x, (s.y ?? 0) - c.center.y, (s.z ?? 0) - c.center.z))
+      c.extent = far + 6
+      c.sun.position.copy(c.center)
+      c.halo.position.copy(c.center)
+      c.nebula.position.copy(c.center)
+      c.nebula.scale.setScalar(c.extent * 2.6 + c.radius * 3)
+      c.label.position.set(c.center.x, c.center.y + c.radius + 3, c.center.z)
+    }
+    for (const g of this.galaxies) {
+      let top = -Infinity
+      const mid = new THREE.Vector3()
+      for (const s of g.stars) {
+        top = Math.max(top, s.y ?? 0)
+        mid.add(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0))
+      }
+      if (g.stars.length) mid.divideScalar(g.stars.length)
+      g.label.position.set(mid.x, top + 14, mid.z)
+    }
     for (const p of this.planets.values()) {
-      const { x = 0, y = 0, z = 0, radius } = p.star
-      p.mesh.position.set(x, y, z)
-      p.halo.position.set(x, y, z)
-      p.label?.position.set(x, y + radius + 2, z)
+      const s = p.star
+      const c = this.clusters.get(s.mod)
+      const pos = new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0)
+      if (c && !p.lit) pos.lerp(c.center, collapse)
+      s.at.copy(pos)
+      p.mesh.position.copy(pos)
+      p.halo.position.copy(pos)
+      p.label?.position.set(pos.x, pos.y + s.radius + 2, pos.z)
     }
     if (this.lines) {
       const pos = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute
       this.rays.forEach((r, i) => {
-        const a = r.source as Star
-        const b = r.target as Star
-        pos.setXYZ(i * 2, a.x ?? 0, a.y ?? 0, a.z ?? 0)
-        pos.setXYZ(i * 2 + 1, b.x ?? 0, b.y ?? 0, b.z ?? 0)
+        const a = (r.source as Star).at
+        const b = (r.target as Star).at
+        pos.setXYZ(i * 2, a.x, a.y, a.z)
+        pos.setXYZ(i * 2 + 1, b.x, b.y, b.z)
       })
       pos.needsUpdate = true
       this.lines.geometry.computeBoundingSphere()
     }
+    if (this.arcs) {
+      const pos = this.arcs.geometry.getAttribute('position') as THREE.BufferAttribute
+      const p = new THREE.Vector3()
+      const q = new THREE.Vector3()
+      this.bridges.forEach((r, i) => {
+        const [a, ctrl, b] = this.arcOf(r)
+        for (let s = 0; s < BRIDGE_SEGMENTS; s++) {
+          bezier(a, ctrl, b, s / BRIDGE_SEGMENTS, p)
+          bezier(a, ctrl, b, (s + 1) / BRIDGE_SEGMENTS, q)
+          const k = (i * BRIDGE_SEGMENTS + s) * 2
+          pos.setXYZ(k, p.x, p.y, p.z)
+          pos.setXYZ(k + 1, q.x, q.y, q.z)
+        }
+      })
+      pos.needsUpdate = true
+      this.arcs.geometry.computeBoundingSphere()
+    }
+    if (this.moduleLines) {
+      const pos = this.moduleLines.geometry.getAttribute('position') as THREE.BufferAttribute
+      this.moduleRays.forEach((r, i) => {
+        const a = this.clusters.get(r.source)?.center ?? this.center
+        const b = this.clusters.get(r.target)?.center ?? this.center
+        pos.setXYZ(i * 2, a.x, a.y, a.z)
+        pos.setXYZ(i * 2 + 1, b.x, b.y, b.z)
+      })
+      pos.needsUpdate = true
+      this.moduleLines.geometry.computeBoundingSphere()
+    }
+  }
+
+  /** 一条跨进程弧线：两头是文件（画出来的位置），中间往上、往外拱起来 */
+  private arcOf(r: Ray): [THREE.Vector3, THREE.Vector3, THREE.Vector3] {
+    const a = (r.source as Star).at
+    const b = (r.target as Star).at
+    const mid = a.clone().add(b).multiplyScalar(0.5)
+    const len = a.distanceTo(b)
+    const out = mid.clone().sub(this.center)
+    if (out.lengthSq() < 1e-6) out.set(0, 1, 0)
+    const ctrl = mid.add(out.normalize().multiplyScalar(len * 0.18)).add(new THREE.Vector3(0, len * 0.32, 0))
+    return [a, ctrl, b]
   }
 
   private flowSparks(dt: number): void {
-    if (!this.sparks) return
-    const pos = this.sparks.geometry.getAttribute('position') as THREE.BufferAttribute
-    const owner = this.sparks.geometry.userData.owner as Uint32Array
     const h = this.highlight
-    owner.forEach((i, k) => {
-      const r = this.rays[i]
-      const speed = h?.links.has(r.key) ? 0.9 : 0.25
-      this.sparkPhase[k] = (this.sparkPhase[k] + dt * speed) % 1
-      const f = this.sparkPhase[k]
-      const a = r.source as Star
-      const b = r.target as Star
-      pos.setXYZ(k, lerp(a.x, b.x, f), lerp(a.y, b.y, f), lerp(a.z, b.z, f))
-    })
-    pos.needsUpdate = true
-    this.sparks.geometry.computeBoundingSphere()
+    if (this.sparks) {
+      const pos = this.sparks.geometry.getAttribute('position') as THREE.BufferAttribute
+      const owner = this.sparks.geometry.userData.owner as Uint32Array
+      owner.forEach((i, k) => {
+        const r = this.rays[i]
+        const speed = h?.links.has(r.key) ? 0.9 : 0.25
+        this.sparkPhase[k] = (this.sparkPhase[k] + dt * speed) % 1
+        const f = this.sparkPhase[k]
+        const a = (r.source as Star).at
+        const b = (r.target as Star).at
+        pos.setXYZ(k, a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f)
+      })
+      pos.needsUpdate = true
+      this.sparks.geometry.computeBoundingSphere()
+    }
+    if (this.arcSparks) {
+      const pos = this.arcSparks.geometry.getAttribute('position') as THREE.BufferAttribute
+      const owner = this.arcSparks.geometry.userData.owner as Uint32Array
+      const p = new THREE.Vector3()
+      owner.forEach((i, k) => {
+        const r = this.bridges[i]
+        this.arcPhase[k] = (this.arcPhase[k] + dt * 0.22) % 1
+        const [a, ctrl, b] = this.arcOf(r)
+        bezier(a, ctrl, b, this.arcPhase[k], p)
+        pos.setXYZ(k, p.x, p.y, p.z)
+      })
+      pos.needsUpdate = true
+      this.arcSparks.geometry.computeBoundingSphere()
+    }
   }
 
-  /** 出错的星球一跳一跳的，选中的慢慢呼吸 */
+  /** 出错的星球一跳一跳的，选中的慢慢呼吸；拉远时文件变小 */
   private pulse(t: number): void {
+    const shrink = 1 - 0.45 * this.zoom
     for (const p of this.planets.values()) {
-      const r = p.star.radius
+      const r = p.star.radius * (p.lit ? 1 : shrink)
       let k = 1
       if (this.highlight?.error.has(p.star.id)) k = 1 + 0.18 * Math.sin(t * 6)
       else if (p.star.id === this.selected) k = 1 + 0.06 * Math.sin(t * 2.5)
@@ -595,14 +872,75 @@ export class StarMap {
     }
   }
 
+  /**
+   * 名字防重叠：星系名最先摆；拉远时模块名优先，拉近时文件名优先（报错、选中、改过的文件始终最先）。
+   * 屏幕外的、被挡住的先不显示
+   */
+  private placeAllLabels(): void {
+    const w = this.el.clientWidth
+    const hgt = this.el.clientHeight
+    const far = this.zoom >= 0.45
+    const h = this.highlight
+    const boxes: LabelBox[] = []
+    const objects = new Map<string, CSS2DObject>()
+    const v = new THREE.Vector3()
+    const add = (id: string, obj: CSS2DObject, text: string, size: number, lift: number, priority: number): void => {
+      v.copy(obj.position).project(this.camera)
+      if (v.z > 1 || Math.abs(v.x) > 1.02 || Math.abs(v.y) > 1.02) return
+      const bw = textWidth(text, size) + 14
+      const bh = size + 6
+      boxes.push({ id, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * hgt - lift - bh / 2, w: bw, h: bh, priority })
+      objects.set(id, obj)
+    }
+    for (const g of this.galaxies) add(`g:${g.group}`, g.label, g.group, 18, 0, 10_000)
+    for (const c of this.clusters.values()) {
+      if (h && !c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))) continue
+      const size = Math.log10(c.info.lines + 10)
+      add(`m:${c.info.id}`, c.label, c.info.label, 13, 0, (far ? 5_000 : 50) + size * (c.info.test ? 1 : 10))
+    }
+    for (const p of this.planets.values()) {
+      if (!p.label) continue
+      const wanted = p.lit || (!h && !far && this.showLabels.has(p.star.id))
+      if (!wanted) continue
+      const rank = (p.star.test ? 20 : 100) + Math.log10(p.star.lines + 10) * 10 // 测试文件的名字排在后面
+      add(`f:${p.star.id}`, p.label, p.star.name, 12, 10, p.lit ? 9_000 : rank)
+    }
+    const shown = placeLabels(boxes)
+    for (const g of this.galaxies) g.label.visible = false
+    for (const c of this.clusters.values()) c.label.visible = false
+    for (const p of this.planets.values()) if (p.label) p.label.visible = false
+    for (const [id, obj] of objects) obj.visible = shown.has(id)
+  }
+
   private flyTo(id: string): void {
     const p = this.planets.get(id)
     if (!p) return
-    const aim = p.mesh.position.clone()
+    const s = p.star
+    this.flyToPoint(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0), s.radius * 9 + 75) // 留点余地，看得到旁边的文件
+  }
+
+  /** 飞到一个模块跟前：大星散开成文件 */
+  private flyToModule(id: string): void {
+    const c = this.clusters.get(id)
+    if (c) this.flyToPoint(c.center.clone(), Math.max(45, c.extent * 2.4 + 30))
+  }
+
+  private flyToPoint(aim: THREE.Vector3, distance: number): void {
     const dir = this.camera.position.clone().sub(this.controls.target).normalize()
-    const to = aim.clone().add(dir.multiplyScalar(p.star.radius * 9 + 40))
+    const to = aim.clone().add(dir.multiplyScalar(distance))
     this.fly = { from: this.camera.position.clone(), to, aimFrom: this.controls.target.clone(), aimTo: aim, start: performance.now() }
-    this.controls.autoRotate = false
+    this.sway = null
+  }
+
+  /**
+   * 没人动镜头时左右轻轻晃（不转整圈）：星系排在正对镜头的平面上，转到侧面会前后挡住，晃一晃既有立体感又看得清
+   */
+  private swayStep(elapsed: number): void {
+    if (!this.sway || this.fly) return
+    const offset = this.camera.position.clone().sub(this.controls.target)
+    const s = new THREE.Spherical().setFromVector3(offset)
+    s.theta = this.sway.theta + SWAY * Math.sin((elapsed - this.sway.start) * 0.13)
+    this.camera.position.copy(this.controls.target).add(new THREE.Vector3().setFromSpherical(s))
   }
 
   private flyStep(): void {
@@ -616,12 +954,22 @@ export class StarMap {
 
   // ---------- 鼠标 ----------
 
-  private pick(clientX: number, clientY: number): Planet | null {
+  /** 鼠标下面是什么：拉远时先看模块的大星，拉近时先看文件 */
+  private pick(clientX: number, clientY: number): Planet | Cluster | null {
     const rect = this.renderer.domElement.getBoundingClientRect()
     this.pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
     this.raycaster.setFromCamera(this.pointer, this.camera)
-    const hit = this.raycaster.intersectObjects([...this.planets.values()].map((p) => p.mesh), false)[0]
-    return hit ? (this.planets.get(hit.object.userData.id as string) ?? null) : null
+    const planet = (): Planet | null => {
+      const meshes = [...this.planets.values()].filter((p) => p.lit || this.zoom < 0.6).map((p) => p.mesh)
+      const hit = this.raycaster.intersectObjects(meshes, false)[0]
+      return hit ? (this.planets.get(hit.object.userData.id as string) ?? null) : null
+    }
+    const cluster = (): Cluster | null => {
+      if (this.zoom < 0.4) return null
+      const hit = this.raycaster.intersectObjects([...this.clusters.values()].map((c) => c.sun), false)[0]
+      return hit ? (this.clusters.get(hit.object.userData.module as string) ?? null) : null
+    }
+    return this.zoom >= 0.5 ? (cluster() ?? planet()) : (planet() ?? cluster())
   }
 
   private onPointerDown = (e: PointerEvent): void => {
@@ -632,26 +980,36 @@ export class StarMap {
     const p = this.pressed
     this.pressed = null
     if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5) return // 是拖动，不是点击
-    const planet = this.pick(e.clientX, e.clientY)
-    this.select(planet?.star.id ?? null)
-    this.onSelect(planet?.star ?? null)
+    const hit = this.pick(e.clientX, e.clientY)
+    if (hit && 'info' in hit) {
+      this.flyToModule(hit.info.id) // 点模块：飞过去，散开成文件
+      this.setHovered(null, 0, 0)
+      return
+    }
+    this.select(hit?.star.id ?? null)
+    this.onSelect(hit?.star ?? null)
   }
 
   private onPointerMove = (e: PointerEvent): void => {
     if (this.pressed) return
-    const planet = this.pick(e.clientX, e.clientY)
+    const hit = this.pick(e.clientX, e.clientY)
     const rect = this.renderer.domElement.getBoundingClientRect()
-    this.setHovered(planet, e.clientX - rect.left, e.clientY - rect.top)
+    this.setHovered(hit, e.clientX - rect.left, e.clientY - rect.top)
   }
 
-  private setHovered(planet: Planet | null, x: number, y: number): void {
+  private setHovered(hit: Planet | Cluster | null, x: number, y: number): void {
+    const planet = hit && 'star' in hit ? hit : null
+    const cluster = hit && 'info' in hit ? hit : null
     const id = planet?.star.id ?? null
-    this.renderer.domElement.style.cursor = id ? 'pointer' : 'grab'
-    if (id !== this.hovered) {
+    const mod = cluster?.info.id ?? null
+    this.renderer.domElement.style.cursor = hit ? 'pointer' : 'grab'
+    if (id !== this.hovered || mod !== this.hoveredModule) {
       this.hovered = id
+      this.hoveredModule = mod
       this.applyStyles()
     }
     this.onHover(planet?.star ?? null, x, y)
+    this.onHoverModule(cluster?.info ?? null, x, y)
   }
 
   private fit(): void {
@@ -670,8 +1028,40 @@ function starId(s: Star | string): string {
   return typeof s === 'string' ? s : s.id
 }
 
-function lerp(a = 0, b = 0, f: number): number {
-  return a + (b - a) * f
+/** 二次贝塞尔曲线上的一点 */
+function bezier(a: THREE.Vector3, c: THREE.Vector3, b: THREE.Vector3, t: number, out: THREE.Vector3): THREE.Vector3 {
+  const u = 1 - t
+  return out.set(
+    u * u * a.x + 2 * u * t * c.x + t * t * b.x,
+    u * u * a.y + 2 * u * t * c.y + t * t * b.y,
+    u * u * a.z + 2 * u * t * c.z + t * t * b.z
+  )
+}
+
+/** 一批线段的几何（位置、颜色每帧改） */
+function lineGeometry(vertices: number): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices * 3), 3))
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vertices * 3), 3))
+  return geo
+}
+
+/** 一批光点：counts[i] 是第 i 条光线上有几个；userData.owner 记着每个光点属于哪条光线 */
+function sparkGeometry(counts: number[]): { geometry: THREE.BufferGeometry; phase: Float32Array } {
+  const total = counts.reduce((a, b) => a + b, 0)
+  const geometry = lineGeometry(total)
+  const phase = new Float32Array(total)
+  const owner = new Uint32Array(total)
+  let k = 0
+  counts.forEach((c, i) => {
+    for (let j = 0; j < c; j++) {
+      owner[k] = i
+      phase[k] = Math.random()
+      k++
+    }
+  })
+  geometry.userData.owner = owner
+  return { geometry, phase }
 }
 
 /** 中间亮、往外淡的圆形贴图：光晕和光点都用它 */
@@ -723,6 +1113,42 @@ function makeLabel(text: string): CSS2DObject {
     font: '12px "Microsoft YaHei", sans-serif',
     whiteSpace: 'nowrap',
     transform: 'translateY(-10px)'
+  })
+  const label = new CSS2DObject(div)
+  label.center.set(0.5, 1)
+  return label
+}
+
+/** 模块的名字：写在星云上，用子项目的颜色、发一点光 */
+function makeModuleLabel(text: string, color: string): CSS2DObject {
+  const div = document.createElement('div')
+  div.className = 'module-label'
+  div.textContent = text
+  Object.assign(div.style, {
+    color,
+    font: '600 13px "Microsoft YaHei", sans-serif',
+    letterSpacing: '0.5px',
+    whiteSpace: 'nowrap',
+    textShadow: `0 0 8px ${color}, 0 0 2px #000`
+  })
+  const label = new CSS2DObject(div)
+  label.center.set(0.5, 1)
+  return label
+}
+
+/** 子项目（星系）的名字：大一号，写在星系上方 */
+function makeGalaxyLabel(text: string, color: string): CSS2DObject {
+  const div = document.createElement('div')
+  div.className = 'galaxy-label'
+  div.textContent = text
+  Object.assign(div.style, {
+    color: '#f2f7ff',
+    font: '700 18px "Microsoft YaHei", sans-serif',
+    letterSpacing: '3px',
+    whiteSpace: 'nowrap',
+    padding: '2px 12px',
+    borderBottom: `2px solid ${color}`,
+    textShadow: `0 0 14px ${color}`
   })
   const label = new CSS2DObject(div)
   label.center.set(0.5, 1)

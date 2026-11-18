@@ -6,7 +6,22 @@ import { diffLines } from '../components/bubble'
 import { lines } from '../persona/lines'
 import GestureLayer from '../gestures/GestureLayer.vue'
 import type { GestureEvent } from '../gestures/GestureEngine'
-import { CHAIN_COLOR, ERROR_COLOR, TOUCH_COLOR, groupColors, highlightFrom, searchNodes, starOf } from './layout'
+import {
+  CHAIN_COLOR,
+  ERROR_COLOR,
+  HTTP_COLOR,
+  IPC_COLOR,
+  TOUCH_COLOR,
+  buildModules,
+  crossLinks,
+  groupColors,
+  highlightFrom,
+  kindOf,
+  searchNodes,
+  starOf,
+  withoutTests,
+  type ModuleInfo
+} from './layout'
 import type { AgentActivity } from '../../../shared/agent'
 import { createSource } from './source'
 import { StarMap } from './StarMap'
@@ -52,7 +67,26 @@ function onActivity(a: AgentActivity): void {
 }
 let toastTimer = 0
 
-const results = computed(() => (graph.value ? searchNodes(graph.value.nodes, query.value) : []))
+/** 隐藏测试文件（默认只是调暗） */
+const hideTests = ref(false)
+/** 星图上画的：隐藏测试文件时去掉它们 */
+const shown = computed(() => (graph.value && hideTests.value ? withoutTests(graph.value) : graph.value))
+const counts = computed(() => {
+  const g = shown.value
+  if (!g) return null
+  const cross = g.links.filter((l) => kindOf(l) !== 'call')
+  return {
+    files: g.nodes.length,
+    modules: buildModules(g).modules.length,
+    calls: g.links.length - cross.length,
+    cross: cross.length,
+    tests: graph.value?.nodes.filter((n) => n.test).length ?? 0
+  }
+})
+const moduleTip = ref<{ m: ModuleInfo; x: number; y: number } | null>(null)
+/** 选中文件的跨进程光线：它请求了谁、谁请求了它 */
+const cross = computed(() => (node.value && graph.value ? crossLinks(graph.value, node.value.id) : null))
+const results = computed(() => (shown.value ? searchNodes(shown.value.nodes, query.value) : []))
 const legend = computed(() => (graph.value ? [...groupColors(graph.value.nodes).entries()] : []))
 const primary = computed(() => (located.value ? highlightFrom(located.value, graph.value ?? { nodes: [], links: [] }).primary : null))
 const kinds: Record<string, string> = { function: '函数', method: '方法', class: '类', template: '界面模板' }
@@ -90,12 +124,27 @@ async function loadGraph(): Promise<void> {
     status.value = `读不了这个项目：${(err as Error).message}`
     return
   }
-  map.setGraph(graph.value)
+  map.setGraph(shown.value!)
   status.value = ''
   if (located.value?.project === projectId.value) showError(located.value)
 }
 
 watch(projectId, () => void loadGraph())
+watch(hideTests, () => {
+  if (!map || !shown.value) return
+  map.setGraph(shown.value)
+  if (node.value && !shown.value.nodes.some((n) => n.id === node.value!.id)) node.value = null
+  else if (node.value) map.select(node.value.id, false)
+  if (located.value?.project === projectId.value) showError(located.value)
+})
+
+/** 面板里点一个跨进程的文件：飞过去看它 */
+function jump(id: string): void {
+  const n = graph.value?.nodes.find((x) => x.id === id)
+  if (!n) return
+  if (n.test && hideTests.value) hideTests.value = false
+  pick(n)
+}
 
 // ---------- 选星球、看代码 ----------
 
@@ -247,6 +296,7 @@ onMounted(async () => {
   map = new StarMap(canvas.value!)
   map.onSelect = (n) => void selectNode(n)
   map.onHover = (n, x, y) => (tip.value = n ? { name: n.id, lines: n.lines, x, y } : null)
+  map.onHoverModule = (m, x, y) => (moduleTip.value = m ? { m, x, y } : null)
   if (import.meta.env.DEV) {
     // 开发调试入口：控制台里可以直接定位报错、选星球
     ;(window as unknown as Record<string, unknown>).__wb = {
@@ -298,7 +348,16 @@ onBeforeUnmount(() => {
           <li v-for="r in results" :key="r.id" @click="pick(r)">{{ r.id }}</li>
         </ul>
       </div>
-      <button v-if="graph" class="ghost" @click="map?.frameAll()">看全部</button>
+      <button v-if="graph" class="ghost" title="拉远看模块，拉近看文件" @click="map?.frameAll()">看全部</button>
+      <button
+        v-if="graph && counts?.tests"
+        class="ghost"
+        :class="{ on: hideTests }"
+        :title="hideTests ? '把测试文件显示回来（调暗显示）' : '测试文件现在是调暗的，点一下隐藏'"
+        @click="hideTests = !hideTests"
+      >
+        {{ hideTests ? '显示测试文件' : '隐藏测试文件' }}
+      </button>
       <button
         v-if="graph"
         class="ghost"
@@ -312,7 +371,10 @@ onBeforeUnmount(() => {
 
     <div v-if="graph" class="legend">
       <div v-for="[g, c] in legend" :key="g"><i :style="{ background: c }"></i>{{ g }}</div>
-      <div><i class="bright"></i>亮一点：还没提交的改动</div>
+      <div class="gap"><b class="line"></b>函数调用</div>
+      <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>请求接口（HTTP）</div>
+      <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>进程间消息（IPC）</div>
+      <div class="gap"><i class="bright"></i>亮一点：还没提交的改动</div>
       <div><i :style="{ background: ERROR_COLOR }"></i>报错的文件</div>
       <div><i :style="{ background: CHAIN_COLOR }"></i>调用链上的文件</div>
       <div><i :style="{ background: TOUCH_COLOR }"></i>她这次改过的文件</div>
@@ -320,6 +382,10 @@ onBeforeUnmount(() => {
 
     <div v-if="tip" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 10}px` }">
       {{ tip.name }} · {{ tip.lines }} 行
+    </div>
+    <div v-else-if="moduleTip" class="tip" :style="{ left: `${moduleTip.x + 14}px`, top: `${moduleTip.y + 10}px` }">
+      <b>{{ moduleTip.m.label }}</b> · {{ moduleTip.m.files.length }} 个文件 · {{ moduleTip.m.lines }} 行
+      <div class="muted">{{ moduleTip.m.id }} · 点一下飞过去</div>
     </div>
 
     <div v-if="located || notice" class="error-bar">
@@ -370,6 +436,18 @@ onBeforeUnmount(() => {
         <button @click="askFile">问她这个文件</button>
         <button v-if="code" @click="askCode">问她这段代码</button>
       </div>
+      <div v-if="cross && (cross.out.length || cross.in.length)" class="cross">
+        <div v-for="l in cross.out" :key="'o' + l.target + l.kind" class="cross-row" @click="jump(l.target)">
+          <span class="dir" :style="{ color: l.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR }">{{ l.kind === 'ipc' ? '发消息给' : '请求' }} →</span>
+          <span class="who">{{ l.target }}</span>
+          <span class="via">{{ (l.via ?? []).join('、') }}</span>
+        </div>
+        <div v-for="l in cross.in" :key="'i' + l.source + l.kind" class="cross-row" @click="jump(l.source)">
+          <span class="dir" :style="{ color: l.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR }">← {{ l.kind === 'ipc' ? '收到消息' : '被请求' }}</span>
+          <span class="who">{{ l.source }}</span>
+          <span class="via">{{ (l.via ?? []).join('、') }}</span>
+        </div>
+      </div>
       <ul class="outline">
         <li
           v-for="item in outline"
@@ -400,9 +478,10 @@ onBeforeUnmount(() => {
 
     <footer class="status">
       <template v-if="status">{{ status }}</template>
-      <template v-else-if="graph">
-        {{ graph.nodes.length }} 个文件 · {{ graph.links.length }} 条调用光线 ·
-        {{ gestures ? '张开手掌旋转、捏住星球往面前拉看代码' : '拖动旋转、滚轮缩放、点星球看代码' }}
+      <template v-else-if="counts">
+        {{ counts.modules }} 个模块 · {{ counts.files }} 个文件 · {{ counts.calls }} 条调用光线 ·
+        {{ counts.cross }} 条跨进程弧线 ·
+        {{ gestures ? '张开手掌旋转、捏住星球往面前拉看代码' : '拉远看模块、拉近看文件，点模块飞过去，点星球看代码' }}
         <span v-if="activity" class="activity"> · {{ activity }}</span>
       </template>
     </footer>
@@ -541,6 +620,71 @@ button.on {
 
 .legend i.bright {
   background: #fff;
+}
+
+.legend .gap {
+  margin-top: 5px;
+}
+
+/* 光线的图例：直线是调用，弧线是跨进程 */
+.legend b {
+  display: inline-block;
+  width: 16px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.legend b.line {
+  height: 0;
+  border-top: 1px solid #8fa4c8;
+}
+
+.legend b.arc {
+  height: 7px;
+  border: 1.5px solid;
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+}
+
+/* 面板里的跨进程光线 */
+.cross {
+  margin-bottom: 8px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(90, 209, 255, 0.15);
+  max-height: 22%;
+  overflow-y: auto;
+}
+
+.cross-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cross-row:hover {
+  background: rgba(90, 209, 255, 0.12);
+}
+
+.cross-row .dir {
+  flex: none;
+  font-size: 12px;
+}
+
+.cross-row .who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cross-row .via {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #8fa4c8;
+  font-size: 12px;
 }
 
 .tip {

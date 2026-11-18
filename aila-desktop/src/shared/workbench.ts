@@ -5,17 +5,28 @@ export interface GraphNode {
   id: string // 相对项目根目录的路径
   name: string
   group: string // 子项目或顶层目录：同一组颜色一样、聚在一起
+  /** 所在的目录：星图拉远时同一个目录聚成一个模块（旧服务没有，按路径算） */
+  module?: string
+  /** 测试文件：星图里调暗，可以隐藏 */
+  test?: boolean
   lang: string
   lines: number
   functions: number
   modified: boolean // 还没提交的改动
 }
 
-/** 一条光线 = 一个文件调用另一个文件（同一对文件之间的调用汇总，weight 是次数） */
+/** call：函数调用；http：请求了另一个文件提供的接口；ipc：发了另一个文件处理的 IPC 消息 */
+export type LinkKind = 'call' | 'http' | 'ipc'
+
+/** 一条光线 = 一个文件用到另一个文件（同一对文件之间汇总，weight 是次数或经过的接口数） */
 export interface GraphLink {
   source: string
   target: string
   weight: number
+  /** 旧服务没有，当成 call */
+  kind?: LinkKind
+  /** http、ipc：经过的接口路径或频道名 */
+  via?: string[]
 }
 
 export interface CodeGraph {
