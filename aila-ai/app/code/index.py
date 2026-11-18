@@ -475,10 +475,12 @@ class CodeIndex:
 
     # ---------- 星图 ----------
 
-    def graph(self, modified: set[str] | None = None) -> dict[str, list[dict[str, object]]]:
+    def graph(self, modified: set[str] | None = None,
+              churn: dict[str, int] | None = None) -> dict[str, list[dict[str, object]]]:
         """文件是星球，文件之间的调用汇总成光线（按名字解析，和 callees 同样保守：同名的有好几个就不连）
 
-        每个文件带上所在的目录（module，星图拉远时按它聚成一个模块）和是不是测试文件（test，星图里调暗）。
+        每个文件带上所在的目录（module，星图拉远时按它聚成一个模块）、是不是测试文件（test，星图里调暗）、
+        最近的提交里改过几次（churn，「按改动」上色）。
         光线分三种（kind）：call 函数调用；http 请求了另一个文件提供的接口；ipc 发了另一个文件处理的 IPC 消息。
         http、ipc 的 via 是经过的接口路径或频道名（最多 6 个）
         """
@@ -525,7 +527,8 @@ class CodeIndex:
 
         nodes = [
             {"id": f, "name": f.rsplit("/", 1)[-1], "group": group(f), "module": f.rsplit("/", 1)[0] if "/" in f else ".",
-             "test": is_test(f), "lang": lang, "lines": lines, "functions": counts.get(f, 0), "modified": f in modified}
+             "test": is_test(f), "lang": lang, "lines": lines, "functions": counts.get(f, 0), "modified": f in modified,
+             "churn": (churn or {}).get(f, 0)}
             for f, lang, lines, _, _ in files
         ]
         links: list[dict[str, object]] = [

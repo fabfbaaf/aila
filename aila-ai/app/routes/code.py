@@ -102,7 +102,8 @@ async def graph(project_id: str, projects: CodeProjects = Depends(get_code_proje
     _project_index(projects, project_id)
     index = await asyncio.to_thread(projects.fresh, project_id)  # 新加的、改过的文件先更新进去
     modified = await asyncio.to_thread(projects.modified_files, project_id)
-    return await asyncio.to_thread(index.graph, modified)
+    churn = await asyncio.to_thread(projects.churn, project_id)
+    return await asyncio.to_thread(index.graph, modified, churn)
 
 
 @router.get("/code/projects/{project_id}/outline")

@@ -7,6 +7,13 @@ import { lines } from '../persona/lines'
 import GestureLayer from '../gestures/GestureLayer.vue'
 import type { GestureEvent } from '../gestures/GestureEngine'
 import {
+  TESTED_COLOR,
+  TEST_FILE_COLOR,
+  UNTESTED_COLOR,
+  hottest,
+  modeColors,
+  testedFiles,
+  type ColorMode,
   CHAIN_COLOR,
   ERROR_COLOR,
   HTTP_COLOR,
@@ -89,6 +96,31 @@ const moduleTip = ref<{ m: ModuleInfo; x: number; y: number } | null>(null)
 const cross = computed(() => (node.value && graph.value ? crossLinks(graph.value, node.value.id) : null))
 const results = computed(() => (shown.value ? searchNodes(shown.value.nodes, query.value) : []))
 const legend = computed(() => (graph.value ? [...groupColors(graph.value.nodes).entries()] : []))
+
+// ---------- 换颜色看项目 ----------
+
+const colorMode = ref<ColorMode>('group')
+const COLOR_MODES: { id: ColorMode; label: string; title: string }[] = [
+  { id: 'group', label: '按子项目', title: '颜色看属于哪个子项目' },
+  { id: 'churn', label: '按改动', title: '最近 300 次提交里改得越多越红：容易出问题的地方' },
+  { id: 'tests', label: '按测试', title: '有没有测试：绿的有，橙红的没找到（按测试文件的调用和同名测试估算）' }
+]
+const hot = computed(() => (shown.value ? hottest(shown.value) : []))
+const testStats = computed(() => {
+  const g = shown.value
+  if (!g) return { tested: 0, untested: 0 }
+  const tested = testedFiles(g)
+  const code = g.nodes.filter((n) => !n.test)
+  return { tested: code.filter((n) => tested.has(n.id)).length, untested: code.filter((n) => !tested.has(n.id)).length }
+})
+
+function applyColors(): void {
+  if (!map || !shown.value) return
+  const c = modeColors(shown.value, colorMode.value)
+  map.setColors(c?.files ?? null, c?.modules ?? null)
+}
+
+watch(colorMode, applyColors)
 const primary = computed(() => (located.value ? highlightFrom(located.value, graph.value ?? { nodes: [], links: [] }).primary : null))
 const kinds: Record<string, string> = { function: '函数', method: '方法', class: '类', template: '界面模板' }
 /** 修改的说明（项目、改了什么、怎么测）和 diff 分开显示 */
@@ -126,6 +158,7 @@ async function loadGraph(): Promise<void> {
     return
   }
   map.setGraph(shown.value!)
+  applyColors()
   status.value = ''
   if (located.value?.project === projectId.value) showError(located.value)
 }
@@ -134,6 +167,7 @@ watch(projectId, () => void loadGraph())
 watch(hideTests, () => {
   if (!map || !shown.value) return
   map.setGraph(shown.value)
+  applyColors()
   if (node.value && !shown.value.nodes.some((n) => n.id === node.value!.id)) node.value = null
   else if (node.value) map.select(node.value.id, false)
   if (located.value?.project === projectId.value) showError(located.value)
@@ -473,7 +507,24 @@ onBeforeUnmount(() => {
     </header>
 
     <div v-if="graph" class="legend">
-      <div v-for="[g, c] in legend" :key="g"><i :style="{ background: c }"></i>{{ g }}</div>
+      <div class="modes">
+        <button v-for="m in COLOR_MODES" :key="m.id" class="ghost" :class="{ on: colorMode === m.id }" :title="m.title" @click="colorMode = m.id">
+          {{ m.label }}
+        </button>
+      </div>
+      <template v-if="colorMode === 'group'">
+        <div v-for="[g, c] in legend" :key="g"><i :style="{ background: c }"></i>{{ g }}</div>
+      </template>
+      <template v-else-if="colorMode === 'churn'">
+        <div class="ramp"><span>没改过</span><b></b><span>改得最多</span></div>
+        <div v-if="!hot.length" class="muted">这个项目没有 git 历史，看不出改动</div>
+        <div v-for="n in hot" :key="n.id" class="hot" :title="n.id" @click="pick(n)">{{ n.id.split('/').slice(-2).join('/') }} · {{ n.churn }} 次</div>
+      </template>
+      <template v-else>
+        <div><i :style="{ background: TESTED_COLOR }"></i>有测试（{{ testStats.tested }}）</div>
+        <div><i :style="{ background: UNTESTED_COLOR }"></i>没找到测试（{{ testStats.untested }}）</div>
+        <div><i :style="{ background: TEST_FILE_COLOR }"></i>测试文件</div>
+      </template>
       <div class="gap"><b class="line"></b>函数调用</div>
       <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>请求接口（HTTP）</div>
       <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>进程间消息（IPC）</div>
@@ -741,6 +792,38 @@ button.on {
   margin-right: 6px;
   border-radius: 50%;
   box-shadow: 0 0 6px currentColor;
+}
+
+/* 换颜色的三个按钮、改动的色带、改得最多的文件 */
+.legend .modes {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  pointer-events: auto;
+}
+
+.legend .modes button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.legend .ramp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend .ramp b {
+  width: 90px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #2f3b58, #1fd2f5, #f5d21f, #ff3b2f);
+}
+
+.legend .hot {
+  color: #ffd2a8;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .legend i.bright {

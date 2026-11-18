@@ -21,6 +21,7 @@ from .fix import FixRunner
 from .index import CodeIndex, RefreshStats
 
 STALE_SECONDS = 20.0
+CHURN_COMMITS = 300  # 「按改动」看最近多少次提交：够看出热点，又不会在大仓库里慢
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 
 
@@ -156,6 +157,28 @@ class CodeProjects:
         prefix = "" if prefix == "." else prefix + "/"
         paths = {entry[3:] for entry in out.split("\0") if len(entry) > 3}
         return {p[len(prefix):] for p in paths if p.startswith(prefix)}
+
+    def churn(self, project_id: str, commits: int = CHURN_COMMITS) -> dict[str, int]:
+        """最近 commits 次提交里每个文件被改过几次（相对项目根目录）：星图「按改动」上色，越常改越热。
+        不是 git 仓库、git 出错都返回空的（星图照样画，只是没有热度）"""
+        project = self.get(project_id)
+        if project is None:
+            return {}
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(project.root), "-c", "core.quotepath=false", "log", f"-n{commits}",
+                 "--relative", "--name-only", "--format=", "--no-renames"],
+                capture_output=True, timeout=30, creationflags=NO_WINDOW,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {}
+        if out.returncode != 0:
+            return {}
+        counts: dict[str, int] = {}
+        for line in out.stdout.decode("utf-8", "replace").splitlines():
+            if line.strip():
+                counts[line.strip()] = counts.get(line.strip(), 0) + 1
+        return counts
 
     def describe(self) -> list[dict[str, Any]]:
         out = []

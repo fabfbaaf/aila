@@ -57,6 +57,8 @@ interface Star extends GraphNode {
   z?: number
   radius: number
   color: THREE.Color
+  /** 按子项目的颜色（换上色方式时 color 会变，换回来用它） */
+  base: THREE.Color
   mod: string
   anchor: Vec3
   /** 画在哪：拉远时往模块中心收拢（力导向算的是 x、y、z，这里是画出来的位置） */
@@ -86,6 +88,7 @@ interface Planet {
 interface Cluster {
   info: ModuleInfo
   color: THREE.Color
+  base: THREE.Color
   stars: Star[]
   center: THREE.Vector3
   extent: number
@@ -241,6 +244,7 @@ export class StarMap {
         anchor,
         radius: nodeRadius(n.lines) * (n.test ? 0.8 : 1),
         color,
+        base: color.clone(),
         at: new THREE.Vector3(),
         x: anchor[0] + (Math.random() - 0.5) * 20,
         y: anchor[1] + (Math.random() - 0.5) * 20,
@@ -330,6 +334,22 @@ export class StarMap {
   /** 换了项目或者开了新任务：不再标改过的文件 */
   clearTouched(): void {
     this.touched.clear()
+    this.applyStyles()
+  }
+
+  /**
+   * 换上色方式：files、modules 是 id → 颜色；null 换回按子项目。光线跟着出发的星球变色
+   */
+  setColors(files: Map<string, string> | null, modules: Map<string, string> | null): void {
+    for (const s of this.stars) s.color = files?.has(s.id) ? new THREE.Color(files.get(s.id)!) : s.base.clone()
+    for (const c of this.clusters.values()) {
+      const hex = modules?.get(c.info.id)
+      c.color = hex ? new THREE.Color(hex) : c.base.clone()
+      for (const m of [c.sun.material, c.halo.material, c.nebula.material]) m.color.copy(c.color)
+      const css = `#${c.color.getHexString()}`
+      c.label.element.style.color = css
+      c.label.element.style.textShadow = `0 0 8px ${css}, 0 0 2px #000`
+    }
     this.applyStyles()
   }
 
@@ -545,7 +565,7 @@ export class StarMap {
     const label = makeModuleLabel(info.label, `#${color.getHexString()}`)
     this.scene.add(nebula, sun, halo, label)
     const stars = this.stars.filter((s) => s.mod === info.id)
-    this.clusters.set(info.id, { info, color, stars, center: new THREE.Vector3(), extent: 10, radius, sun, halo, nebula, label })
+    this.clusters.set(info.id, { info, color, base: color.clone(), stars, center: new THREE.Vector3(), extent: 10, radius, sun, halo, nebula, label })
   }
 
   private addGalaxy(group: string, color: string): void {

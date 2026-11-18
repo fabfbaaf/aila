@@ -13,6 +13,8 @@ export interface GraphNode {
   lines: number
   functions: number
   modified: boolean // 还没提交的改动
+  /** 最近的提交里改过几次（「按改动」上色；旧服务没有） */
+  churn?: number
 }
 
 /** call：函数调用；http：请求了另一个文件提供的接口；ipc：发了另一个文件处理的 IPC 消息 */
