@@ -22,7 +22,8 @@ import {
   withoutTests,
   type ModuleInfo
 } from './layout'
-import type { AgentActivity } from '../../../shared/agent'
+import type { AgentActivity, AgentSessionSummary } from '../../../shared/agent'
+import { buildReplay, editedUpTo, sessionsIn, type ReplayStep } from './replay'
 import { createSource } from './source'
 import { StarMap } from './StarMap'
 
@@ -324,8 +325,101 @@ onMounted(async () => {
   unsubscribe.push(source.onActivity(onActivity))
 })
 
+
+// ---------- 回放她的一次任务 ----------
+
+const replayPicking = ref(false)
+const replayList = ref<AgentSessionSummary[]>([])
+const replay = ref<{ title: string; steps: ReplayStep[] } | null>(null)
+const replayIndex = ref(0)
+const replayPlaying = ref(false)
+const replaySpeed = ref(1)
+/** 镜头跟着她走（平移，不缩放） */
+const replayFollow = ref(true)
+let replayTimer = 0
+const REPLAY_STEP_MS = 900
+const STEP_ICON: Record<string, string> = { ask: '💬', read: '👁', edit: '✎', run: '▶', search: '⌕', explore: '⇢', other: '·', end: '■' }
+const replayStep = computed(() => replay.value?.steps[replayIndex.value] ?? null)
+
+async function openReplayPicker(): Promise<void> {
+  const root = projects.value.find((p) => p.id === projectId.value)?.root
+  if (!root) return
+  replayPicking.value = !replayPicking.value
+  if (!replayPicking.value) return
+  try {
+    replayList.value = sessionsIn(root, await source.sessions())
+  } catch (err) {
+    say(`读不了任务列表：${(err as Error).message}`)
+    replayPicking.value = false
+  }
+}
+
+async function startReplay(s: AgentSessionSummary): Promise<void> {
+  const root = projects.value.find((p) => p.id === projectId.value)?.root
+  replayPicking.value = false
+  if (!root || !map) return
+  try {
+    const full = await source.session(s.id)
+    const steps = buildReplay(full.events, root, full.cwd)
+    if (!steps.length) return say('这个任务里还没有能回放的步骤')
+    closePanel()
+    replay.value = { title: s.title, steps }
+    replayIndex.value = 0
+    map.setTouched([])
+    applyReplayStep(true)
+    playReplay(true)
+  } catch (err) {
+    say(`读不了这个任务：${(err as Error).message}`)
+  }
+}
+
+/** 放到第 replayIndex 步：改过的文件标绿（拖动时整体重算），这一步碰的文件闪一下，镜头跟过去 */
+function applyReplayStep(seek: boolean): void {
+  const r = replay.value
+  const step = replayStep.value
+  if (!r || !step || !map) return
+  if (seek) map.setTouched(editedUpTo(r.steps, replayIndex.value))
+  if (step.star) {
+    map.touch(step.star, step.kind === 'edit' && step.ok ? 'edit' : 'read')
+    if (replayFollow.value) map.follow(step.star)
+  }
+}
+
+function playReplay(on: boolean): void {
+  window.clearInterval(replayTimer)
+  replayPlaying.value = on
+  if (!on) return
+  if (replay.value && replayIndex.value >= replay.value.steps.length - 1) {
+    replayIndex.value = 0 // 放完了再点播放：从头来
+    applyReplayStep(true)
+  }
+  replayTimer = window.setInterval(() => {
+    const r = replay.value
+    if (!r || replayIndex.value >= r.steps.length - 1) return playReplay(false)
+    replayIndex.value++
+    applyReplayStep(false)
+  }, REPLAY_STEP_MS / replaySpeed.value)
+}
+
+function seekReplay(i: number): void {
+  replayIndex.value = i
+  applyReplayStep(true)
+}
+
+function setReplaySpeed(speed: number): void {
+  replaySpeed.value = speed
+  if (replayPlaying.value) playReplay(true)
+}
+
+function closeReplay(): void {
+  playReplay(false)
+  replay.value = null
+  map?.clearTouched()
+}
+
 onBeforeUnmount(() => {
   for (const off of unsubscribe.splice(0)) off()
+  window.clearInterval(replayTimer)
   clearTimeout(toastTimer)
   clearTimeout(activityTimer)
   map?.dispose()
@@ -349,6 +443,15 @@ onBeforeUnmount(() => {
         </ul>
       </div>
       <button v-if="graph" class="ghost" title="拉远看模块，拉近看文件" @click="map?.frameAll()">看全部</button>
+      <div v-if="graph" class="replay-pick">
+        <button class="ghost" :class="{ on: replayPicking || replay }" title="在星图上回放她做过的一个任务：读了哪些文件、改了哪里" @click="openReplayPicker">回放</button>
+        <ul v-if="replayPicking">
+          <li v-if="!replayList.length" class="muted">这个项目里还没有做过的任务</li>
+          <li v-for="s in replayList.slice(0, 12)" :key="s.id" @click="startReplay(s)">
+            {{ s.title }}<span class="muted"> · {{ s.events }} 条记录</span>
+          </li>
+        </ul>
+      </div>
       <button
         v-if="graph && counts?.tests"
         class="ghost"
@@ -474,6 +577,28 @@ onBeforeUnmount(() => {
     <div v-if="!projects.length && !status" class="empty">
       <p>还没有登记项目。登记以后，项目里的每个文件都会变成一颗星球。</p>
       <button @click="source.openSettings()">去「设置 → 代码库」添加项目</button>
+    </div>
+
+    <div v-if="replay" class="replay-bar">
+      <div class="replay-title">回放：{{ replay.title }}</div>
+      <div class="replay-controls">
+        <button :title="replayPlaying ? '暂停' : '播放'" @click="playReplay(!replayPlaying)">{{ replayPlaying ? '❚❚' : '▶' }}</button>
+        <button v-for="sp in [1, 2, 4]" :key="sp" class="ghost speed" :class="{ on: replaySpeed === sp }" @click="setReplaySpeed(sp)">{{ sp }}×</button>
+        <input
+          type="range"
+          min="0"
+          :max="replay.steps.length - 1"
+          :value="replayIndex"
+          aria-label="回放进度"
+          @input="seekReplay(Number(($event.target as HTMLInputElement).value))"
+        />
+        <label class="follow"><input v-model="replayFollow" type="checkbox" />镜头跟着走</label>
+        <button class="ghost" title="关掉回放" @click="closeReplay">×</button>
+      </div>
+      <div v-if="replayStep" class="replay-step" :class="[replayStep.kind, { bad: !replayStep.ok }]">
+        第 {{ replayIndex + 1 }}/{{ replay.steps.length }} 步 · {{ STEP_ICON[replayStep.kind] }} {{ replayStep.label }}
+        <span v-if="!replayStep.ok && replayStep.kind !== 'end'" class="muted">（没成）</span>
+      </div>
     </div>
 
     <footer class="status">
@@ -935,6 +1060,112 @@ pre span.hit em {
   transform: translate(-50%, -50%);
   text-align: center;
   color: #8fa4c8;
+}
+
+/* 回放：项目里的任务列表、底部的时间轴 */
+.replay-pick {
+  position: relative;
+}
+
+.replay-pick ul {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 3;
+  min-width: 320px;
+  max-height: 360px;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  background: rgba(8, 16, 32, 0.95);
+  border: 1px solid rgba(90, 209, 255, 0.35);
+  border-radius: 6px;
+}
+
+.replay-pick li {
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-pick li:hover {
+  background: rgba(90, 209, 255, 0.15);
+}
+
+.replay-bar {
+  position: absolute;
+  left: 16px;
+  right: 470px;
+  bottom: 36px;
+  z-index: 2;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(8, 16, 32, 0.85);
+  border: 1px solid rgba(90, 209, 255, 0.4);
+  box-shadow: 0 0 18px rgba(90, 209, 255, 0.18);
+}
+
+.replay-title {
+  margin-bottom: 4px;
+  color: #9fe6ff;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-controls input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+  accent-color: #5ad1ff;
+}
+
+.replay-controls .speed {
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.replay-controls .follow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8fa4c8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.replay-step {
+  margin-top: 6px;
+  font-family: Consolas, 'Microsoft YaHei', monospace;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-step.read {
+  color: #67e8f9;
+}
+
+.replay-step.edit {
+  color: #4ade80;
+}
+
+.replay-step.ask {
+  color: #ffe9a8;
+}
+
+.replay-step.bad {
+  color: #ff8a92;
 }
 
 .status .activity {

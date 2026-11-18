@@ -333,6 +333,20 @@ export class StarMap {
     this.applyStyles()
   }
 
+  /** 回放时拖动时间轴：直接设定到这一步为止改过的文件（不闪） */
+  setTouched(ids: Iterable<string>): void {
+    this.touched = new Set([...ids].filter((id) => this.planets.has(id)))
+    this.applyStyles()
+  }
+
+  /** 回放时镜头跟着走：平移到这颗星球，不拉近拉远（一步一缩放会晕） */
+  follow(id: string): void {
+    const p = this.planets.get(id)
+    if (!p) return
+    const s = p.star
+    this.flyToPoint(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0), this.camera.position.distanceTo(this.controls.target))
+  }
+
   private runFlashes(): void {
     const now = performance.now()
     this.flashes = this.flashes.filter((f) => {

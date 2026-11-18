@@ -1,6 +1,6 @@
 // 星图的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import type { AiResult, CodeProject } from '../../../shared/settings'
-import type { AgentActivity } from '../../../shared/agent'
+import type { AgentActivity, AgentSession, AgentSessionSummary } from '../../../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../../../shared/workbench'
 import { bridge } from '../platform/bridge'
 
@@ -26,6 +26,9 @@ export interface StarSource {
   seal(id: string): Promise<boolean>
   /** 把修报错交给工作窗口里的编程 Agent（开会话、开始做、打开工作窗口）；失败时返回原因 */
   task(project: string, text: string): Promise<string | null>
+  /** 回放用：任务列表、一个任务的完整日志 */
+  sessions(): Promise<AgentSessionSummary[]>
+  session(sid: string): Promise<AgentSession>
 }
 
 function unwrap<T>(r: AiResult<T>): T {
@@ -54,7 +57,9 @@ function desktop(api: NonNullable<typeof bridge>): StarSource {
     task: async (project, text) => {
       const r = await api.agentTask({ project, text })
       return r.ok ? null : (r.error ?? '没开成')
-    }
+    },
+    sessions: async () => unwrap(await api.agentList('')),
+    session: async (sid) => unwrap(await api.agentGet(sid))
   }
 }
 
@@ -96,7 +101,9 @@ function web(): StarSource {
         body: JSON.stringify({ project, text })
       })
       return res.ok ? null : `AI 服务返回 ${res.status}`
-    }
+    },
+    sessions: () => get('/agent/sessions'),
+    session: (sid) => get(`/agent/sessions/${enc(sid)}`)
   }
 }
 
