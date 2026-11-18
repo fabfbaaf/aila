@@ -25,6 +25,8 @@ import { canContinue, planState } from './plan'
 import PlanCard from './PlanCard.vue'
 
 const source = createAgentSource()
+/** 告诉主窗口外壳有几个会话在等你（图标栏的角标） */
+const emit = defineEmits<{ waiting: [count: number] }>()
 const sessions = ref<AgentSessionSummary[]>([])
 const current = ref<AgentSessionSummary | null>(null)
 const t = shallowRef(reactive(new Transcript()))
@@ -54,6 +56,12 @@ const undoPreview = ref<{ sid: string; plan: UndoPreview; branch: string | null 
 // 左边列表：搜索、改名、删除
 const query = ref('')
 const groups = computed(() => groupSessions(sessions.value))
+const WAITING: Record<string, string> = { confirm: '等你确认', plan: '等你看计划', paused: '计划停了' }
+const waitingCount = computed(() => sessions.value.filter((s) => s.waiting).length)
+watch(waitingCount, (n) => emit('waiting', n), { immediate: true })
+/** 终端里开的、别的窗口开的会话也可能在等你：每隔一会儿刷新一次列表 */
+const LIST_REFRESH_MS = 15000
+let listTimer = 0
 const menuFor = ref('')
 const renaming = ref('')
 const renameText = ref('')
@@ -528,9 +536,11 @@ async function undoNow(): Promise<void> {
 
 source.onEvent((sid, e) => {
   if (sid !== current.value?.id) {
-    if (e.type === 'turn_end') void refreshList()
+    // 别的会话：结束、要你确认、计划停了，都会改变列表上的「等你」
+    if (['turn_end', 'confirm', 'confirm_end', 'plan_pause', 'plan_end'].includes(e.type)) void refreshList()
     return
   }
+  if (['confirm', 'confirm_end', 'plan_pause', 'plan_end', 'plan_decision'].includes(e.type)) void refreshList()
   const near = nearBottom()
   t.value.apply(e)
   if (e.type === 'user' || e.type === 'undo' || e.type === 'branch_closed') closeUndoPreview()
@@ -602,6 +612,7 @@ const endMark: Record<string, string> = { done: '✓', error: '✗' }
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('click', closeMenus)
+  listTimer = window.setInterval(() => void refreshList(), LIST_REFRESH_MS)
   // 轨迹里正在做的那一轮每秒往右长一点（只在看轨迹、而且她在做事的时候）
   clock = window.setInterval(() => {
     if (running.value && view.value === 'trace') now.value = Date.now() / 1000
@@ -632,6 +643,7 @@ onBeforeUnmount(() => {
   clearInterval(clock)
   clearTimeout(ledgerTimer)
   clearTimeout(searchTimer)
+  clearInterval(listTimer)
 })
 </script>
 
@@ -677,6 +689,10 @@ onBeforeUnmount(() => {
                 <span v-if="s.branch" class="meta-branch" :title="`在分支 ${s.branch} 上做`"><Icon name="branch" :size="12" /></span>
                 <span class="dot">·</span>
                 <span>{{ when(s.updated) }}</span>
+                <span v-if="s.plan && s.plan.decision === 'approved' && !s.plan.finished" class="meta-plan">
+                  第 {{ Math.min(s.plan.done + 1, s.plan.stages) }}/{{ s.plan.stages }} 阶段
+                </span>
+                <span v-if="s.waiting" class="meta-wait">{{ WAITING[s.waiting] }}</span>
               </div>
               <button class="more" title="改名、删除" aria-label="改名、删除" @click.stop="toggleMenu(s.id)"><Icon name="more" :size="16" :stroke="2.4" /></button>
               <div v-if="menuFor === s.id" class="menu-pop" role="menu" @click.stop>
@@ -1227,8 +1243,9 @@ code {
 
 .sess .meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 2px 4px;
   margin-top: 3px;
   overflow: hidden;
   color: var(--dim);
@@ -1239,6 +1256,20 @@ code {
 .sess .meta > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.meta-plan {
+  color: var(--ui-accent-hi);
+}
+
+.meta-wait {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ui-warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 17px;
 }
 
 .meta-branch {

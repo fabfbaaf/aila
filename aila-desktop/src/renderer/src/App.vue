@@ -50,6 +50,8 @@ const reminderAsk = ref<{ reminder: Reminder; late: boolean } | null>(null)
 const dropAsk = ref<DropInfo | null>(null)
 /** 每天见面、日报：说完气泡里给「好 / 看看任务」（有具体的事可说时） */
 const briefingAsk = ref<{ text: string; detail: boolean } | null>(null)
+/** 任务页里有个操作等你同意：气泡里给「去看看」，点了打开那个任务（同意还是在任务页里点，那里看得到完整的改动） */
+const agentAsk = ref<{ sid: string; action: string } | null>(null)
 /** 桌面状态：藏没藏、能不能说话、省不省电、拔没拔电（主进程推过来） */
 const desk = ref<DesktopStatus | null>(null)
 
@@ -76,6 +78,16 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
             { label: '看看任务', value: 'tasks' }
           ]
         : [{ label: '好', value: 'ok', primary: true }]
+    }
+  }
+  if (agentAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
+    return {
+      tag: '任务',
+      detail: agentAsk.value.action,
+      buttons: [
+        { label: '去看看', value: 'open', primary: true },
+        { label: '等会儿', value: 'later' }
+      ]
     }
   }
   if (reminderAsk.value && !convAsk.value) {
@@ -142,6 +154,7 @@ const voice: Voice = {
 }
 const conversation = new Conversation(behavior, transport, voice)
 const voiceControl = new VoiceController(behavior, conversation, speaker, new VoiceLink(transport.voiceUrl))
+voiceControl.warm = (parts) => transport.warmup(parts)
 const screenWatch = new ScreenWatch(transport.screenUrl)
 let stage: Stage | null = null
 let usingPlaceholder = true
@@ -276,6 +289,7 @@ async function startFix(project: string, snippet: string): Promise<void> {
 function onAnswer(value: string): void {
   if (dropAsk.value && !convAsk.value) void answerDrop(value)
   else if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerBriefing(value)
+  else if (agentAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerAgent(value)
   else if (reminderAsk.value && !convAsk.value) answerReminder(value)
   else if (convAsk.value) conversation.answer(value === 'yes')
   else answerScreen(value)
@@ -401,6 +415,13 @@ function showBriefing(b: { text: string; detail: boolean }): void {
     briefingAsk.value = null
     bubbleVisible.value = false
   }, BRIEFING_ASK_MS)
+}
+
+function answerAgent(value: string): void {
+  const ask = agentAsk.value
+  agentAsk.value = null
+  bubbleVisible.value = false
+  if (ask && value === 'open') bridge?.openAgent(ask.sid)
 }
 
 function answerBriefing(value: string): void {
@@ -536,8 +557,10 @@ function onAgentProgress(p: AgentProgress): void {
     case 'confirm':
       behavior.gesture('tilt')
       if (!quiet) conversation.announce(lines.agentConfirm(p.action))
+      if (p.sid) agentAsk.value = { sid: p.sid, action: p.action }
       break
     case 'done':
+      agentAsk.value = null
       behavior.setWorking(false)
       behavior.react('happy')
       if (!quiet) conversation.announce(lines.agentDone(p.files))

@@ -220,7 +220,9 @@ class BrowserSession:
             if not self.is_open:
                 raise BrowserError("浏览器还没打开。")
             page = await self._ensure()
-            if await page.go_back(wait_until="domcontentloaded") is None:
+            before = page.url
+            # 从浏览器的前进后退缓存（bfcache）里恢复时 go_back 也返回 None，只看返回值会误判成「已经是第一页」
+            if await page.go_back(wait_until="domcontentloaded") is None and page.url == before:
                 raise BrowserError("已经是第一页了，没法再返回。")
             await self._settle(page)
             return await self._snap()

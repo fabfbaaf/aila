@@ -13,6 +13,8 @@ export interface ChatTransport {
   confirm(id: string, approved: boolean): Promise<boolean>
   /** 一句话转语音，返回 WAV；没有能念的内容时返回 null，服务不可用时抛错 */
   synthesize(text: string): Promise<ArrayBuffer | null>
+  /** 提前加载语音模型（AI 服务启动时不加载） */
+  warmup(parts: { tts?: boolean; ears?: boolean }): void
   /** 语音（耳朵）的 WebSocket 地址 */
   voiceUrl: string
   /** 看屏幕找报错的 WebSocket 地址 */
@@ -44,6 +46,7 @@ function desktopTransport(api: AilaApi): ChatTransport {
     },
     confirm: (id, approved) => api.chatConfirm(id, approved),
     synthesize: (text) => api.synthesize(text),
+    warmup: (parts) => void api.voiceWarmup(parts),
     // WebSocket 不受跨域限制，CSP 也允许 ws:，渲染层直接连；服务端会检查 Origin
     voiceUrl: api.aiUrl.replace(/^http/, 'ws') + '/voice',
     screenUrl: api.aiUrl.replace(/^http/, 'ws') + '/screen'
@@ -59,6 +62,10 @@ function webTransport(): ChatTransport {
       return { cancel: () => controller.abort() }
     },
     confirm: (id, approved) => answerConfirm('/ai', id, approved),
+    warmup: (parts) =>
+      void fetch('/ai/voice/warmup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(parts) }).catch(
+        () => undefined
+      ),
     synthesize: async (text) => {
       const res = await fetch('/ai/tts', {
         method: 'POST',

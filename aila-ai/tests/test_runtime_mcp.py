@@ -361,3 +361,44 @@ def test_runtime_uses_given_config_path(tmp_path: Path) -> None:
     rt = Runtime(tmp_path / "data", lambda: Scripted([["好"]]), shell=SHELL, mcp_config=tmp_path / "shared.json")
     assert rt.mcp.path == tmp_path / "shared.json"
     assert Runtime(tmp_path / "d2", lambda: Scripted([["好"]]), shell=SHELL).mcp.path == tmp_path / "d2" / "mcp.json"
+
+
+@pytest.mark.anyio
+async def test_config_changes_notify_chat_side(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    async def changed() -> None:
+        calls.append("changed")
+
+    m = McpManager(tmp_path / "mcp.json")
+    m.on_change = changed
+    await m.save(fake_config("fake"))
+    await m.set_disabled("fake", True)
+    await m.remove("fake")
+    assert calls == ["changed"] * 3
+    await m.stop_all()
+
+
+@pytest.mark.anyio
+async def test_chat_side_reconnects_without_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+
+    from app import deps
+    from app.tools import Skill, SkillRegistry
+
+    registry = SkillRegistry([])
+    old_skill = Skill("mcp:old", "旧服务", "", [])
+    registry.add(old_skill)
+    stopped: list[bool] = []
+
+    class OldRunner:
+        async def stop(self) -> None:
+            stopped.append(True)
+
+    monkeypatch.setattr(deps, "get_registry", lambda: registry)
+    monkeypatch.setattr(deps, "_mcp_skills", [old_skill])
+    monkeypatch.setattr(deps, "mcp_runner", OldRunner())
+    monkeypatch.setattr(deps, "settings", replace(deps.settings, mcp_config=tmp_path / "none.json"))
+    await deps.restart_mcp()
+    assert stopped == [True] and deps._mcp_skills == [] and deps.mcp_runner is None  # 新配置是空的：不再连
+    assert "mcp:old" not in registry.enabled({"mcp:old": True})

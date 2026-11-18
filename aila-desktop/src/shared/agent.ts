@@ -36,6 +36,8 @@ export interface AgentSessionSummary {
   budget?: number | null
   /** 长任务的计划做到哪了（没有计划是 null）：列表里显示「第 2/4 阶段」 */
   plan?: { decision: 'proposed' | 'approved' | 'rejected'; stages: number; done: number; finished: boolean } | null
+  /** 在等你什么（「等你」收件箱）：confirm 有个操作等你同意；plan 计划等你决定；paused 计划停下了 */
+  waiting?: 'confirm' | 'plan' | 'paused' | null
   running?: boolean
   shell?: string
   /** 在新分支上做时的分支名（放弃了或者不在分支上是 null） */
@@ -109,7 +111,7 @@ export interface AgentActivity {
 /** 工作窗口里的任务进展，主进程转给桌面上的她（她说一句、做个动作） */
 export type AgentProgress =
   | { kind: 'start'; title: string }
-  | { kind: 'confirm'; action: string }
+  | { kind: 'confirm'; action: string; sid?: string }
   | { kind: 'done'; files: number }
   | { kind: 'stopped'; reason: string }
   | { kind: 'budget' }

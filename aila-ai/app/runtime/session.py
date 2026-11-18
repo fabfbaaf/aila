@@ -195,7 +195,28 @@ class Session:
             "cost": self.cost,
             "budget": self.budget,
             "plan": self.plan_brief(),
+            "waiting": self.waiting(),
         }
+
+    def waiting(self) -> str | None:
+        """这个会话在等你什么（「等你」收件箱用）：
+        confirm 有个操作等你同意；plan 交了计划等你决定；paused 计划做到一半停下了；None 不用你管"""
+        from .planning import plan_state
+
+        closed = {e.get("id") for e in self.events if e["type"] == "confirm_end"}
+        if any(e["type"] == "confirm" and e.get("id") not in closed for e in self.events[-50:]):
+            return "confirm"
+        state = plan_state(self.events)
+        if state is None or self.branch_closed:
+            return None
+        if state.decision == "proposed":
+            return "plan"
+        if state.decision == "approved" and not state.finished:
+            last = next((e for e in reversed(self.events)
+                         if e["type"] == "plan_pause" or (e["type"] == "user" and "plan_stage" in e)), None)
+            if last is not None and last["type"] == "plan_pause":
+                return "paused"
+        return None
 
     def plan_brief(self) -> dict[str, Any] | None:
         """列表里显示用：计划做到第几阶段了（没有计划是 None）"""

@@ -228,6 +228,7 @@ describe('工作窗口的转发（主进程）', () => {
 
     expect(seen.progress.map((p) => p.kind)).toEqual(['start', 'confirm', 'done'])
     expect(seen.progress[2]).toEqual({ kind: 'done', files: 1 })
+    expect(seen.progress[1]).toMatchObject({ kind: 'confirm', sid: 's1' }) // 气泡里「去看看」要知道是哪个任务
     expect(seen.activity).toEqual([
       { sid: 's1', cwd: 'C:\\code\\shop', file: 'README.md', kind: 'read' },
       { sid: 's1', cwd: 'C:\\code\\shop', file: 'README.md', kind: 'edit' }

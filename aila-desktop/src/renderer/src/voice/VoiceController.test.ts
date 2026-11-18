@@ -64,6 +64,19 @@ beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 
 describe('VoiceController', () => {
+  it('默认开着「说话」：启动时提前加载语音合成；打开说话时也加载，关掉时不加载', async () => {
+    const { vc } = setup()
+    const warm = vi.fn()
+    vc.warm = warm
+    await vc.init()
+    expect(warm).toHaveBeenCalledWith({ tts: true, ears: false })
+    warm.mockClear()
+    vc.toggleSpeak() // 关掉
+    expect(warm).not.toHaveBeenCalled()
+    vc.toggleSpeak() // 打开
+    expect(warm).toHaveBeenCalledWith({ tts: true })
+  })
+
   it('唤醒后开始听，用户说完交给对话', () => {
     const { ear, behavior, conversation, bubbles } = setup()
     ear.onEvent({ type: 'wake', keyword: '你好艾拉' })

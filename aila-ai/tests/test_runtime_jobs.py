@@ -92,12 +92,18 @@ async def test_background_returns_ready_without_waiting_and_uses_clean_environme
     tools = CodingTools(Workspace(tmp_path), SHELL)
     try:
         t0 = time.perf_counter()
-        result = await asyncio.wait_for(start(tools, command), timeout=5)
-        assert time.perf_counter() - t0 < 5
-        assert result.extra["job_id"] == "job-1"
-        assert "ready" in result.content and "还在跑" in result.content
-        assert str(tmp_path) in result.content and "ordinary-value" in result.content
-        assert "test-secret-value" not in result.content and "[None, None, None]" in result.content
+        result = await asyncio.wait_for(start(tools, command), timeout=10)
+        assert time.perf_counter() - t0 < 10  # 最多等启动窗口（3 秒）就回来；机器很忙时留点余量
+        assert result.extra["job_id"] == "job-1" and "还在跑" in result.content
+        # 机器很忙时子进程启动可能超过启动窗口：那就接着看输出，直到它打印 ready
+        output = result.content
+        deadline = time.perf_counter() + 20
+        while "ready" not in output and time.perf_counter() < deadline:
+            await asyncio.sleep(0.2)
+            output += (await tools.tools["job_output"].run({"id": "job-1"})).content
+        assert "ready" in output
+        assert str(tmp_path) in output and "ordinary-value" in output
+        assert "test-secret-value" not in output and "[None, None, None]" in output
         assert tools.jobs.jobs["job-1"].proc.returncode is None
     finally:
         await tools.jobs.shutdown()

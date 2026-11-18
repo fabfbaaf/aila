@@ -288,7 +288,7 @@ export class AgentRelay {
         break
       }
       case 'confirm':
-        this.hooks.progress({ kind: 'confirm', action: String(e.action ?? '') })
+        this.hooks.progress({ kind: 'confirm', action: String(e.action ?? ''), sid })
         if (e.kind === 'edit') {
           this.pendingConfirm = { sid, id: String(e.id) }
           this.hooks.confirm({ sid, id: String(e.id), detail: String(e.detail ?? '') })

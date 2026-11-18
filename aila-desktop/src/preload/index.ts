@@ -77,6 +77,7 @@ const api = {
   /** 本地 AI 服务地址（语音 WebSocket 由渲染层直接连） */
   aiUrl: process.env['AILA_AI_URL'] ?? AI_SERVICE_URL,
   synthesize: (text: string): Promise<ArrayBuffer | null> => ipcRenderer.invoke('tts:synthesize', text),
+  voiceWarmup: (parts: { tts?: boolean; ears?: boolean }): Promise<void> => ipcRenderer.invoke('voice:warmup', parts),
   onVoiceMenu: (cb: (action: VoiceMenuAction) => void): Unsubscribe => listen('voice:menu', cb),
 
   // 对话记录（本地保存，登录后同步到云端）
