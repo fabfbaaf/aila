@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app import deps
+from app import deps, security
 from app.main import app, get_embedder
 
 
@@ -35,3 +35,7 @@ def isolated_data(tmp_path: Path) -> Iterator[None]:
     deps.settings = saved
     for cache in (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime):
         cache.cache_clear()
+
+
+# TestClient 用 testserver、有的测试用 test 当 Host：只在测试进程里认它们（正式运行只认 127.0.0.1、localhost、[::1]）
+security.EXTRA_HOSTS.update({"testserver", "test"})

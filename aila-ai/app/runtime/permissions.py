@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from .workspace import SAFE_ENV_EXAMPLES, SECRET_NAME
+from .workspace import SAFE_ENV_EXAMPLES, SECRET_DIRS, SECRET_NAME
 
 Mode = Literal["read_only", "ask", "auto"]
 MODES: tuple[Mode, ...] = ("read_only", "ask", "auto")
@@ -42,7 +42,11 @@ class Decision:
 
 
 # 命令里有这些就不算「明显只读」：可能串了别的命令、重定向写文件、或者展开出别的东西
-SHELL_META = re.compile(r"[;&|<>`\n\r]|\$\(")
+# PowerShell 里括号、@( ) 都会先执行里面的命令（echo (Remove-Item x)），所以括号也算
+SHELL_META = re.compile(r"[;&|<>`\n\r()]|\$\(")
+# 看起来是查看类的 git 命令，带了这些参数就会写文件或者跑外部程序：--output 写到任意路径，
+# --ext-diff / --textconv 跑 git 配置里的外部程序
+WRITING_OPTIONS = re.compile(r"(^|\s)--(output|ext-diff|textconv)(=|\s|$)", re.IGNORECASE)
 
 # 明显只读、可以直接跑的命令（整条命令以这些开头，且没有上面的符号）
 READ_ONLY_COMMANDS = re.compile(
@@ -65,7 +69,8 @@ DANGEROUS = [
     (re.compile(r"\b(curl|wget|iwr|Invoke-WebRequest|irm|Invoke-RestMethod)\b.*\|\s*(sh|bash|iex|Invoke-Expression|python)\b", re.I), "下载后直接执行"),
     (re.compile(r"\b(iex|Invoke-Expression)\b", re.I), "执行任意字符串"),
     (re.compile(r"\bsudo\b|\brunas\b", re.I), "要管理员权限"),
-    (re.compile(r"\b(shutdown|reboot|halt|poweroff|mkfs|diskpart|format)\b|\bdd\s+if=", re.I), "影响整台电脑"),
+    # format 只认 Windows 格式化磁盘的写法（format D:），不误伤 git log --format、dotnet format
+    (re.compile(r"\b(shutdown|reboot|halt|poweroff|mkfs|diskpart)\b|(^|[\s;&|])format(\.com)?\s+[a-z]:|\bdd\s+if=", re.I), "影响整台电脑"),
     (re.compile(r"\breg\s+(add|delete|import)\b|Set-ItemProperty\s+.*HK(LM|CU)|Set-ExecutionPolicy|\bnetsh\b|\bbcdedit\b|\bsetx\b", re.I), "改系统设置"),
     (re.compile(r"\b(taskkill|Stop-Process|kill|pkill|killall)\b", re.I), "会结束进程"),
     (re.compile(r"\bchmod\s+-R\b|\bchown\b|\bicacls\b|\btakeown\b", re.I), "改文件权限"),
@@ -82,6 +87,8 @@ def dangerous(command: str) -> str | None:
 
 def mentions_secret(command: str) -> bool:
     """命令里提到了像是存着密钥的文件（cat .env 这类）：和直接读那个文件一样要问"""
+    if SECRET_DIRS.search(command):
+        return True
     for token in re.split(r"[\s'\"=:]+", command):
         name = re.split(r"[/\\]", token)[-1]
         if name and SECRET_NAME.search(name) and not SAFE_ENV_EXAMPLES.match(name):
@@ -91,7 +98,7 @@ def mentions_secret(command: str) -> bool:
 
 def read_only_command(command: str) -> bool:
     cmd = command.strip()
-    return bool(cmd) and not SHELL_META.search(cmd) and bool(READ_ONLY_COMMANDS.match(cmd))
+    return bool(cmd) and not SHELL_META.search(cmd) and not WRITING_OPTIONS.search(cmd) and bool(READ_ONLY_COMMANDS.match(cmd))
 
 
 class Rules:

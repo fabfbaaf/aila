@@ -19,10 +19,18 @@ IGNORED_DIRS = {
     "dist", "build", "out", "target", ".idea", ".gradle", ".next", ".nuxt", "coverage",
 }
 SECRET_NAME = re.compile(
-    r"(^\.env(\..+)?$|\.pem$|\.key$|\.pfx$|\.p12$|^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$|credentials|secrets?\.(json|ya?ml|toml)$)",
+    r"(^\.env(\..+)?$|\.pem$|\.key$|\.pfx$|\.p12$|^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$|credentials|secrets?\.(json|ya?ml|toml)$"
+    # 包管理器、登录信息里常放令牌：npm、PyPI、netrc、Java 的密钥库、kubeconfig
+    r"|^\.?npmrc$|^\.pypirc$|^[._]netrc$|\.keystore$|\.jks$|^kubeconfig$)",
     re.IGNORECASE,
 )
+# 这些目录里的东西都当密钥看：SSH、云服务、集群、GPG 的登录信息；
+# Docker 只算放登录信息的那个文件（项目里常有自己的 .docker 目录，放 Dockerfile 之类）
+SECRET_DIRS = re.compile(
+    r"(^|[/\\])(\.ssh|\.aws|\.azure|\.gnupg|\.kube)([/\\]|$)|[/\\]\.docker[/\\]config\.json\b", re.IGNORECASE
+)
 SAFE_ENV_EXAMPLES = re.compile(r"^\.env\.(example|sample|template)$", re.IGNORECASE)
+WINDOWS_DEVICE = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$", re.IGNORECASE)
 MAX_FILES = 20000
 
 
@@ -60,6 +68,9 @@ class Workspace:
             raise WorkspaceError("不能改 .git 里面的文件。")
         if for_write and os.name == "nt" and any(":" in part for part in path.relative_to(self.root).parts):
             raise WorkspaceError("不能改文件的备用数据流。")
+        # Windows 的设备名（CON、NUL、COM1……，带不带扩展名都是）：读 CON 会一直等键盘输入，把工具卡住
+        if os.name == "nt" and any(WINDOWS_DEVICE.match(part) for part in path.relative_to(self.root).parts):
+            raise WorkspaceError(f"{raw} 是 Windows 的设备名，不是文件。")
         return path
 
     def rel(self, path: Path) -> str:
@@ -70,6 +81,8 @@ class Workspace:
 
     @staticmethod
     def is_secret(path: Path) -> bool:
+        if SECRET_DIRS.search(path.as_posix()):
+            return True
         return bool(SECRET_NAME.search(path.name)) and not SAFE_ENV_EXAMPLES.match(path.name)
 
     # ---------- 读过才能改 ----------
