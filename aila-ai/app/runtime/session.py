@@ -203,7 +203,36 @@ class Session:
             "budget": self.budget,
             "plan": self.plan_brief(),
             "waiting": self.waiting(),
+            # 看板用：不打开会话也知道她在干嘛、做得怎么样
+            "activity": self.activity(),
+            "outcome": next((e.get("reason") for e in reversed(self.events) if e["type"] == "turn_end"), None),
+            "edits": len({e["file"] for e in self.events if e["type"] == "tool" and e.get("status") == "ok"
+                          and e.get("name") in ("edit_file", "write_file") and e.get("file")}),
+            "pending": self.pending_confirm(),
         }
+
+    def activity(self) -> dict[str, str] | None:
+        """她最近一次要用的工具和对象（读哪个文件、跑哪条命令），看板上一行字"""
+        for e in reversed(self.events[-200:]):
+            if e["type"] == "assistant" and e.get("tool_calls"):
+                call = e["tool_calls"][-1]
+                try:
+                    args = json.loads(call.get("arguments") or "{}")
+                except (TypeError, ValueError):
+                    args = {}
+                target = next((str(args[k]) for k in ("path", "command", "pattern", "query", "url", "task")
+                               if isinstance(args, dict) and args.get(k)), "")
+                return {"tool": str(call.get("name", "")), "target": target[:120]}
+        return None
+
+    def pending_confirm(self) -> dict[str, Any] | None:
+        """还没回答的那个确认：看板上直接点「可以 / 不行」。说明是代码按参数生成的（confirm 事件里的 action）"""
+        closed = {e.get("id") for e in self.events if e["type"] == "confirm_end"}
+        for e in reversed(self.events[-50:]):
+            if e["type"] == "confirm" and e.get("id") not in closed:
+                return {"id": e["id"], "tool": e.get("tool", ""), "action": str(e.get("action", ""))[:200],
+                        "can_remember": bool(e.get("can_remember"))}
+        return None
 
     def waiting(self) -> str | None:
         """这个会话在等你什么（「等你」收件箱用）：

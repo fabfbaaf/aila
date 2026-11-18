@@ -55,6 +55,14 @@ export interface AgentSessionSummary {
   shell?: string
   /** 在新分支上做时的分支名（放弃了或者不在分支上是 null） */
   branch?: string | null
+  /** 看板用：她最近一次要用的工具和对象 */
+  activity?: { tool: string; target: string } | null
+  /** 上一轮怎么结束的（done、error、max_steps、interrupted、budget……）；还没做过是 null */
+  outcome?: string | null
+  /** 这个会话里改过几个文件 */
+  edits?: number
+  /** 还没回答的确认（action 是代码按参数生成的说明） */
+  pending?: { id: string; tool: string; action: string; can_remember: boolean } | null
 }
 
 /** 一个事件。带 seq 的写在会话日志里；text_delta、reasoning_delta、tool_start 只是实时推送 */

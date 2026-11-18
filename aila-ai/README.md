@@ -131,7 +131,7 @@ data: {"type": "done"}
 | 接口 | 作用 |
 |---|---|
 | `POST /agent/sessions` | 新建会话 `{cwd, mode, budget?, kind?}`；kind 默认 `project`，传 `computer` 不用 cwd；电脑任务只接受 `read_only` / `ask`，项目还可用 `auto`；budget 是累计元数上限，省略或 `null` 表示不限 |
-| `GET /agent/sessions` | 会话列表（最近的在前，带标题、用量、花费 `cost`、上限 `budget`、是否在做） |
+| `GET /agent/sessions` | 会话列表（最近的在前，带标题、用量、花费 `cost`、上限 `budget`、是否在做；看板用的 `activity` 她最近要用的工具和对象、`outcome` 上一轮怎么结束的、`edits` 改过几个文件、`pending` 还没回答的确认） |
 | `GET /agent/sessions/{id}` | 会话的全部日志事件（界面据此重建） |
 | `POST /agent/sessions/{id}/messages` | 说一句话开始一轮，返回这一轮的事件流（SSE）；连接断了她照样做完 |
 | `GET /agent/sessions/{id}/events?after=N` | 订阅：补发 N 之后的事件，正在做的话接着推实时事件 |

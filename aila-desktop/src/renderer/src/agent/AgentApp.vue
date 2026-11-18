@@ -24,6 +24,7 @@ import Icon from '../theme/Icon.vue'
 import { deleteNotice, groupSessions, sessionLabel } from './sessions'
 import { canContinue, planState } from './plan'
 import PlanCard from './PlanCard.vue'
+import TaskBoard from './TaskBoard.vue'
 
 const source = createAgentSource()
 /** 告诉主窗口外壳有几个会话在等你（图标栏的角标） */
@@ -72,6 +73,7 @@ const waitingCount = computed(() => sessions.value.filter((s) => s.waiting).leng
 watch(waitingCount, (n) => emit('waiting', n), { immediate: true })
 /** 终端里开的、别的窗口开的会话也可能在等你：每隔一会儿刷新一次列表 */
 const LIST_REFRESH_MS = 15000
+const BOARD_REFRESH_MS = 2500
 let listTimer = 0
 const menuFor = ref('')
 const renaming = ref('')
@@ -160,7 +162,11 @@ const choices = computed<ProjectChoice[]>(() => {
 // ---------- 会话 ----------
 
 let listRequest = 0
-async function refreshList(): Promise<void> {
+/**
+ * 重新取会话列表。loud：你自己触发的（打开页面、搜索）出错要说；后台刷新（定时、事件触发、看板轮询）
+ * 偶尔一次失败不打扰你，下一次刷新就补上了
+ */
+async function refreshList(loud = false): Promise<void> {
   const request = ++listRequest
   try {
     const result = await source.list(query.value)
@@ -173,7 +179,7 @@ async function refreshList(): Promise<void> {
       t.value.budget = validBudget(latest.budget) ? latest.budget : null
     }
   } catch (err) {
-    if (request === listRequest) error.value = (err as Error).message
+    if (request === listRequest && loud) error.value = (err as Error).message
   }
 }
 
@@ -251,7 +257,7 @@ async function pickOther(): Promise<void> {
 // 打字停一下再搜（服务端按标题和项目路径找，能找到很早的会话）
 watch(query, () => {
   clearTimeout(searchTimer)
-  searchTimer = window.setTimeout(() => void refreshList(), 250)
+  searchTimer = window.setTimeout(() => void refreshList(true), 250)
 })
 
 function toggleMenu(sid: string): void {
@@ -583,6 +589,51 @@ source.onFocus((sid) => {
   void open(sid)
 })
 
+// ---------- 看板：几个任务同时做 ----------
+
+const board = ref(false)
+const boardNow = ref(Date.now() / 1000)
+/** 侧栏「看板」按钮上的数字：在做和等你的任务一共几个 */
+const boardBusy = computed(() => sessions.value.filter((s) => s.running || s.waiting).length)
+let boardTimer = 0
+
+watch(board, (on) => {
+  window.clearInterval(boardTimer)
+  if (!on) return
+  void refreshList()
+  // 看板开着时勤快一点刷：别的任务在做什么只能靠列表摘要
+  boardTimer = window.setInterval(() => {
+    boardNow.value = Date.now() / 1000
+    void refreshList()
+  }, BOARD_REFRESH_MS)
+})
+
+function openFromBoard(sid: string): void {
+  board.value = false
+  void open(sid)
+}
+
+async function answerFromBoard(_sid: string, id: string, approved: boolean): Promise<void> {
+  if (!(await source.confirm(id, approved, false))) error.value = '这个确认已经结束了（超时或者被打断）。'
+  void refreshList()
+}
+
+/** 一次开几个：每个都在新分支上做（互不干扰），开好就开始 */
+async function batchFromBoard(cwd: string, mode: AgentMode, tasks: string[]): Promise<void> {
+  error.value = ''
+  for (const task of tasks) {
+    try {
+      const s = await source.create(cwd, mode, true, null, 'project')
+      streaming.add(s.id)
+      source.send(s.id, task)
+    } catch (err) {
+      error.value = `「${task}」没开成：${(err as Error).message}`
+      break
+    }
+  }
+  await refreshList()
+}
+
 // ---------- 命令菜单：输入「/」时列出内置命令和自定义命令 ----------
 
 const commandList = ref<AgentCommandList | null>(null)
@@ -708,7 +759,7 @@ onMounted(async () => {
     if (running.value && view.value === 'trace') now.value = Date.now() / 1000
   }, 1000)
   if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__agent = { t, open, source }
-  await refreshList()
+  await refreshList(true)
   void source.projects().then((p) => (projects.value = p))
   void source.models().then((m) => (models.value = m))
   const focus = await source.takeFocus()
@@ -731,6 +782,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('click', closeMenus)
   clearInterval(clock)
+  clearInterval(boardTimer)
   clearTimeout(ledgerTimer)
   clearTimeout(searchTimer)
   clearInterval(listTimer)
@@ -742,7 +794,12 @@ onBeforeUnmount(() => {
     <aside class="side">
       <div class="side-head">
         <h2>任务</h2>
-        <button class="new" title="开一个新任务" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+        <div class="head-actions">
+          <button class="board-toggle" :class="{ on: board }" :title="board ? '回到当前任务' : '看板：几个任务同时做时一眼看全'" @click="board = !board">
+            看板<span v-if="boardBusy" class="dot">{{ boardBusy }}</span>
+          </button>
+          <button class="new" title="开一个新任务" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+        </div>
       </div>
       <label class="search">
         <Icon name="search" :size="15" />
@@ -797,7 +854,19 @@ onBeforeUnmount(() => {
       <div class="side-foot">终端里也能用：<code>aila</code></div>
     </aside>
 
-    <main class="main">
+    <TaskBoard
+      v-if="board"
+      class="main"
+      :sessions="sessions"
+      :choices="choices"
+      :now="boardNow"
+      :error="error"
+      @open="openFromBoard"
+      @stop="(sid: string) => void source.interrupt(sid)"
+      @answer="answerFromBoard"
+      @batch="batchFromBoard"
+    />
+    <main v-else class="main">
       <header v-if="current" class="top">
         <div class="proj" :title="current.cwd">
           <b>{{ sessionLabel(current) }}</b>
@@ -953,7 +1022,7 @@ onBeforeUnmount(() => {
       </footer>
     </main>
 
-    <aside v-if="current" class="info">
+    <aside v-if="current && !board" class="info">
       <section v-if="plan && plan.decision !== 'rejected'" class="plan-side">
         <h3>计划</h3>
         <p class="plan-side-goal">{{ plan.goal }}</p>
@@ -1282,6 +1351,39 @@ code {
 .side-head .new {
   padding: 5px 11px 5px 9px;
   font-size: 12.5px;
+}
+
+.head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.board-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r-s);
+  background: transparent;
+  color: var(--dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.board-toggle.on {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.board-toggle .dot {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ui-warn-soft);
+  color: var(--ui-warn);
+  font-size: 11px;
+  text-align: center;
 }
 
 .search {
