@@ -2,6 +2,7 @@
 
 import os
 import platform
+import re
 import shutil
 import threading
 import time
@@ -12,6 +13,9 @@ from .runtime.shell import Shell
 PROBE_SECONDS = 1.5
 PROGRAM_LIMIT = 80
 ENTRY_LIMIT = 600
+# 开始菜单里的卸载程序、说明文档、官网链接不是能用的程序，列出来只占上下文
+NOT_A_PROGRAM = re.compile(r"^(uninstall|卸载)|\b(documentation|website|release notes|installation notes|readme)\b|帮助$",
+                           re.IGNORECASE)
 PATH_TOOLS = ("git", "node", "python", "py", "code", "ffmpeg", "docker", "winget",
               "pwsh", "powershell", "excel", "winword")
 
@@ -104,7 +108,9 @@ def inventory_names(home: Path) -> tuple[list[str], list[str]]:
                             if entry.is_dir(follow_symlinks=False):
                                 if not path.is_junction():
                                     roots.append(path)
-                            elif entry.is_file(follow_symlinks=False) and path.suffix.lower() in (".lnk", ".url", ".appref-ms"):
+                            elif (entry.is_file(follow_symlinks=False)
+                                  and path.suffix.lower() in (".lnk", ".url", ".appref-ms")
+                                  and not NOT_A_PROGRAM.search(path.stem)):
                                 with lock:
                                     programs.add(path.stem[:100])
                                     if len(programs) >= PROGRAM_LIMIT:

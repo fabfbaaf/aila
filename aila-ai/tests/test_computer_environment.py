@@ -28,11 +28,14 @@ def test_inventory_names_only_and_optional_context(tmp_path: Path, monkeypatch: 
     menu.mkdir()
     (menu / "记事本.lnk").write_text("这段内容绝对不应读取", encoding="utf-8")
     (menu / "说明.txt").write_text("其他文件也不读", encoding="utf-8")
+    for noise in ("Uninstall Node.js", "Node.js documentation", "Node.js website", "卸载 某软件", "某软件 帮助"):
+        (menu / f"{noise}.lnk").write_text("", encoding="utf-8")
     monkeypatch.setattr(computer, "program_directories", lambda _: [menu])
     monkeypatch.setattr(computer.shutil, "which", lambda name: "C:/工具/bin/" + name if name in ("git", "node", "excel") else None)
     context = computer.build_computer_context(tmp_path, "PowerShell")
     assert "记事本" in context and "git" in context and "node" in context and "excel" in context
     assert "这段内容绝对" not in context and "说明.txt" not in context and "C:/工具" not in context
+    assert "Node.js" not in context and "某软件" not in context  # 卸载、文档、官网、帮助不算程序
     assert str(tmp_path / "Downloads") in context and "先列出要动哪些文件" in context
     assert len(computer.WINDOWS_GUIDE) < 1500
 
