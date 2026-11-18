@@ -437,6 +437,10 @@ async function planAction(action: 'approve' | 'continue' | 'reject', pauseEach =
 
 /** /review：她只读地审一遍没提交的改动，按严重程度列出问题；focus 是可选的「特别注意什么」 */
 function review(focus = ''): void {
+  if (current.value?.kind === 'computer') {
+    error.value = '电脑任务没有项目代码可审。要审改动，在项目里开一个任务。'
+    return
+  }
   if (!canStart() || !current.value) return
   error.value = ''
   text.value = ''
@@ -839,6 +843,7 @@ onBeforeUnmount(() => {
               <Icon name="plan" :size="15" />出方案
             </button>
             <button
+              v-if="current?.kind !== 'computer'"
               class="chip"
               :disabled="running || undoBusy || opening || t.closed"
               title="她只读地审一遍还没提交的改动，按严重程度列出问题。也可以输入「/review 要特别注意的地方」"

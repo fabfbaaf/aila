@@ -257,6 +257,15 @@ describe('电脑任务入口', () => {
     await settle()
     byClass(root, 'send').props.onClick()
     expect(fixture.source.send).toHaveBeenCalledWith('computer1', '先整理测试文件夹', false, true)
+    // 电脑任务没有项目代码：不给「审查改动」，输入 /review 只提示
+    expect(viewText(root)).not.toContain('审查改动')
+    vi.mocked(fixture.source.send).mockClear()
+    composer.props['onUpdate:modelValue']('/review')
+    await settle()
+    byClass(root, 'send').props.onClick()
+    await settle()
+    expect(fixture.source.send).not.toHaveBeenCalled()
+    expect(viewText(root)).toContain('电脑任务没有项目代码可审')
   })
 
   it('电脑任务仍可查看和批准计划，阶段流显示在原任务页', async () => {
