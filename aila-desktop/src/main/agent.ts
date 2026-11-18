@@ -8,6 +8,7 @@ import { SseParser } from '../shared/chat'
 import type {
   AgentActivity,
   AgentBudgetEvent,
+  AgentCommandList,
   AgentEvent,
   AgentKind,
   AgentLedger,
@@ -112,6 +113,12 @@ export class AgentRelay {
       if (this.pendingConfirm?.sid === sid) this.clearPending()
     }
     return result
+  }
+
+  /** 自定义命令：这个项目能用的「/名字」（电脑任务只有自己的） */
+  commands(cwd: string | null, kind: AgentKind): Promise<AiResult<AgentCommandList>> {
+    const q = new URLSearchParams({ kind, ...(cwd ? { cwd } : {}) })
+    return this.call('GET', `/agent/commands?${q}`)
   }
 
   /** 项目记忆：按项目目录看、加、删（改动从下一个会话起放进开头） */

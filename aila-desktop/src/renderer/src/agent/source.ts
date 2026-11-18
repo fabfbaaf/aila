@@ -1,6 +1,6 @@
 // 工作窗口的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import { SseParser } from '../../../shared/chat'
-import type { AgentBudgetEvent, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
+import type { AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 
@@ -14,6 +14,8 @@ export interface AgentSource {
   list(q?: string): Promise<AgentSessionSummary[]>
   rename(sid: string, title: string): Promise<AgentSessionSummary>
   remove(sid: string): Promise<void>
+  /** 自定义命令：这个项目能用的「/名字」 */
+  commands?(cwd: string | null, kind: AgentKind): Promise<AgentCommandList>
   /** 项目记忆：按项目目录看、加、删 */
   memory(cwd: string): Promise<AgentMemoryNote[]>
   remember(cwd: string, text: string): Promise<AgentMemoryNote & { added: boolean }>
@@ -59,6 +61,7 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     list: async (q = '') => unwrap(await api.agentList(q)),
     rename: async (sid, title) => unwrap(await api.agentRename(sid, title)),
     remove: async (sid) => void unwrap(await api.agentDelete(sid)),
+    commands: async (cwd, kind) => unwrap(await api.agentCommands(cwd, kind)),
     memory: async (cwd) => unwrap(await api.agentMemory(cwd)),
     remember: async (cwd, text) => unwrap(await api.agentRemember(cwd, text)),
     forgetMemory: async (cwd, id) => void unwrap(await api.agentForgetMemory(cwd, id)),
@@ -140,6 +143,7 @@ function web(): AgentSource {
     list: (q = '') => call('GET', `/agent/sessions${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`),
     rename: (sid, title) => call('PATCH', `/agent/sessions/${encodeURIComponent(sid)}`, { title }),
     remove: async (sid) => void (await call('DELETE', `/agent/sessions/${encodeURIComponent(sid)}`)),
+    commands: (cwd, kind) => call('GET', `/agent/commands?${new URLSearchParams({ kind, ...(cwd ? { cwd } : {}) })}`),
     memory: (cwd) => call('GET', `/agent/memory?cwd=${encodeURIComponent(cwd)}`),
     remember: (cwd, text) => call('POST', '/agent/memory', { cwd, text }),
     forgetMemory: async (cwd, id) => void (await call('DELETE', '/agent/memory', { cwd, id })),

@@ -636,6 +636,11 @@ function registerIpc(): void {
   ipcMain.handle('agent:delete', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.delete(sid) : notAllowed))
   // 项目记忆：写进去的话以后每个会话都会带上，所以也只认主窗口
   const cwdOk = (cwd: unknown): cwd is string => typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 1000
+  ipcMain.handle('agent:commands', (e, cwd: unknown, kind: unknown) =>
+    fromAgent(e) && (cwd === null || cwdOk(cwd)) && (kind === 'project' || kind === 'computer')
+      ? agentRelay.commands(cwd, kind)
+      : notAllowed
+  )
   ipcMain.handle('agent:memory', (e, cwd: unknown) => (fromAgent(e) && cwdOk(cwd) ? agentRelay.memory(cwd) : notAllowed))
   ipcMain.handle('agent:memory-add', (e, cwd: unknown, text: unknown) => {
     if (!fromAgent(e) || !cwdOk(cwd)) return notAllowed

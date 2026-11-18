@@ -82,8 +82,10 @@ class KeyWatcher:
 
 
 class SlashCompleter(Completer):
-    def __init__(self, computer: Callable[[], bool] = lambda: False) -> None:
+    def __init__(self, computer: Callable[[], bool] = lambda: False,
+                 custom: Callable[[], dict[str, str]] = dict) -> None:
         self.computer = computer
+        self.custom = custom  # 自定义命令：/名字 → 一句说明
 
     def get_completions(self, document, complete_event):  # noqa: ANN001, ANN201
         text = document.text_before_cursor
@@ -91,6 +93,9 @@ class SlashCompleter(Completer):
             for name, desc in COMMANDS.items():
                 if name.startswith(text.lower()):
                     yield Completion(name, start_position=-len(text), display_meta=desc[:30])
+            for name, desc in self.custom().items():
+                if name.lower().startswith(text.lower()):
+                    yield Completion(name, start_position=-len(text), display_meta=f"自定义：{desc}"[:30])
         elif text.startswith("/mode "):
             word = text[6:]
             for mode in MODES:
@@ -118,9 +123,11 @@ class Terminal:
         self.watcher = KeyWatcher(self.inp)
         self._last_ctrl_c = 0.0
         self._resume_ids: list[str] | None = None
+        # 自定义命令（/名字 → 说明）：开始时读一次，/commands 时重新读
+        self.custom: dict[str, str] = {}
         self.prompt: PromptSession[str] = PromptSession(
             history=FileHistory(str(history)) if history else InMemoryHistory(),
-            completer=SlashCompleter(lambda: self.info.get("kind") == "computer"),
+            completer=SlashCompleter(lambda: self.info.get("kind") == "computer", lambda: self.custom),
             complete_while_typing=True,
             key_bindings=self._bindings(),
             bottom_toolbar=self._toolbar,
@@ -164,7 +171,17 @@ class Terminal:
 
     # ---------- 主循环 ----------
 
+    async def load_commands(self) -> dict[str, Any]:
+        """读这个项目能用的自定义命令；读不到（服务没开新接口之类）就当没有"""
+        try:
+            found = await self.backend.commands(self.info.get("cwd"), self.info.get("kind", "project"))
+        except BackendError:
+            return {"commands": []}
+        self.custom = {f"/{c['name']}": c["description"] for c in found.get("commands", [])}
+        return found
+
     async def loop(self) -> int:
+        await self.load_commands()
         while True:
             try:
                 text = await self.prompt.prompt_async("> ")
@@ -461,8 +478,14 @@ class Terminal:
                     await self.backend.set_budget(self.sid, amount)
                     self.info["budget"] = amount
                 self.console.print(Text("花费不限。" if amount is None else f"花费上限 ¥{amount:.6f}", style="dim"))
+            elif name == "/commands":
+                await self._commands()
+            elif await self._is_custom(name):
+                cmd = text.strip().split(maxsplit=1)[0]
+                self.console.print(Text(f"按自定义命令 {cmd} 做：{self.custom.get(cmd, '')}", style="dim"))
+                await self.turn(text)  # 原样发过去，AI 服务按命令文件展开
             else:
-                self.console.print(Text(f"没有 {name} 这个命令，/help 看所有命令", style="dim"))
+                self.console.print(Text(f"没有 {name} 这个命令，/help 看所有命令，/commands 看自定义命令", style="dim"))
         except BackendError as err:
             self.renderer.stop_waiting()
             self.console.print(Text(str(err), style="red"))
@@ -505,6 +528,29 @@ class Terminal:
         if event.get("commands"):
             self.console.print(Text("这一轮还跑过命令，命令做的事没有撤销。", style="yellow"))
 
+    async def _is_custom(self, name: str) -> bool:
+        """是不是自定义命令；不在记着的列表里就再读一遍（可能刚加了命令文件）"""
+        if name.lower() not in {k.lower() for k in self.custom}:
+            await self.load_commands()
+        return name.lower() in {k.lower() for k in self.custom}
+
+    async def _commands(self) -> None:
+        found = await self.load_commands()
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        for c in found.get("commands", []):
+            table.add_row(Text(f"/{c['name']}", style="bold"), c["description"],
+                          Text("项目" if c["source"] == "project" else "我的", style="dim"))
+        if found.get("commands"):
+            self.console.print(table)
+        else:
+            self.console.print(Text("还没有自定义命令。", style="dim"))
+        where = [f"项目里：{found['project_dir']}"] if found.get("project_dir") else []
+        if found.get("user_dir"):
+            where.append(f"每个项目都能用：{found['user_dir']}")
+        self.console.print(Text(
+            "把常做的流程写成 <名字>.md 放进去，就能用 /名字 让她照着做。" + "；".join(where)
+            + "。开头可以用两行 --- 包住一行 description: 一句说明；正文里的 $ARGUMENTS 换成命令后面写的内容。", style="dim"))
+
     def _help(self) -> None:
         table = Table(show_header=False, box=None, padding=(0, 2))
         for name, desc in COMMANDS.items():
@@ -514,6 +560,10 @@ class Terminal:
                 if name == "/mode":
                     desc = "换权限模式：/mode read_only | ask；不带参数或 Shift+Tab 切换"
             table.add_row(Text(name, style="bold"), desc)
+        if self.custom:
+            table.add_row("", "")
+            for name, desc in self.custom.items():
+                table.add_row(Text(name, style="bold"), f"自定义：{desc}")
         table.add_row("", "")
         for key, desc in KEYS:
             table.add_row(Text(key, style="bold"), desc)

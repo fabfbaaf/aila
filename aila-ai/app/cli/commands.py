@@ -28,6 +28,7 @@ COMMANDS: dict[str, str] = {
     "/exit": "退出（Ctrl+D 也行）",
     "/undo": "撤销最近一轮用文件工具做的改动（先问 y/n）",
     "/budget": "看或修改会话花费上限：/budget 1（元），/budget off（不限）",
+    "/commands": "自定义命令：列出能用的「/名字」，以及命令文件放在哪",
 }
 ALIASES = {"/quit": "/exit", "/sessions": "/resume", "/cost": "/usage", "/clear": "/new", "/?": "/help"}
 

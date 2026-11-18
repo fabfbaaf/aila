@@ -85,6 +85,22 @@ export interface AgentSession extends Omit<AgentSessionSummary, 'events'> {
   events: AgentEvent[]
 }
 
+/** 自定义命令（GET /agent/commands）：项目 .aila/commands/ 或自己的 commands/ 里的「/名字」 */
+export interface AgentCommand {
+  name: string
+  description: string
+  /** project：项目里的；user：自己的（每个项目都能用） */
+  source: 'project' | 'user'
+  path: string
+}
+
+export interface AgentCommandList {
+  commands: AgentCommand[]
+  /** 项目命令放哪（电脑任务没有） */
+  project_dir: string | null
+  user_dir: string
+}
+
 /** 项目记忆的一条（GET /agent/memory?cwd=）：下次在这个项目开会话时放进开头 */
 export interface AgentMemoryNote {
   id: string

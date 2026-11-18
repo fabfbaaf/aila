@@ -8,7 +8,8 @@
  * 计划和进度从日志推出来（plan.ts），右边有计划进度和「接着做」。
  */
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { agentModes, MODE_HINTS, MODE_LABELS, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { agentModes, MODE_HINTS, MODE_LABELS, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
 import { createAgentSource, type ProjectChoice } from './source'
@@ -197,6 +198,7 @@ async function open(sid: string): Promise<void> {
     ledger.value = null
     loadLedger()
     void loadNotes()
+    void loadCommands()
     if (s.running && !streaming.has(sid)) {
       streaming.add(sid)
       source.watch(sid, tr.lastSeq) // 正在做（可能是终端里开的）：接上实时事件
@@ -581,7 +583,72 @@ source.onFocus((sid) => {
   void open(sid)
 })
 
+// ---------- 命令菜单：输入「/」时列出内置命令和自定义命令 ----------
+
+const commandList = ref<AgentCommandList | null>(null)
+const menuIndex = ref(0)
+/** 按了 Esc：在输入变化前不再弹 */
+const menuClosed = ref(false)
+const menu = computed<MenuItem[]>(() =>
+  menuClosed.value || !current.value || running.value
+    ? []
+    : commandMenu(text.value, commandList.value?.commands ?? [], current.value.kind === 'computer')
+)
+/** 展开看过「发了什么」的自定义命令 */
+const openCommands = reactive(new Set<string>())
+
+async function loadCommands(): Promise<void> {
+  const s = current.value
+  if (!s || !source.commands) return
+  const kind = s.kind ?? 'project'
+  try {
+    const list = await source.commands(kind === 'computer' ? null : s.cwd, kind)
+    if (current.value?.id === s.id) commandList.value = list
+  } catch {
+    commandList.value = null // 取不到（旧服务）：只列内置的
+  }
+}
+
+watch(text, (now, before) => {
+  menuIndex.value = 0
+  menuClosed.value = false
+  if (now === '/' && before !== '/') void loadCommands() // 刚打「/」：重新读一遍，命令文件可能刚加
+})
+
+function pickCommand(item: MenuItem): void {
+  text.value = `/${item.name} `
+  void nextTick(() => input.value?.focus())
+}
+
+function toggleCommand(key: string): void {
+  if (openCommands.has(key)) openCommands.delete(key)
+  else openCommands.add(key)
+}
+
+/** 菜单开着时：↑↓ 选、Tab 补全、Enter 补全（已经是完整命令名就照常发送）、Esc 收起。处理了返回 true */
+function menuKey(e: KeyboardEvent): boolean {
+  const items = menu.value
+  if (!items.length || e.isComposing) return false
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    menuIndex.value = (menuIndex.value + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length
+  } else if (e.key === 'Tab') {
+    pickCommand(items[menuIndex.value])
+  } else if (e.key === 'Escape') {
+    menuClosed.value = true
+    e.stopPropagation() // 不要变成「打断她」
+  } else if (e.key === 'Enter' && !e.shiftKey) {
+    const next = pickOnEnter(text.value, items[menuIndex.value])
+    if (next === null) return false
+    text.value = next
+  } else {
+    return false
+  }
+  e.preventDefault()
+  return true
+}
+
 function onComposerKey(e: KeyboardEvent): void {
+  if (menuKey(e)) return
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     send()
@@ -767,6 +834,13 @@ onBeforeUnmount(() => {
             <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>只读</span></div>
             <div v-else-if="item.kind === 'user' && item.tag === 'plan'" class="user review"><Icon name="plan" :size="16" />{{ item.text }}<span>只读</span></div>
             <div v-else-if="item.kind === 'user' && item.tag === 'stage'" class="stage-line"><Icon name="play" :size="12" :stroke="2" />{{ item.text }}</div>
+            <div v-else-if="item.kind === 'user' && item.tag === 'command'" class="user command">
+              <div class="command-head">
+                <Icon name="command" :size="16" />{{ item.text }}
+                <button class="link" type="button" @click="toggleCommand(item.key)">{{ openCommands.has(item.key) ? '收起' : '看发了什么' }}</button>
+              </div>
+              <pre v-if="openCommands.has(item.key)" class="command-body">{{ item.detail }}</pre>
+            </div>
             <div v-else-if="item.kind === 'user'" class="user">{{ item.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
             <div v-else-if="item.kind === 'text'" class="md" :class="{ live: item.live }" v-html="renderMarkdown(item.text)"></div>
@@ -816,6 +890,26 @@ onBeforeUnmount(() => {
 
       <footer v-if="current" class="composer">
         <div class="box">
+          <div v-if="menu.length" class="cmd-menu" role="listbox" aria-label="命令">
+            <button
+              v-for="(c, i) in menu"
+              :key="c.source + c.name"
+              type="button"
+              role="option"
+              :aria-selected="i === menuIndex"
+              :class="{ on: i === menuIndex }"
+              @mousedown.prevent="pickCommand(c)"
+              @mouseenter="menuIndex = i"
+            >
+              <b>/{{ c.name }}</b><span class="desc">{{ c.description }}</span><span class="src">{{ SOURCE_LABEL[c.source] }}</span>
+            </button>
+            <div v-if="!commandList?.commands.length" class="cmd-hint">
+              常做的流程可以写成自定义命令：把「名字.md」放进
+              {{ commandList?.project_dir ? '项目的 .aila/commands/' : '' }}{{ commandList?.project_dir ? '，或者 ' : '' }}{{ commandList?.user_dir ?? '数据目录的 commands/' }}，
+              以后输入「/名字」她就照着做
+            </div>
+            <div class="cmd-keys">↑↓ 选 · Tab 补全 · Esc 收起</div>
+          </div>
           <textarea
             ref="input"
             v-model="text"
@@ -1907,6 +2001,99 @@ code {
 /* 输入框：一个圆角盒子，下面一条工具栏 */
 .composer {
   padding: 4px 22px 16px;
+}
+
+/* 输入「/」时的命令菜单：贴在输入框上方 */
+.box {
+  position: relative;
+}
+
+.cmd-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r);
+  background: var(--card);
+  box-shadow: var(--ui-shadow);
+}
+
+.cmd-menu button {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cmd-menu button.on {
+  background: var(--ui-brand-soft);
+}
+
+.cmd-menu b {
+  flex: none;
+  font-family: var(--ui-mono);
+}
+
+.cmd-menu .desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-menu .src {
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cmd-hint,
+.cmd-keys {
+  padding: 6px 10px 2px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cmd-keys {
+  text-align: right;
+}
+
+/* 自定义命令的那句话：/发布 v1.2，可以展开看发了什么 */
+.user.command .command-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user.command .link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-body {
+  max-height: 260px;
+  margin: 8px 0 0;
+  overflow: auto;
+  color: var(--dim);
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .box {

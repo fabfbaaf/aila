@@ -17,6 +17,7 @@
   POST   /agent/sessions/{id}/compact      手动压缩上下文
   GET    /agent/sessions/{id}/context      上下文账本：上下文由哪几块组成、各占多少
   POST   /agent/confirm                    回答她的确认 {id, approved, remember}
+  GET    /agent/commands?cwd=&kind=        自定义命令：项目 .aila/commands/ 和自己的 commands/ 里的「/名字」
   GET    /agent/memory?cwd=                项目记忆：她在这个项目里记下的约定（下次开会话时带上）
   POST   /agent/memory                     加一条 {cwd, text}
   DELETE /agent/memory                     删一条 {cwd, id}
@@ -34,6 +35,7 @@
 import json
 from dataclasses import asdict
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -326,6 +328,18 @@ class MemoryNote(BaseModel):
 class ForgetNote(BaseModel):
     cwd: str = Field(min_length=1, max_length=1000)
     id: str = Field(min_length=1, max_length=64)
+
+
+@router.get("/commands")
+async def list_commands(cwd: str | None = None, kind: Literal["project", "computer"] = "project",
+                        rt: Runtime = Depends(get_runtime)) -> dict:
+    """这个项目能用的自定义命令（输入「/」时列出来），以及命令文件放在哪"""
+    found = rt.commands(cwd, kind)
+    return {
+        "commands": sorted((c.summary() for c in found.values()), key=lambda c: c["name"]),
+        "project_dir": str(Path(cwd) / ".aila" / "commands") if cwd and kind != "computer" else None,
+        "user_dir": str(rt.data_dir / "commands"),
+    }
 
 
 @router.get("/memory")

@@ -25,7 +25,7 @@ import type {
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
-import type { AgentActivity, AgentBudgetEvent, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
+import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
@@ -147,6 +147,8 @@ const api = {
   /** 仅主窗口：改会话标题、删除会话 */
   agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
   agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),
+  agentCommands: (cwd: string | null, kind: AgentKind): Promise<AiResult<AgentCommandList>> =>
+    ipcRenderer.invoke('agent:commands', cwd, kind),
   agentMemory: (cwd: string): Promise<AiResult<AgentMemoryNote[]>> => ipcRenderer.invoke('agent:memory', cwd),
   agentRemember: (cwd: string, text: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> =>
     ipcRenderer.invoke('agent:memory-add', cwd, text),
