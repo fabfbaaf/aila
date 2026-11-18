@@ -70,6 +70,11 @@ DANGEROUS = [
     (re.compile(r"\bgit\s+push\b", re.I), "会推送到远程仓库"),
     (re.compile(r"\bgit\s+(reset\s+--hard|clean\s+-|checkout\s+(--\s+)?\.(\s|$)|restore\b|stash\s+(drop|clear)|branch\s+-D|rebase\b|filter-branch)", re.I), "会丢掉改动或改写历史"),
     (re.compile(r"\b(npm|pnpm|yarn)\s+publish\b|\btwine\s+upload\b|\bdocker\s+push\b|\bmvn\s+deploy\b", re.I), "会发布到外面"),
+    # GitHub 上别人看得到的：开 PR、合并、评论、发版、建仓库、发 issue，以及 gh api 发出写请求
+    (re.compile(r"\bgh\s+(pr\s+(create|merge|comment|review|close|edit|ready)|release\s+(create|upload|delete|edit)"
+                r"|issue\s+(create|comment|close|edit)|repo\s+(create|delete|edit|fork)|gist\s+create)\b"
+                r"|\bgh\s+api\b.*(-X|--method)\s*(POST|PUT|PATCH|DELETE)\b|\bgh\s+api\b.*\s-(f|F)\s", re.I),
+     "会在 GitHub 上公开发东西"),
     (re.compile(r"\b(curl|wget|iwr|Invoke-WebRequest|irm|Invoke-RestMethod)\b.*\|\s*(sh|bash|iex|Invoke-Expression|python)\b", re.I), "下载后直接执行"),
     (re.compile(r"\b(iex|Invoke-Expression)\b", re.I), "执行任意字符串"),
     (re.compile(r"\bsudo\b|\brunas\b", re.I), "要管理员权限"),

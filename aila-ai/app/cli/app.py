@@ -480,6 +480,8 @@ class Terminal:
                 self.console.print(Text("花费不限。" if amount is None else f"花费上限 ¥{amount:.6f}", style="dim"))
             elif name == "/commands":
                 await self._commands()
+            elif name in ("/commit", "/pr", "/pr-comments"):
+                await self.turn(text)  # 请求由 AI 服务按改动清单、分支、PR 评论生成
             elif await self._is_custom(name):
                 cmd = text.strip().split(maxsplit=1)[0]
                 self.console.print(Text(f"按自定义命令 {cmd} 做：{self.custom.get(cmd, '')}", style="dim"))
@@ -555,7 +557,7 @@ class Terminal:
         table = Table(show_header=False, box=None, padding=(0, 2))
         for name, desc in COMMANDS.items():
             if self.info.get("kind") == "computer":
-                if name in ("/init", "/review", "/memory", "/mcp", "/merge", "/discard"):
+                if name in ("/init", "/review", "/memory", "/mcp", "/merge", "/discard", "/commit", "/pr", "/pr-comments"):
                     continue
                 if name == "/mode":
                     desc = "换权限模式：/mode read_only | ask；不带参数或 Shift+Tab 切换"

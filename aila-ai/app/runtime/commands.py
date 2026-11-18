@@ -24,7 +24,7 @@ MAX_COMMANDS = 200
 BUILTIN = {
     "help", "mode", "compact", "new", "resume", "rename", "delete", "usage", "trace", "context", "todo", "changes",
     "init", "plan", "review", "mcp", "memory", "merge", "discard", "rules", "exit", "undo", "budget", "commands",
-    "quit", "sessions", "cost", "clear",
+    "quit", "sessions", "cost", "clear", "commit", "pr", "pr-comments",
 }
 FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
 

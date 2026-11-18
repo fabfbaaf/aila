@@ -24,6 +24,7 @@ from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
 from .commands import Command, load_commands, match
+from .delivery import DELIVERY, DeliveryError
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, remember_tool
@@ -304,6 +305,19 @@ class Runtime:
             prompt = COMPUTER_PLAN_PROMPT if agent.session.kind == "computer" else PLAN_PROMPT
             return agent, prompt.format(goal=text.strip()), {"plan_request": True, "title": plan_title(text)}
         if not review:
+            # 交活：/commit、/pr、/pr-comments，请求由代码生成（改动清单、分支、PR 评论都是代码查的）
+            head, _, args = text.strip().partition(" ")
+            name = head[1:].lower() if head.startswith("/") else ""
+            if name in DELIVERY:
+                if agent.session.kind == "computer":
+                    raise RuntimeError_("电脑任务不在项目里，没有可以提交或开 PR 的改动。")
+                build, _label = DELIVERY[name]
+                root = agent.session.workdir if agent.session.workdir.is_dir() else agent.session.cwd
+                try:
+                    request = build(root, args)
+                except DeliveryError as err:
+                    raise RuntimeError_(str(err)) from err
+                return agent, request, {"command": name, "title": f"/{name}" + (f" {args.strip()}"[:200] if args.strip() else "")}
             # 自定义命令：「/发布 v1.2」展开成命令文件里写的话；日志里记着命令名和你写的那一行
             found = match(text.strip(), self.commands(agent.session.cwd, agent.session.kind))
             if found:

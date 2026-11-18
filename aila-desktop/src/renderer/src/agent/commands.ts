@@ -12,19 +12,24 @@ export interface MenuItem {
 
 const BUILTIN: MenuItem[] = [
   { name: 'plan', description: '先出分阶段的计划，批准后一段一段做', source: 'builtin' },
-  { name: 'review', description: '只读地审一遍没提交的改动', source: 'builtin' }
+  { name: 'review', description: '只读地审一遍没提交的改动', source: 'builtin' },
+  { name: 'commit', description: '把这次的改动提交到 git（只提交相关文件）', source: 'builtin' },
+  { name: 'pr', description: '推送并开 GitHub PR（推送、开 PR 都要你点头）', source: 'builtin' },
+  { name: 'pr-comments', description: '按 PR 上的评论接着改', source: 'builtin' }
 ]
+/** 电脑任务不在项目里：没有审查、提交、PR */
+const PROJECT_ONLY = new Set(['review', 'commit', 'pr', 'pr-comments'])
 
 export const SOURCE_LABEL: Record<MenuItem['source'], string> = { builtin: '内置', project: '项目', user: '我的' }
 
 /**
  * 现在输入的是「/开头、还没打空格」时，列出名字对得上的命令（内置的在前）；否则空列表。
- * 电脑任务没有 /review
+ * 电脑任务没有 /review、/commit、/pr
  */
 export function commandMenu(text: string, custom: AgentCommand[], computer = false, limit = 8): MenuItem[] {
   if (!text.startsWith('/') || text.startsWith('//') || /\s/.test(text)) return []
   const q = text.slice(1).toLowerCase()
-  const builtin = BUILTIN.filter((c) => !(computer && c.name === 'review'))
+  const builtin = BUILTIN.filter((c) => !(computer && PROJECT_ONLY.has(c.name)))
   const all: MenuItem[] = [...builtin, ...custom.map((c) => ({ name: c.name, description: c.description, source: c.source }))]
   return all.filter((c) => c.name.toLowerCase().startsWith(q)).slice(0, limit)
 }
