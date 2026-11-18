@@ -1,0 +1,21 @@
+{
+  "id": "extract-config",
+  "title": "把三处重复的常量收到一个配置文件",
+  "fixture": "repo",
+  "prompt": "TAX_RATE 和 CURRENCY 在 invoice.py、receipt.py、quote.py 里各写了一遍。新建 settings.py 只定义一次，三个文件都从那里导入；行为不变，跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_money_docs.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "refactor",
+    "multi-file",
+    "python"
+  ]
+}

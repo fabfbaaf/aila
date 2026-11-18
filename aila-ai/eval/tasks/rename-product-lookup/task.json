@@ -3,8 +3,19 @@
   "title": "跨三个文件统一商品查询函数名",
   "fixture": "repo",
   "prompt": "把 catalog.py 的 lookup_product 改名为 find_product，更新 orders.py 和 app.py 里所有调用和导入。不要留旧名别名，原有行为保持不变，跑测试确认。",
-  "check": {"command": "python -m pytest -q", "expect_exit": 0},
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_catalog.py"
+  ],
   "max_steps": 30,
   "timeout_s": 600,
-  "tags": ["refactor", "multi-file", "python"]
+  "tags": [
+    "refactor",
+    "multi-file",
+    "python"
+  ]
 }

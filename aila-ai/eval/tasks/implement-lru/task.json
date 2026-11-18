@@ -1,0 +1,20 @@
+{
+  "id": "implement-lru",
+  "title": "按说明实现 LRU 缓存",
+  "fixture": "repo",
+  "prompt": "按 README 实现 lru.py 里的 LRUCache，跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_lru.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "feature",
+    "python"
+  ]
+}

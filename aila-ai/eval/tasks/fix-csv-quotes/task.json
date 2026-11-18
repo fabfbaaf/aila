@@ -1,0 +1,20 @@
+{
+  "id": "fix-csv-quotes",
+  "title": "导入商品时带逗号、带引号的名字要拆对",
+  "fixture": "repo",
+  "prompt": "导入商品表时，名字里带逗号的那一行会拆错（「绿茶, 罐装」被拆成两列）。修好 importer.py 的 load_products：按标准 CSV 规则处理引号（包括两个双引号表示一个双引号），每格去掉首尾空白，跳过空行，只有表头时返回空列表。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_importer.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python"
+  ]
+}

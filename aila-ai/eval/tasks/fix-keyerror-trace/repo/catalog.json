@@ -1,0 +1,12 @@
+{
+  "tea": {
+    "name": "茶",
+    "unit_price": 12,
+    "bulk_from": 10
+  },
+  "cup": {
+    "name": "杯子",
+    "unit_price": 30,
+    "bulk_from": 5
+  }
+}

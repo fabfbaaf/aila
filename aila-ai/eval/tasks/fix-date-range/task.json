@@ -1,0 +1,20 @@
+{
+  "id": "fix-date-range",
+  "title": "按日期查订单要包含结束那天",
+  "fixture": "repo",
+  "prompt": "按日期范围查订单时，结束那天的订单查不出来。README 说两头都包含。修好 report.py，跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_report.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python"
+  ]
+}

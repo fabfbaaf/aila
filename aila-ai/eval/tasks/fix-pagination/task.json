@@ -1,0 +1,20 @@
+{
+  "id": "fix-pagination",
+  "title": "分页从第一页开始、最后不满一页也算一页",
+  "fixture": "repo",
+  "prompt": "分页有问题：第一页拿到的是第二页的内容，最后不满一页的那页也没算进总页数。按 README 里的约定修好 pager.py，跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_pager.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python"
+  ]
+}

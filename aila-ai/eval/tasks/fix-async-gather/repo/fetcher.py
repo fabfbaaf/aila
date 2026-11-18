@@ -1,0 +1,12 @@
+"""批量抓取。client.get(url) 是一个协程。"""
+
+
+async def fetch(client, url):
+    return await client.get(url)
+
+
+async def fetch_all(client, urls):
+    results = []
+    for url in urls:
+        results.append(await fetch(client, url))
+    return results

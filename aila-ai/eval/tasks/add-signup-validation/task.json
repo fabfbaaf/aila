@@ -1,0 +1,20 @@
+{
+  "id": "add-signup-validation",
+  "title": "注册表单校验",
+  "fixture": "repo",
+  "prompt": "实现 signup.py 的 validate_signup(form)：返回 {字段: 原因} 的字典，全对返回空字典。规则：username 3 到 20 个字符，只能是字母、数字、下划线；email 恰好一个 @，@ 后面的部分里有点；password 至少 8 位且同时有字母和数字；confirm 要和 password 一样（不一样时错误记在 confirm 上）。缺的字段当空字符串。原因写一句中文就行，测试只看有哪些字段。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_signup.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "feature",
+    "python"
+  ]
+}

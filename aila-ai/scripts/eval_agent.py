@@ -2,10 +2,17 @@
 
 临时会话、规则和进程在每次评测结束时清理；报告逐条落盘，单个任务失败不影响后面的任务。
 主 Agent 步数单独统计，token 则包含压缩和查资料助手，缓存命中率按总输入加权。
+
+防止「为了过检查而作弊」：
+- hidden：检查用的隐藏测试，她做完以后才放进项目，她看不到，只能真的把功能做对
+- protect：不许改的文件（通常是原有测试），改了就算没做成——改测试让它通过不算修好
+- expect_unchanged：只读的任务，项目里有任何改动就算没做成
+每一次的会话日志都存进报告目录（sessions/），做没做成都能回头看她是怎么做的。
 """
 
 import argparse
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -48,6 +55,9 @@ class TaskCase:
     max_steps: int = 30
     timeout_s: float = 600
     tags: tuple[str, ...] = ()
+    hidden: Path | None = None
+    protect: tuple[str, ...] = ()
+    expect_unchanged: bool = False
 
 
 @dataclass
@@ -55,6 +65,10 @@ class EvalResult:
     id: str
     title: str
     iteration: int
+    tags: list[str] = field(default_factory=list)
+    changed: list[str] = field(default_factory=list)
+    protected_changed: list[str] = field(default_factory=list)
+    log: str = ""
     success: bool = False
     reason: str = "error"
     steps: int = 0
@@ -115,8 +129,24 @@ def load_task(path: Path) -> TaskCase:
         raise ValueError(f"{path} 的 max_steps 要是正整数。")
     if type(timeout) not in (float, int) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError(f"{path} 的 timeout_s 要是大于零的秒数。")
+    hidden = None
+    if "hidden" in data:
+        if not isinstance(data["hidden"], str) or not data["hidden"].strip():
+            raise ValueError(f"{path} 的 hidden 要是任务目录里的子目录。")
+        hidden = (root / data["hidden"]).resolve()
+        if not hidden.is_relative_to(root) or hidden in (root, fixture) or not hidden.is_dir():
+            raise ValueError(f"{path} 的 hidden 要指向任务目录里另一个子目录。")
+        if not check:
+            raise ValueError(f"{path} 有 hidden 时要写 check（隐藏测试靠检查命令跑）。")
+    protect = data.get("protect", [])
+    if not isinstance(protect, list) or any(not isinstance(p, str) or not p.strip() or ".." in p for p in protect):
+        raise ValueError(f"{path} 的 protect 要是项目里的相对路径（可以带 *）的列表。")
+    unchanged = data.get("expect_unchanged", False)
+    if type(unchanged) is not bool:
+        raise ValueError(f"{path} 的 expect_unchanged 要是 true 或 false。")
     return TaskCase(data["id"], data["title"], fixture, data["prompt"],
-                    check["command"] if check else None, expect, tuple(words), steps, float(timeout), tuple(tags))
+                    check["command"] if check else None, expect, tuple(words), steps, float(timeout), tuple(tags),
+                    hidden, tuple(protect), unchanged)
 
 
 def load_tasks(root: Path, only: Sequence[str] = ()) -> list[TaskCase]:
@@ -166,6 +196,29 @@ def python_command(command: str, shell: Shell) -> str:
     return "".join([*parts, command[end:]])
 
 
+NOISE = ("__pycache__/", ".pytest_cache/", "node_modules/")
+
+
+def changed_files(project: Path) -> list[str]:
+    """她动过哪些文件（相对起点那次提交；新建的也算）。运行测试产生的缓存不算"""
+    out = subprocess.run(
+        ["git", "-c", f"safe.directory={project.as_posix()}", "status", "--porcelain", "--untracked-files=all", "-z"],
+        cwd=project, env=clean_env(), check=True, capture_output=True, timeout=30,
+    ).stdout.decode("utf-8", errors="replace")
+    paths = sorted({entry[3:] for entry in out.split("\0") if len(entry) > 3})
+    return [p for p in paths if not any(n in f"/{p}" or p.startswith(n) for n in NOISE)]
+
+
+def fingerprint(project: Path, patterns: Sequence[str]) -> dict[str, str]:
+    """受保护文件的内容摘要（文件名 → sha1）"""
+    found: dict[str, str] = {}
+    for pattern in patterns:
+        for path in sorted(project.glob(pattern)):
+            if path.is_file():
+                found[path.relative_to(project).as_posix()] = hashlib.sha1(path.read_bytes()).hexdigest()
+    return found
+
+
 def init_repo(project: Path) -> None:
     for args in (("init", "-q"), ("add", "."), ("commit", "-q", "-m", "评测起点")):
         subprocess.run(["git", "-c", f"safe.directory={project.as_posix()}", "-c", "user.name=艾拉评测",
@@ -174,9 +227,9 @@ def init_repo(project: Path) -> None:
 
 
 async def evaluate_task(task: TaskCase, model_factory: Callable[[], CoderModel], iteration: int = 1,
-                        shell: Shell | None = None) -> EvalResult:
-    """每次都新建 Runtime；超时会同时打断当轮并收回它开的后台进程。"""
-    result = EvalResult(task.id, task.title, iteration)
+                        shell: Shell | None = None, log_dir: Path | None = None) -> EvalResult:
+    """每次都新建 Runtime；超时会同时打断当轮并收回它开的后台进程。log_dir：会话日志存到这里"""
+    result = EvalResult(task.id, task.title, iteration, tags=list(task.tags))
     started = time.perf_counter()
     shell = shell or find_shell()
     with tempfile.TemporaryDirectory(prefix=f"aila-eval-{task.id}-") as temp:
@@ -187,6 +240,7 @@ async def evaluate_task(task: TaskCase, model_factory: Callable[[], CoderModel],
             project = root / "repo"
             shutil.copytree(task.fixture, project, ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache"))
             init_repo(project)
+            guarded = fingerprint(project, task.protect)
             rt = Runtime(root / "data", model_factory, shell=shell, config=AgentConfig(max_steps=task.max_steps))
 
             def count_step(**_: Any) -> None:
@@ -202,6 +256,12 @@ async def evaluate_task(task: TaskCase, model_factory: Callable[[], CoderModel],
                 result.turn_reason = next((e["reason"] for e in reversed(session.events) if e["type"] == "turn_end"), "error")
                 result.answer = next((e.get("text", "") for e in reversed(session.events)
                                       if e["type"] == "assistant" and not e.get("tool_calls")), "")
+                # 先看她改了什么（放隐藏测试之前），再放隐藏测试、跑检查
+                result.changed = changed_files(project)
+                now = fingerprint(project, task.protect)
+                result.protected_changed = sorted(p for p in guarded.keys() | now.keys() if guarded.get(p) != now.get(p))
+                if task.hidden:
+                    shutil.copytree(task.hidden, project, dirs_exist_ok=True)
                 if task.check_command:
                     remaining = task.timeout_s - (time.perf_counter() - started)
                     checked = await run(shell, python_command(task.check_command, shell), project, remaining)
@@ -211,6 +271,10 @@ async def evaluate_task(task: TaskCase, model_factory: Callable[[], CoderModel],
                         raise TimeoutError
                 if result.turn_reason != "done":
                     result.reason = result.turn_reason
+                elif result.protected_changed:
+                    result.reason = "改了不许改的文件"
+                elif task.expect_unchanged and result.changed:
+                    result.reason = "只读任务改了文件"
                 elif task.check_command and result.check_exit_code != task.expect_exit:
                     result.reason = "检查没通过"
                 elif any(word not in result.answer for word in task.answer_contains):
@@ -235,6 +299,11 @@ async def evaluate_task(task: TaskCase, model_factory: Callable[[], CoderModel],
                 result.tools = dict(Counter(e["name"] for e in session.events if e["type"] == "tool"))
                 result.turn_reason = result.turn_reason or next(
                     (e["reason"] for e in reversed(session.events) if e["type"] == "turn_end"), "error")
+                if log_dir and session.path.exists():
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    name = f"{task.id}-{iteration}.jsonl"
+                    shutil.copyfile(session.path, log_dir / name)
+                    result.log = f"{log_dir.name}/{name}"
             result.seconds = round(time.perf_counter() - started, 3)
     return result
 
@@ -279,9 +348,35 @@ def summary(results: Sequence[EvalResult], prices: Prices | None = None) -> str:
                 f"{stats['average_steps']:.2f} | {stats['average_seconds']:.3f} | {token['prompt']} | "
                 f"{token['cache_hit']} | {token['cache_miss']} | {token['completion']} | {stats['cache_hit_rate']:.1%} |")
         lines.append(line + (f" {prices.cost(token):.6f} |" if prices else ""))
+    if prices:
+        done = sum(r.success for r in results)
+        all_tokens = totals(results)["tokens"]
+        if done:
+            lines.extend(["", f"每做成一个任务平均花费：{prices.cost(all_tokens) / done:.4f} 元（失败的花费也算在里面）。"])
+
+    tags = sorted({t for r in results for t in r.tags})
+    if tags:
+        lines.extend(["", "## 按类别", "", "| 类别 | 做成 / 次数 | 成功率 | 平均步数 | 平均秒数 |", "|---|---:|---:|---:|---:|"])
+        for tag in tags:
+            stats = totals([r for r in results if tag in r.tags])
+            lines.append(f"| {tag} | {stats['successes']} / {stats['count']} | {stats['success_rate']:.1%} | "
+                         f"{stats['average_steps']:.2f} | {stats['average_seconds']:.1f} |")
+
     lines.extend(["", "## 失败原因", ""])
     reasons = Counter(r.reason for r in results if not r.success)
     lines.extend([f"- {reason}：{count}" for reason, count in sorted(reasons.items())] or ["没有失败的任务。"])
+
+    lines.extend(["", "## 每一次", "", "| | 任务 | 步数 | 秒数 | 工具 | 改了哪些文件 | 原因 | 会话日志 |",
+                  "|---|---|---:|---:|---|---|---|---|"])
+    for r in results:
+        tools = "、".join(f"{k}×{v}" for k, v in sorted(r.tools.items(), key=lambda kv: -kv[1])[:4])
+        changed = "、".join(r.changed[:5]) + ("……" if len(r.changed) > 5 else "")
+        if r.protected_changed:
+            changed += f"（不许改的：{'、'.join(r.protected_changed)}）"
+        log = f"[看]({r.log})" if r.log else ""
+        cell = lambda s: s.replace("|", "\\|").replace("\n", " ")  # noqa: E731
+        lines.append(f"| {'✓' if r.success else '✗'} | {cell(r.id)}" + (f" #{r.iteration}" if r.iteration > 1 else "")
+                     + f" | {r.steps} | {r.seconds:.1f} | {cell(tools)} | {cell(changed) or '—'} | {cell(r.reason) or ''} | {log} |")
     if any(r.estimated for r in results):
         lines.extend(["", "含假模型估算的 token，不是真实账单。"])
     return "\n".join(lines) + "\n"
@@ -296,7 +391,7 @@ async def evaluate(tasks: Sequence[TaskCase], model_factory: Callable[[], CoderM
     with (output / "results.jsonl").open("w", encoding="utf-8") as stream:
         for task in tasks:
             for iteration in range(1, repeat + 1):
-                result = await evaluate_task(task, model_factory, iteration)
+                result = await evaluate_task(task, model_factory, iteration, log_dir=output / "sessions")
                 row = asdict(result)
                 if prices:
                     row["cost_yuan"] = float(prices.cost(result.tokens))
@@ -318,6 +413,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tasks-dir", type=Path, default=TASKS)
     parser.add_argument("--output-dir", type=Path, help="新的报告目录，默认 eval/results/时间")
     args = parser.parse_args(argv)
+    # 她自己跑 python / pytest 时用的也是这份虚拟环境（Windows 上 PATH 里的 python 可能是应用商店的占位程序，
+    # 那样做不成是环境的锅，不是她的）
+    os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
     try:
         if args.repeat < 1:
             raise ValueError("repeat 要大于零。")

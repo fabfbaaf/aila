@@ -1,0 +1,23 @@
+{
+  "id": "fix-keyerror-trace",
+  "title": "根据跨三个文件的报错修好报价",
+  "fixture": "repo",
+  "prompt": "报价接口报错了：\nTraceback (most recent call last):\n  File \"api.py\", line 9, in quote\n    return {\"sku\": sku, \"total\": service.line_total(sku, qty)}\n  File \"service.py\", line 10, in line_total\n    return rules.apply_rules(item, qty)\n  File \"pricing_rules.py\", line 6, in apply_rules\n    subtotal = item[\"price\"] * qty\nKeyError: 'price'\n商品数据 catalog.json 是别的系统导出的，不能改。找到原因修好，跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_api.py",
+    "catalog.json"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "traceback",
+    "multi-file",
+    "python"
+  ]
+}

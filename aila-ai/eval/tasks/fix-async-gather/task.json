@@ -1,0 +1,21 @@
+{
+  "id": "fix-async-gather",
+  "title": "并发请求：同时发出去，一个失败不影响别的",
+  "fixture": "repo",
+  "prompt": "fetch_all 一个一个地等，太慢。改 fetcher.py：所有请求同时发出去，结果顺序和 urls 一致；有一个请求抛异常时，其他的照样返回，失败的那个位置放异常对象本身。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_fetcher.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python",
+    "async"
+  ]
+}

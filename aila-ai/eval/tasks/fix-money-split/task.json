@@ -1,0 +1,20 @@
+{
+  "id": "fix-money-split",
+  "title": "平分账单不能丢一分钱",
+  "fixture": "repo",
+  "prompt": "split_bill 平分账单时会丢钱：100 元分给 3 个人，加起来不是 100。改 money.py：返回每个人的金额（Decimal，两位小数），加起来正好等于总额，除不尽的零头一分一分地从第一个人开始多给；people 小于 1 抛 ValueError。跑测试确认。",
+  "check": {
+    "command": "python -m pytest -q",
+    "expect_exit": 0
+  },
+  "hidden": "hidden",
+  "protect": [
+    "test_money.py"
+  ],
+  "max_steps": 30,
+  "timeout_s": 600,
+  "tags": [
+    "bugfix",
+    "python"
+  ]
+}
