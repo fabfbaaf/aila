@@ -48,6 +48,7 @@ import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
+import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
@@ -88,6 +89,9 @@ let win: BrowserWindow | null = null
  * 以前是工作窗口、星图、设置三个窗口；IPC 里原来「只认工作窗口 / 星图窗口」的地方都改成只认主窗口
  */
 let mainWin: BrowserWindow | null = null
+/** 设置、账号、记忆、资料、代码库这些写操作只认主窗口（设置都在主窗口里）；角色窗口出了问题也改不了密钥、删不了东西 */
+const fromMainWindow = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
+const MAIN_ONLY = { ok: false, error: '只有主窗口能用' }
 /** 主窗口打开时要显示的会话（任务页加载好以后来取） */
 let agentFocus: string | null = null
 let tray: Tray | null = null
@@ -176,7 +180,7 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
-      sandbox: false
+      sandbox: true
     }
   })
 
@@ -230,7 +234,7 @@ function openMain(route: ShellRoute = { page: 'tasks' }): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
-      sandbox: false
+      sandbox: true
     }
   })
   mainWin.setMenu(null)
@@ -531,26 +535,29 @@ function registerIpc(): void {
   })
   ipcMain.on('settings:put', (_e, key: string, value: unknown) => account?.putSetting(key, value))
   ipcMain.handle('account:status', () => account?.status())
-  ipcMain.handle('account:details', () => account?.details())
-  ipcMain.handle('account:auth', (_e, form: AuthForm) =>
-    account ? account.authenticate(form) : { ok: false, error: '还没准备好' }
+  ipcMain.handle('account:details', (e) => (fromMainWindow(e) ? account?.details() : undefined))
+  ipcMain.handle('account:auth', (e, form: AuthForm) =>
+    !fromMainWindow(e) ? MAIN_ONLY : account ? account.authenticate(form) : { ok: false, error: '还没准备好' }
   )
-  ipcMain.handle('account:logout', () => account?.logout())
+  ipcMain.handle('account:logout', (e) => (fromMainWindow(e) ? account?.logout() : undefined))
 
   ipcMain.handle('memory:list', () => account?.memories.list() ?? [])
-  ipcMain.on('memory:delete', (_e, id: string) => {
+  ipcMain.on('memory:delete', (e, id: string) => {
+    if (!fromMainWindow(e)) return
     account?.deleteMemory(String(id))
     characterEvent({ kind: 'forget-one' })
   })
-  ipcMain.handle('memory:forget-all', () => {
+  ipcMain.handle('memory:forget-all', (e) => {
+    if (!fromMainWindow(e)) return 0
     const n = account?.forgetEverything() ?? 0
     if (n) characterEvent({ kind: 'forget-all' })
     return n
   })
 
   ipcMain.handle('knowledge:list', () => listKnowledge(AI_URL))
-  ipcMain.handle('knowledge:delete', (_e, id: string) => deleteKnowledge(AI_URL, String(id)))
+  ipcMain.handle('knowledge:delete', (e, id: string) => (fromMainWindow(e) ? deleteKnowledge(AI_URL, String(id)) : MAIN_ONLY))
   ipcMain.handle('knowledge:add', async (e) => {
+    if (!fromMainWindow(e)) return null
     const parent = BrowserWindow.fromWebContents(e.sender)
     if (!parent) return null
     const picked = await dialog.showOpenDialog(parent, {
@@ -569,6 +576,7 @@ function registerIpc(): void {
   ipcMain.handle('code:list', () => listCodeProjects(AI_URL))
   ipcMain.handle('code:fixes', () => getFixStats(AI_URL))
   ipcMain.handle('code:add', async (e) => {
+    if (!fromMainWindow(e)) return null
     const parent = BrowserWindow.fromWebContents(e.sender)
     if (!parent) return null
     const picked = await dialog.showOpenDialog(parent, {
@@ -578,7 +586,7 @@ function registerIpc(): void {
     if (picked.canceled || picked.filePaths.length === 0) return null
     return addCodeProject(AI_URL, picked.filePaths[0])
   })
-  ipcMain.handle('code:refresh', (_e, id: string) => codeProjectAction(AI_URL, String(id), 'refresh'))
+  ipcMain.handle('code:refresh', (e, id: string) => (fromMainWindow(e) ? codeProjectAction(AI_URL, String(id), 'refresh') : MAIN_ONLY))
 
   // 代码星图
   ipcMain.handle('code:graph', (_e, id: string) => codeGraph(AI_URL, String(id)))
@@ -740,19 +748,22 @@ function registerIpc(): void {
     win?.webContents.send('gesture:approve', pendingFix.id)
     return true
   })
-  ipcMain.handle('code:remove', (_e, id: string) => codeProjectAction(AI_URL, String(id), 'delete'))
+  ipcMain.handle('code:remove', (e, id: string) => (fromMainWindow(e) ? codeProjectAction(AI_URL, String(id), 'delete') : MAIN_ONLY))
 
   // 设置（主窗口里的页面）
   ipcMain.on('settings:open', (_e, section?: SettingsSection) => openSettings(section))
   ipcMain.handle('ai:settings', () => getAiSettings(AI_URL))
-  ipcMain.handle('ai:settings:put', async (_e, update: AiSettingsUpdate) => {
+  ipcMain.handle('ai:settings:put', async (e, update: AiSettingsUpdate) => {
+    if (!fromMainWindow(e)) return MAIN_ONLY // 能改大模型地址和密钥：只认主窗口
     const res = await putAiSettings(AI_URL, update)
     if (res.ok) characterEvent({ kind: 'settings-saved' })
     return res
   })
-  ipcMain.handle('ai:settings:test', () => testLlm(AI_URL))
+  ipcMain.handle('ai:settings:test', (e) => (fromMainWindow(e) ? testLlm(AI_URL) : MAIN_ONLY))
   ipcMain.handle('skills:list', () => listSkills(AI_URL, account?.skillOverrides() ?? {}))
-  ipcMain.on('skills:set', (_e, id: string, on: boolean) => account?.setSkill(String(id), Boolean(on)))
+  ipcMain.on('skills:set', (e, id: string, on: boolean) => {
+    if (fromMainWindow(e)) account?.setSkill(String(id), Boolean(on))
+  })
   ipcMain.handle('model:path', () => loadSettings().modelPath ?? null)
   ipcMain.on('model:choose', (e) => void chooseModel(BrowserWindow.fromWebContents(e.sender)))
   // 换回她自己的原创形象：忘掉选过的模型文件，角色窗口加载自带的那个
@@ -891,6 +902,11 @@ function updateTray(): void {
 const firstInstance = app.requestSingleInstanceLock()
 if (!firstInstance) app.quit()
 else app.on('second-instance', () => openMain({ page: 'tasks' }))
+
+// 每个页面都只许显示艾拉自己的内容：不跳到别的网址、不开新窗口（见 navigation.ts）
+app.on('web-contents-created', (_e, contents) =>
+  lockDown(contents, process.env['ELECTRON_RENDERER_URL'], join(__dirname, '../renderer/index.html'))
+)
 
 app.whenReady().then(() => {
   if (!firstInstance) return
