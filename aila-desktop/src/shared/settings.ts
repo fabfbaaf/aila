@@ -88,6 +88,12 @@ export type CharacterEvent =
   | { kind: 'sit-break'; minutes: number }
   /** 每天第一次见面说说昨天和今天（morning）、晚上的日报（evening）。detail：有具体的事可说（会给「看看任务」） */
   | { kind: 'briefing'; when: 'morning' | 'evening'; text: string; detail: boolean }
+  /** 她自己做好了一件作品：冒个气泡问你要不要看 */
+  | { kind: 'work'; work: { id: string; title: string; why: string } }
+  /** 她在做自己的作品（on）/ 做完了（off）：在桌面上「敲键盘」 */
+  | { kind: 'work-making'; on: boolean; title: string }
+  /** 深夜你还在用电脑：提醒一次早点睡 */
+  | { kind: 'late-night' }
 
 /** AI 服务的设置（GET /settings）。密钥只告诉设没设 */
 export interface AiSettings {

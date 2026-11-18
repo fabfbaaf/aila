@@ -2,6 +2,7 @@
 /** 设置 → 桌面：她什么时候躲开、免打扰、省电、开机启动，以及记下的提醒 */
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { REPORT_TIMES, SIT_BREAK_CHOICES, type DesktopPrefs, type DesktopStatus } from '../../../../shared/desktop'
+import { WORKS_BUDGET_CHOICES, WORKS_EVERY_CHOICES } from '../../../../shared/studio'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
 
@@ -137,6 +138,38 @@ onActivated(load)
           </select>
           <button class="btn" style="margin-left: 8px" @click="reportNow">现在说说今天</button>
           <span class="hint">今天一起做了几个任务、几个还在分支上、用了多少 token、命中多少缓存、聊了几句。右键她「今天做了什么」也行。{{ reported }}</span>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">写日记</span>
+        <div>
+          <Toggle :model-value="status.prefs.diary" @update:model-value="(v) => set({ diary: v })" />
+          <span class="hint">每天晚上十点以后她写一篇日记：今天一起做了什么、她自己做了什么。只写真的发生的事，在「作品」页的「日记」里看。</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>她的作品</h3>
+      <div class="row">
+        <span class="label">自己做点东西</span>
+        <div>
+          <select :value="status.prefs.worksEvery" style="width: 160px" @change="(e) => set({ worksEvery: Number((e.target as HTMLSelectElement).value) })">
+            <option v-for="d in WORKS_EVERY_CHOICES" :key="d" :value="d">{{ d === 0 ? '不让她做' : d === 1 ? '大约每天一件' : d === 7 ? '大约每周一件' : `大约每 ${d} 天一件` }}</option>
+          </select>
+          <span class="hint">
+            她会在每个周期里随机挑个时候，按她对你的了解想个小点子（小游戏、小工具、小动画），自己写出来，做好了在桌面上告诉你。
+            只在她自己的文件夹里做，你的项目一个字都不碰；删除、安装这类命令照样停下来等你点头。认识第 100 天这样的日子她也会做一件。
+          </span>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">每件最多花</span>
+        <div>
+          <select :value="status.prefs.worksBudget" style="width: 160px" @change="(e) => set({ worksBudget: Number((e.target as HTMLSelectElement).value) })">
+            <option v-for="b in WORKS_BUDGET_CHOICES" :key="b" :value="b">{{ b }} 元</option>
+          </select>
+          <span class="hint">到上限就停下（模型的价格要在设置 → 对话里知道，不知道价格时只能靠步数上限）。</span>
         </div>
       </div>
     </div>

@@ -11,6 +11,7 @@
 import type { AgentSessionSummary } from '../shared/agent'
 import type { StoredMemory, StoredMessage } from '../shared/cloud'
 import type { Reminder } from '../shared/desktop'
+import { occasionLine, type Work } from '../shared/studio'
 
 export { REPORT_TIMES } from '../shared/desktop'
 
@@ -20,6 +21,15 @@ export interface BriefingInput {
   memories: StoredMemory[]
   reminders: Reminder[]
   messages: StoredMessage[]
+  /** 她自己的作品（昨天做好的早上提一句） */
+  works?: Work[]
+  /** 今天是不是特别的日子（认识第 N 天、节日） */
+  occasion?: string
+}
+
+/** 她做作品用的会话（工作目录是 …/works/<作品 id>）：不算你的任务 */
+export function isStudioSession(s: Pick<AgentSessionSummary, 'cwd'>): boolean {
+  return /[\\/]works[\\/]\d{8}-\d{6}-[0-9a-f]{4}[\\/]?$/.test(s.cwd)
 }
 
 /** 早上几点以后才算「新的一天」（凌晨两点还在写代码的话，还算昨天） */
@@ -60,6 +70,21 @@ function todaysEvents(memories: StoredMemory[], now: Date): StoredMemory[] {
   return memories.filter((m) => !m.deleted && m.kind === 'event' && m.expiresAt && workday(new Date(m.expiresAt)) === day)
 }
 
+/** 某一天（工作日键）的日程 */
+function eventsOn(memories: StoredMemory[], day: string): StoredMemory[] {
+  return memories.filter((m) => !m.deleted && m.kind === 'event' && m.expiresAt && workday(new Date(m.expiresAt)) === day)
+}
+
+/** 往后（正数）或往前（负数）数几天的工作日键 */
+function shiftDay(now: Date, days: number): string {
+  return workday(new Date(now.getTime() + days * 24 * 3600 * 1000))
+}
+
+/** 日程的那件事本身（「用户周五要面试」→「面试」这种就不拆了，原样用，只把「用户」换成「你」） */
+function eventText(m: StoredMemory): string {
+  return asYou(m.content).slice(0, 30)
+}
+
 function greet(hour: number): string {
   if (hour >= 5 && hour < 11) return '早上好。'
   if (hour >= 11 && hour < 14) return '中午好。'
@@ -77,11 +102,19 @@ export function morningBriefing(input: BriefingInput, withGreeting = true): { te
   const today = workday(now)
   const parts: string[] = []
 
-  const done = input.sessions.filter((s) => sameWorkday(touched(s), yesterday))
+  const sessions = input.sessions.filter((s) => !isStudioSession(s))
+  const occasion = occasionLine(input.occasion ?? '')
+  if (occasion) parts.push(occasion)
+
+  const done = sessions.filter((s) => sameWorkday(touched(s), yesterday))
   if (done.length) parts.push(`昨天一起做了 ${done.length} 个任务：${titles(done)}。`)
 
-  const open = input.sessions.filter((s) => s.branch && !sameWorkday(touched(s), today))
+  const open = sessions.filter((s) => s.branch && !sameWorkday(touched(s), today))
   if (open.length) parts.push(`${titles(open, 1)}还在分支上，没合并。`)
+
+  // 她自己的作品：昨天（或今天一早）做好的
+  const made = (input.works ?? []).filter((w) => w.status === 'done' && [yesterday, today].includes(workday(new Date(w.created * 1000))))
+  if (made.length) parts.push(`昨天我自己做了个小东西「${made[0].title}」，放在「作品」里了。`)
 
   const events = todaysEvents(input.memories, now)
   const reminders = input.reminders.filter((r) => workday(new Date(r.at)) === today)
@@ -91,6 +124,12 @@ export function morningBriefing(input: BriefingInput, withGreeting = true): { te
   ]
   if (todayBits.length) parts.push(`今天：${todayBits.join('；')}。`)
 
+  // 记得你的事：明天的日程提前说一声；前一两天的事问问后来怎么样
+  const tomorrow = eventsOn(input.memories, shiftDay(now, 1))
+  if (tomorrow.length) parts.push(`明天：${eventText(tomorrow[0])}……准备得怎么样？`)
+  const past = [...eventsOn(input.memories, shiftDay(now, -1)), ...eventsOn(input.memories, shiftDay(now, -2))]
+  if (past.length) parts.push(`之前说的「${eventText(past[0])}」，后来怎么样了？`)
+
   // 程序刚启动时她已经打过招呼了（Behavior.greet），这时就不再说「早上好」
   return { text: (withGreeting ? greet(now.getHours()) : '') + parts.join(''), detail: parts.length > 0 }
 }
@@ -98,7 +137,7 @@ export function morningBriefing(input: BriefingInput, withGreeting = true): { te
 /** 晚上的日报：今天做了几个任务、几个还在分支上、用了多少 token、命中多少缓存、聊了几句 */
 export function dailyReport(input: BriefingInput): string {
   const today = workday(input.now)
-  const tasks = input.sessions.filter((s) => sameWorkday(touched(s), today))
+  const tasks = input.sessions.filter((s) => !isStudioSession(s) && sameWorkday(touched(s), today))
   const chats = input.messages.filter((m) => !m.deleted && m.role === 'user' && workday(new Date(m.createdAt)) === today).length
   if (!tasks.length && !chats) return '今天还没一起做什么……明天见。'
 

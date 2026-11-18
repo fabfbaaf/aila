@@ -74,7 +74,7 @@ export function getScreenStatus(aiUrl: string): Promise<AiResult<ScreenStatus>> 
 }
 
 /** 设置窗口用：成功、失败都返回一个结果对象，失败原因能直接显示 */
-async function attempt<T>(fn: () => Promise<T>): Promise<AiResult<T>> {
+export async function attempt<T>(fn: () => Promise<T>): Promise<AiResult<T>> {
   try {
     return { ok: true, data: await fn() }
   } catch (err) {
@@ -107,7 +107,7 @@ export function testLlm(aiUrl: string): Promise<AiResult<{ ok: boolean; message:
 
 const MAX_UPLOAD = 20 * 1024 * 1024
 
-async function json<T>(res: Response): Promise<T> {
+export async function json<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { detail?: unknown }
   if (!res.ok) throw new Error(describeDetail(data.detail) ?? `AI 服务返回 ${res.status}`)
   return data

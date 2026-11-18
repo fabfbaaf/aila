@@ -11,8 +11,20 @@ import { app, Notification, powerMonitor, type BrowserWindow } from 'electron'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { cleanPrefs, type DesktopPrefs, type DesktopStatus, type FocusState, type Presence, type Reminder } from '../shared/desktop'
-import type { CharacterEvent } from '../shared/settings'
-import { dailyReport, due, morningBriefing, workday, type BriefingInput } from './briefing'
+import type { AiResult, CharacterEvent } from '../shared/settings'
+import {
+  daysKnown,
+  diaryDue,
+  diaryFacts,
+  lateNight,
+  nextWorkAt,
+  occasionOf,
+  workDue,
+  type LifeState,
+  type Work
+} from '../shared/studio'
+import { dailyReport, due, isStudioSession, morningBriefing, workday, type BriefingInput } from './briefing'
+import type { StartWorkBody } from './studio'
 import { decidePresence, FocusWatch } from './presence'
 import { ReminderBook, SitTimer } from './reminders'
 
@@ -40,6 +52,34 @@ export interface DesktopKeeperOptions {
   gather: () => Promise<Omit<BriefingInput, 'now' | 'reminders'> | null>
   loadBriefing: () => BriefingState
   saveBriefing: (state: BriefingState) => void
+  /** 她的一天：作品、日记（AI 服务的接口）和记着的状态。不给就没有这些 */
+  life?: LifeHooks
+}
+
+export interface LifeHooks {
+  load: () => LifeState
+  save: (state: LifeState) => void
+  works: () => Promise<Work[] | null>
+  start: (body: StartWorkBody) => Promise<AiResult<Work>>
+  seen: (id: string) => Promise<void>
+  writeDiary: (day: string, facts: string[]) => Promise<boolean>
+}
+
+/** 本地日期（YYYY-MM-DD），不按 5 点切 */
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** 挑作品点子的参考：她记得的你的事、最近的任务（不算她自己做作品的会话） */
+function workHints(
+  got: { sessions: { cwd: string; title: string }[]; memories: { deleted?: boolean; content: string }[] },
+  occasion: string
+): { memories: string[]; tasks: string[]; occasion: string } {
+  return {
+    memories: got.memories.filter((m) => !m.deleted).map((m) => m.content).slice(0, 12),
+    tasks: got.sessions.filter((s) => !isStudioSession(s)).map((s) => s.title).slice(0, 8),
+    occasion
+  }
 }
 
 export class DesktopKeeper {
@@ -54,6 +94,10 @@ export class DesktopKeeper {
   private minute: NodeJS.Timeout | undefined
   private briefing: BriefingState
   private briefingBusy = false
+  private life: LifeState
+  private lifeBusy = false
+  /** 上次告诉桌面上的她「在做作品」没有 */
+  private making = false
   private watch = new FocusWatch((f) => {
     this.focus = f
     this.applyPresence()
@@ -64,6 +108,7 @@ export class DesktopKeeper {
     this.book = new ReminderBook(this.readReminders())
     this.sit = new SitTimer(this.prefs.sitBreakMinutes)
     this.briefing = o.loadBriefing() ?? {}
+    this.life = o.life?.load() ?? {}
   }
 
   get file(): string {
@@ -184,6 +229,16 @@ export class DesktopKeeper {
     if (this.sit.tick(Date.now(), idle) && canTalk) {
       this.o.characterEvent({ kind: 'sit-break', minutes: this.prefs.sitBreakMinutes })
     }
+    if (!this.lifeBusy) {
+      this.lifeBusy = true
+      try {
+        await this.lifeTick(idle, canTalk)
+      } catch {
+        // AI 服务没开、网络抖动：下一分钟再说
+      } finally {
+        this.lifeBusy = false
+      }
+    }
     // 每天第一次见面、晚上的日报：人在电脑前、她能说话时才说；没说成的下一分钟再试
     if (!canTalk || idle >= AWAY_SECONDS || this.briefingBusy) return
     const now = new Date()
@@ -201,7 +256,7 @@ export class DesktopKeeper {
     try {
       const got = await this.o.gather()
       if (!got) return false
-      const input: BriefingInput = { ...got, now, reminders: this.book.list() }
+      const input: BriefingInput = { ...got, now, reminders: this.book.list(), ...(await this.lifeForBriefing()) }
       if (record) {
         this.briefing = { ...this.briefing, [when]: workday(now) }
         this.o.saveBriefing(this.briefing)
@@ -219,6 +274,113 @@ export class DesktopKeeper {
     } finally {
       this.briefingBusy = false
     }
+  }
+
+  // ---------- 她的一天：作品、日记、深夜 ----------
+
+  private saveLife(): void {
+    this.o.life?.save(this.life)
+  }
+
+  private async lifeTick(idle: number, canTalk: boolean): Promise<void> {
+    const l = this.o.life
+    if (!l) return
+    const now = new Date()
+    const ms = now.getTime()
+    const day = workday(now)
+    if (!this.life.firstSeen) {
+      this.life.firstSeen = ymd(now)
+      this.saveLife()
+    }
+    const occasion = occasionOf(now, this.life.firstSeen)
+
+    // 作品：每个周期里随机挑个时刻；特别的日子当天也做一件；你不在忙的时候开始
+    if (this.prefs.worksEvery > 0) {
+      if (this.life.nextWorkAt === undefined) {
+        this.life.nextWorkAt = nextWorkAt(ms, this.prefs.worksEvery, Math.random())
+        this.saveLife()
+      }
+      if (occasion && this.life.occasionWork !== day) {
+        this.life.nextWorkAt = Math.min(this.life.nextWorkAt, ms)
+        this.life.occasionWork = day
+        this.saveLife()
+      }
+      if (workDue(this.life, ms, idle)) await this.startWork(occasion)
+    } else if (this.life.nextWorkAt !== undefined) {
+      delete this.life.nextWorkAt
+      this.saveLife()
+    }
+
+    // 在做的、做好了的：桌面上的她敲键盘；做好了冒个气泡（你在电脑前、她能说话的时候）
+    const works = await l.works()
+    if (works) {
+      const making = works.find((w) => w.status === 'making' || w.status === 'waiting')
+      if (!!making !== this.making) {
+        this.making = !!making
+        this.o.characterEvent({ kind: 'work-making', on: this.making, title: making?.title ?? '' })
+      }
+      const fresh = works.find((w) => w.status === 'done' && !w.announced)
+      if (fresh && canTalk && idle < AWAY_SECONDS) {
+        await l.seen(fresh.id)
+        this.o.characterEvent({ kind: 'work', work: { id: fresh.id, title: fresh.title, why: fresh.why } })
+      }
+    }
+
+    // 日记：晚上写一篇（不用你在电脑前）
+    if (this.prefs.diary && diaryDue(this.life, now, day)) {
+      const got = await this.o.gather()
+      if (got) {
+        const tasks = got.sessions
+          .filter((s) => !isStudioSession(s) && s.updated !== undefined && workday(new Date(s.updated * 1000)) === day)
+          .map((s) => s.title)
+        const messages = got.messages.filter((m) => !m.deleted && m.role === 'user' && workday(new Date(m.createdAt)) === day).length
+        const facts = diaryFacts({ tasks, messages, reminders: 0, daysKnown: daysKnown(this.life.firstSeen, now), occasion })
+        if (await l.writeDiary(day, facts)) {
+          this.life.diary = day
+          this.saveLife()
+        }
+      }
+    }
+
+    // 深夜你还在用电脑：说一次早点睡
+    if (canTalk && idle < 60 && lateNight(now) && this.life.lateNight !== day) {
+      this.life.lateNight = day
+      this.saveLife()
+      this.o.characterEvent({ kind: 'late-night' })
+    }
+  }
+
+  /** 开始做一件作品：带上她对你的了解（记忆、最近的任务）和今天的日子 */
+  private async startWork(occasion: string): Promise<void> {
+    const l = this.o.life
+    const got = await this.o.gather()
+    if (!l || !got) return
+    const r = await l.start({ hints: workHints(got, occasion), budget: this.prefs.worksBudget })
+    const ms = Date.now()
+    // 做上了：排下一件；手上还有没做完的：一小时后再看；别的错误（服务没开、出错）：十分钟后再试
+    if (r.ok) this.life.nextWorkAt = nextWorkAt(ms, this.prefs.worksEvery, Math.random())
+    else this.life.nextWorkAt = ms + ((r.error ?? '').includes('还没做完') ? 3_600_000 : 600_000)
+    this.saveLife()
+  }
+
+  /** 作品页里「现在就让她做一件」（可以带你给的点子） */
+  async workNow(idea?: StartWorkBody['idea']): Promise<AiResult<Work>> {
+    const l = this.o.life
+    if (!l) return { ok: false, error: '还没准备好' }
+    const got = await this.o.gather()
+    const occasion = occasionOf(new Date(), this.life.firstSeen)
+    return l.start({ hints: got ? workHints(got, occasion) : undefined, idea, budget: this.prefs.worksBudget })
+  }
+
+  /** 每天见面要用：她自己的作品、今天是什么日子 */
+  async lifeForBriefing(): Promise<{ works: Work[]; occasion: string }> {
+    const works = (await this.o.life?.works().catch(() => null)) ?? []
+    return { works, occasion: occasionOf(new Date(), this.life.firstSeen) }
+  }
+
+  /** 认识第几天、第一次见面是哪天（作品页上显示） */
+  knownSince(): { firstSeen: string | undefined; days: number } {
+    return { firstSeen: this.life.firstSeen, days: daysKnown(this.life.firstSeen, new Date()) }
   }
 
   // ---------- 在不在、省电、开机启动 ----------

@@ -58,6 +58,8 @@ import { Account, type SecretBox } from './cloud/account'
 import type { SocketLike } from './cloud/sync'
 import { createServiceKeeper } from './serviceNode'
 import { registerServiceIpc } from './serviceIpc'
+import { openWorkPreview, revealWork, studio, WORK_ID } from './studio'
+import type { LifeState } from '../shared/studio'
 
 // 桌面窗口：透明、无边框、置顶，只在角色身上响应鼠标
 const WIN_WIDTH = 300
@@ -137,6 +139,8 @@ interface Settings {
   desktop?: unknown
   /** 今天见过面、说过日报没有 */
   briefing?: BriefingState
+  /** 她的一天：第一次见面的日子、下一件作品什么时候做、哪天写过日记…… */
+  life?: LifeState
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -807,6 +811,28 @@ function registerIpc(): void {
   })
   // 拖给她的文件、剪贴板：只认角色窗口（她身上才能拖、对她说才会去看）
   const fromCharacter = (e: { sender: Electron.WebContents }): boolean => !!win && e.sender === win.webContents
+  // 她的作品、日记：看、删、打开、现在就做一件只认主窗口；气泡里点「看看」从角色窗口来，只是打开作品页
+  const workOk = (id: unknown): id is string => typeof id === 'string' && WORK_ID.test(id)
+  const nope = { ok: false, error: '只有主窗口能用' }
+  ipcMain.handle('studio:list', (e) => (fromMain(e) ? studio.works(AI_URL) : nope))
+  ipcMain.handle('studio:get', (e, id: unknown) => (fromMain(e) && workOk(id) ? studio.work(AI_URL, id) : nope))
+  ipcMain.handle('studio:delete', (e, id: unknown) => (fromMain(e) && workOk(id) ? studio.remove(AI_URL, id) : nope))
+  ipcMain.handle('studio:open', (e, id: unknown) => (fromMain(e) && workOk(id) ? openWorkPreview(AI_URL, id, mainWin) : nope))
+  ipcMain.handle('studio:reveal', (e, id: unknown) => (fromMain(e) && workOk(id) ? revealWork(AI_URL, id) : nope))
+  ipcMain.handle('studio:now', (e, idea: unknown) => {
+    if (!fromMain(e) || !desktop) return nope
+    const i = idea as Record<string, unknown> | null
+    const valid =
+      i && typeof i.title === 'string' && typeof i.idea === 'string' && i.title.trim() && i.idea.trim() && i.title.length <= 40 && i.idea.length <= 300
+    return desktop.workNow(
+      valid ? { title: String(i.title).trim(), idea: String(i.idea).trim(), kind: i.kind === 'script' ? 'script' : 'web', why: '' } : undefined
+    )
+  })
+  ipcMain.handle('studio:diary', (e) => (fromMain(e) ? studio.diary(AI_URL) : nope))
+  ipcMain.handle('studio:known', (e) => (fromMain(e) && desktop ? desktop.knownSince() : null))
+  ipcMain.on('studio:show', (e, id: unknown) => {
+    if (fromCharacter(e)) openMain({ page: 'studio', ...(workOk(id) ? { work: id } : {}) })
+  })
   ipcMain.handle('drop:inspect', (e, paths: unknown) => {
     if (!fromCharacter(e) || !Array.isArray(paths)) return []
     return drops.inspect(paths.filter((p): p is string => typeof p === 'string' && p.length > 0 && p.length <= 1000))
@@ -933,7 +959,19 @@ app.whenReady().then(() => {
       return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [] }
     },
     loadBriefing: () => loadSettings().briefing ?? {},
-    saveBriefing: (state) => saveSettings({ ...loadSettings(), briefing: state })
+    saveBriefing: (state) => saveSettings({ ...loadSettings(), briefing: state }),
+    // 她的一天：作品、日记在 AI 服务里，记着的状态在 settings.json
+    life: {
+      load: () => loadSettings().life ?? {},
+      save: (state) => saveSettings({ ...loadSettings(), life: state }),
+      works: async () => {
+        const r = await studio.works(AI_URL)
+        return r.ok && r.data ? r.data : null
+      },
+      start: (body) => studio.start(AI_URL, body),
+      seen: async (id) => void (await studio.seen(AI_URL, id)),
+      writeDiary: async (day, facts) => (await studio.writeDiary(AI_URL, day, facts)).ok
+    }
   })
   void serviceKeeper.start()
   createWindow()

@@ -86,8 +86,16 @@ export const lines = {
   sitBreak: (minutes: number): string[] => [
     `……已经坐了 ${minutes} 分钟了。起来走走吧。`,
     `${minutes} 分钟了……喝口水，活动一下？`,
-    '……眼睛也休息一下吧。看看远处。'
+    '……眼睛也休息一下吧。看看远处。',
+    `……盯着屏幕 ${minutes} 分钟了。去倒杯水吧，我等你。`
   ],
+  // 她自己的作品
+  workDone: (title: string, why: string): string =>
+    `……我自己做了个小东西，叫「${title}」。${why ? `${why.replace(/[。.]$/, '')}。` : ''}要看看吗？`,
+  workMaking: ['（在做自己的小东西……）', '……我在写一个小作品，做好了给你看。'],
+  workOpen: '……嗯，在「作品」里。',
+  // 深夜
+  lateNight: ['……已经很晚了。早点休息吧，代码明天还在。', '这么晚还在忙……再一会儿就睡吧？', '……我有点困了。你也早点睡。'],
   fixTask: (snippet: string): string => `修好这个报错。先定位到出错的代码、弄清原因，改完跑相关的测试验证：\n${snippet}`
 }
 

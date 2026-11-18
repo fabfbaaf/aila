@@ -58,6 +58,27 @@ describe('每天第一次见面', () => {
     expect(morningBriefing(input({ sessions: s }), false).text).toBe('昨天一起做了 1 个任务：「修购物车总价」。')
   })
 
+  it('特别的日子、她昨天做的作品、明天的事、前几天的事后来怎么样；她做作品的会话不算你的任务', () => {
+    const work = {
+      id: 'w', title: '像素时钟', idea: '', kind: 'web' as const, why: '', occasion: '', session: 's', status: 'done' as const,
+      reason: '', entry: 'index.html', announced: true, created: at(2026, 11, 16, 22).getTime() / 1000
+    }
+    const r = morningBriefing(
+      input({
+        occasion: '认识第 100 天',
+        works: [work, { ...work, id: 'x', title: '没做成的', status: 'failed' }],
+        sessions: [session('s', '像素时钟', at(2026, 11, 16, 22), { cwd: 'C:/data/works/20261116-220000-abcd' })],
+        memories: [memory('用户明天上午面试', at(2026, 11, 18, 11)), memory('用户周日去看演唱会', at(2026, 11, 15, 20))]
+      }),
+      false
+    )
+    expect(r.text).toBe(
+      '……今天是我们认识第 100 天。谢谢你一直让我待在这里。昨天我自己做了个小东西「像素时钟」，放在「作品」里了。' +
+        '明天：你明天上午面试……准备得怎么样？之前说的「你周日去看演唱会」，后来怎么样了？'
+    )
+    expect(r.detail).toBe(true)
+  })
+
   it('凌晨 5 点前还算前一天', () => {
     expect(workday(at(2026, 11, 17, 2))).toBe('2026-11-16')
     expect(workday(at(2026, 11, 17, 6))).toBe('2026-11-17')
