@@ -102,7 +102,8 @@ class Renderer:
 
     def header(self, info: dict[str, Any], backend: str) -> None:
         mode = MODE_LABELS.get(info.get("mode", ""), info.get("mode", ""))
-        title = Text.assemble(("艾拉", "bold magenta"), "  在 ", (info.get("cwd", ""), "bold"), " 里工作")
+        title = (Text.assemble(("艾拉", "bold magenta"), "  电脑任务") if info.get("kind") == "computer" else
+                 Text.assemble(("艾拉", "bold magenta"), "  在 ", (info.get("cwd", ""), "bold"), " 里工作"))
         meta = Text(f"{mode} · 模型 {info.get('model', '')} · 命令用 {info.get('shell', '')} · {backend} · 会话 {info.get('id', '')}",
                     style="dim")
         tips = Text("/help 看命令 · Shift+Tab 换权限模式 · Esc 打断 · Ctrl+J 换行", style="dim")

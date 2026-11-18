@@ -8,6 +8,7 @@ const props = defineProps<{
   item: ToolItem
   sessionId?: string
   loadScreenshot?: (sid: string, name: string) => Promise<string>
+  computer?: boolean
 }>()
 const emit = defineEmits<{ answer: [approved: boolean, remember: boolean] }>()
 
@@ -89,7 +90,7 @@ const rememberLabel = computed(() =>
       ? '可以，这个项目里这个端口以后都不用问'
     : props.item.confirm?.kind === 'mcp'
       ? '可以，这个外部工具以后都不用问'
-      : '可以，这条命令在这个项目里不用再问'
+      : props.computer ? '可以，这条命令在电脑任务里不用再问' : '可以，这条命令在这个项目里不用再问'
 )
 const answered = computed(() => {
   const c = props.item.confirm

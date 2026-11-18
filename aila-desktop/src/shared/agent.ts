@@ -1,6 +1,18 @@
 // 编程 Agent（工作窗口）：主进程、预加载和渲染层共用的类型。事件的含义见 aila-ai 的 /agent 接口
 
 export type AgentMode = 'read_only' | 'ask' | 'auto'
+export type AgentKind = 'project' | 'computer'
+
+/** 电脑任务没有工作区内自动；旧会话没有 kind 时仍按项目处理。 */
+export function agentModes(kind: AgentKind = 'project'): AgentMode[] {
+  return kind === 'computer' ? ['read_only', 'ask'] : ['read_only', 'ask', 'auto']
+}
+
+/** 开会话前供用户预览的环境说明；实际会话会把同样的说明固定在开头。 */
+export interface ComputerContext {
+  context: string
+  inventory: boolean
+}
 
 export const MODE_LABELS: Record<AgentMode, string> = {
   read_only: '只读',
@@ -24,6 +36,7 @@ export interface AgentUsage {
 export interface AgentSessionSummary {
   id: string
   cwd: string
+  kind?: AgentKind
   title: string
   mode: AgentMode
   model: string

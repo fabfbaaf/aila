@@ -17,7 +17,7 @@ from fastapi import FastAPI
 
 from . import deps
 from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
-from .routes import agent, chat, code, knowledge, screen, settings, voice
+from .routes import agent, chat, code, computer, knowledge, screen, settings, voice
 from .routes.chat import ChatMessage, ChatRequest, build_messages
 from .security import LocalOnly
 
@@ -54,3 +54,4 @@ app.include_router(settings.router)
 app.include_router(screen.router)
 app.include_router(code.router)
 app.include_router(agent.router)
+app.include_router(computer.router)

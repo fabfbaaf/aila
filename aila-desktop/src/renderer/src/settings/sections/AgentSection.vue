@@ -1,9 +1,10 @@
 <script setup lang="ts">
-/** 编程权限说明、记住的命令（只能撤销授权，删除后立即按原有权限规则判断）、外部工具（MCP）。 */
+/** 编程权限说明、记住的命令、电脑任务的环境说明预览和外部工具（MCP）。 */
 import { computed, onActivated, ref } from 'vue'
 import { MODE_HINTS, MODE_LABELS, type AgentMode } from '../../../../shared/agent'
 import type { AgentRuleGroup } from '../../../../shared/settings'
 import { loadAgentRules, removeAgentRule } from '../agentRules'
+import { loadComputerContext, loadComputerSettings, saveComputerInventory } from '../computer'
 import McpCard from './McpCard.vue'
 
 const modes: AgentMode[] = ['read_only', 'ask', 'auto']
@@ -13,6 +14,86 @@ const loading = ref(false)
 const removing = ref('')
 const error = ref('')
 const notice = ref('')
+const inventory = ref(true)
+const inventoryReady = ref(false)
+const inventoryBusy = ref(false)
+const computerError = ref('')
+const previewError = ref('')
+const computerNotice = ref('')
+const previewOpen = ref(false)
+const previewLoading = ref(false)
+const computerContext = ref('')
+let previewRequest = 0
+
+async function loadComputer(): Promise<void> {
+  inventoryBusy.value = true
+  computerError.value = ''
+  try {
+    const res = await loadComputerSettings()
+    if (!res.ok || !res.data) {
+      computerError.value = res.error ?? '没能读取电脑任务设置，重试一下。'
+      return
+    }
+    inventory.value = res.data.computer?.inventory ?? true
+    inventoryReady.value = true
+    if (previewOpen.value) void preview()
+  } catch {
+    computerError.value = '没能读取电脑任务设置，重试一下。'
+  } finally {
+    inventoryBusy.value = false
+  }
+}
+
+async function preview(): Promise<void> {
+  const request = ++previewRequest
+  previewLoading.value = true
+  previewError.value = ''
+  computerContext.value = ''
+  try {
+    const res = await loadComputerContext()
+    if (request !== previewRequest) return
+    if (res.ok && res.data) computerContext.value = res.data.context
+    else previewError.value = res.error ?? '没能读取环境说明，重试一下。'
+  } catch {
+    if (request === previewRequest) previewError.value = '没能读取环境说明，重试一下。'
+  } finally {
+    if (request === previewRequest) previewLoading.value = false
+  }
+}
+
+function togglePreview(): void {
+  previewOpen.value = !previewOpen.value
+  if (previewOpen.value) void preview()
+  else {
+    previewRequest++
+    previewLoading.value = false
+  }
+}
+
+async function saveInventory(): Promise<void> {
+  const next = inventory.value
+  inventoryBusy.value = true
+  computerError.value = ''
+  computerNotice.value = ''
+  previewRequest++
+  computerContext.value = ''
+  try {
+    const res = await saveComputerInventory(next)
+    if (!res.ok || !res.data) {
+      inventory.value = !next
+      computerError.value = res.error ?? '没有保存，重试一下。'
+      return
+    }
+    inventory.value = res.data.computer?.inventory ?? next
+    computerNotice.value = '已保存，下次新建电脑任务时使用。已有任务的环境说明保持原样。'
+  } catch {
+    inventory.value = !next
+    computerError.value = '没有保存，重试一下。'
+  } finally {
+    inventoryBusy.value = false
+    if (previewOpen.value) void preview()
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -49,6 +130,7 @@ async function remove(project: string, command: string): Promise<void> {
 }
 
 onActivated(load)
+onActivated(loadComputer)
 </script>
 
 <template>
@@ -65,6 +147,28 @@ onActivated(load)
         </div>
       </dl>
       <p class="safety">危险命令不管哪种模式都要问，也不能「以后都允许」。只读模式下会拒绝执行。读可能存着密钥的文件也要问。</p>
+      <p class="safety">电脑任务只有「只读」和「先问再改」，不提供工作区内自动。受保护的位置每次都要确认，也不能记住授权。</p>
+    </div>
+
+    <div class="card computer-settings" :aria-busy="inventoryBusy">
+      <h3>电脑任务</h3>
+      <label class="inventory-toggle">
+        <input v-model="inventory" type="checkbox" :disabled="!inventoryReady || inventoryBusy" @change="saveInventory" />
+        <span>告诉她这台电脑装了什么</span>
+      </label>
+      <p class="rule-note">默认打开。只提供系统、常用目录、程序和命令行工具的名字，不读取文件内容。关掉后只提供系统和常用目录。每个新电脑任务开始时固定这份说明。</p>
+      <button class="btn" :disabled="inventoryBusy || !inventoryReady" :aria-expanded="previewOpen" aria-controls="computer-context-preview" @click="togglePreview">{{ previewOpen ? '收起环境说明' : '看看具体写了什么' }}</button>
+      <button v-if="computerError && !inventoryReady" class="btn" :disabled="inventoryBusy" @click="loadComputer">重试</button>
+      <p v-if="computerError" class="msg error" role="alert">{{ computerError }}</p>
+      <p v-if="computerNotice" class="msg ok" role="status">{{ computerNotice }}</p>
+      <div v-if="previewOpen" id="computer-context-preview" class="context-preview" :aria-busy="previewLoading">
+        <p v-if="previewError" class="msg error" role="alert">{{ previewError }}</p>
+        <p v-if="previewLoading" role="status">正在生成环境说明…</p>
+        <template v-else>
+          <pre v-if="computerContext" tabindex="0" aria-label="电脑任务的环境说明">{{ computerContext }}</pre>
+          <button class="btn" :disabled="inventoryBusy" @click="preview">重新读取</button>
+        </template>
+      </div>
     </div>
 
     <div class="card" :aria-busy="loading || Boolean(removing)">
@@ -72,17 +176,17 @@ onActivated(load)
         <h3>记住的命令</h3>
         <button class="btn" :disabled="loading || Boolean(removing)" @click="load">{{ loading ? '正在读取…' : '刷新' }}</button>
       </div>
-      <p class="rule-note">只在对应项目里按原文匹配。删掉后立即生效，不会停止正在跑的命令。</p>
+      <p class="rule-note">这里按项目或「电脑」范围列出按原文匹配的命令。删掉后立即生效，不会停止正在跑的命令。电脑任务的授权单独保存，不和项目混用。</p>
       <p v-if="error" class="msg error" role="alert">{{ error }}</p>
       <p v-if="notice" class="msg ok" role="status">{{ notice }}</p>
       <p v-if="loading && !groups.length" class="empty" role="status">正在读取记住的命令…</p>
       <p v-else-if="!projects.length && !error" class="empty">还没有记住的命令。确认命令时选「以后都允许」，才会出现在这里。</p>
       <section v-for="group in projects" :key="group.project" class="project">
-        <h4 class="project-path">{{ group.project }}</h4>
+        <h4 class="project-path">{{ group.project === 'computer' ? '电脑' : group.project }}</h4>
         <ul class="commands">
           <li v-for="command in group.commands" :key="command">
             <code>{{ command }}</code>
-            <button class="btn danger" :disabled="loading || Boolean(removing)" :aria-label="`删掉 ${group.project} 记住的命令：${command}`" @click="remove(group.project, command)">
+            <button class="btn danger" :disabled="loading || Boolean(removing)" :aria-label="`删掉 ${group.project === 'computer' ? '电脑' : group.project} 记住的命令：${command}`" @click="remove(group.project, command)">
               {{ removing === JSON.stringify([group.project, command]) ? '正在删…' : '删掉' }}
             </button>
           </li>
@@ -104,6 +208,11 @@ onActivated(load)
 .rule-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .rule-heading h3 { margin-bottom: 0; }
 .rule-note { margin: 10px 0 14px; color: var(--label); }
+.inventory-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.inventory-toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
+.context-preview { margin-top: 14px; }
+.context-preview pre { max-height: 360px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: var(--ui-r); background: var(--ui-code); color: var(--label); white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.7 var(--ui-mono); }
+.inventory-toggle:focus-within, .context-preview pre:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .project + .project { margin-top: 22px; }
 .project-path { margin: 0 0 4px; color: var(--label); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .commands { margin: 0; padding: 0; list-style: none; }

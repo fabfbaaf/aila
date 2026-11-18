@@ -240,6 +240,20 @@ class Agent:
             if result != "approved":
                 yield self._tool_event(call, Outcome(NOT_DONE[result], ok=False), status=result)
                 return
+            if self.session.kind == "computer":
+                # 等用户点确认时可能已经换成只读，或文件目标变成了受保护位置。
+                try:
+                    current_kind = tool.kind(args)
+                except WorkspaceError as err:
+                    yield self._tool_event(call, Outcome(str(err), ok=False), status="denied")
+                    return
+                current = self.policy.decide(current_kind, command)
+                if current.verdict == "deny":
+                    yield self._tool_event(call, Outcome(current.reason, ok=False), status="denied")
+                    return
+                if current_kind != kind or (current.verdict == "ask" and current != decision):
+                    yield self._tool_event(call, Outcome("确认期间操作范围变了，重新调用工具核对后再做。", ok=False), status="denied")
+                    return
             if remember:
                 self.policy.remember(kind, command)
 

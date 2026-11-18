@@ -140,6 +140,54 @@ class Workspace:
         return found
 
 
+class ComputerWorkspace(Workspace):
+    """电脑文件工具从用户目录出发，也接受用户目录外的绝对路径；保护检查独立于路径范围。"""
+
+    kind = "computer"
+
+    def __init__(self, root: Path, *, data_dir: Path | None = None, env_file: Path | None = None) -> None:
+        from .computerpaths import ProtectedPaths
+
+        super().__init__(root)
+        self.protected = ProtectedPaths(self.root, data_dir, env_file)
+
+    def resolve(self, raw: str, for_write: bool = False) -> Path:
+        if not raw or not raw.strip():
+            raise WorkspaceError("没给文件路径。")
+        path = Path(self.protected.expand(raw.strip()))
+        path = (path if path.is_absolute() else self.root / path).resolve()
+        if for_write and any(os.path.normcase(part) == ".git" for part in path.parts):
+            raise WorkspaceError("不能改 .git 里面的文件。")
+        if os.name == "nt" and any(":" in part for part in path.parts[1:]):
+            raise WorkspaceError("不能操作文件的备用数据流。")
+        return path
+
+    def is_secret(self, path: Path) -> bool:
+        return self.protected.contains(path)
+
+    def rel(self, path: Path) -> str:
+        resolved = path.resolve()
+        return resolved.relative_to(self.root).as_posix() if resolved.is_relative_to(self.root) else resolved.as_posix()
+
+    def files(self, under: Path | None = None) -> list[Path]:
+        base = (under or self.root).resolve()
+        explicitly_protected = self.is_secret(base)
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(base):
+            folder = Path(dirpath)
+            # 默认遍历不深入受保护位置；明确选择了保护目录时，上层工具会先问。
+            dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRS
+                                 and (explicitly_protected or not self.is_secret(folder / name))
+                                 and not (folder / name).is_symlink() and not (folder / name).is_junction())
+            for name in sorted(filenames):
+                path = folder / name
+                if explicitly_protected or not self.is_secret(path):
+                    found.append(path)
+                if len(found) >= MAX_FILES:
+                    return found
+        return found
+
+
 def glob_match(rel: str, pattern: str) -> bool:
     """「*.py」匹配任意目录下的 py 文件；带 / 的按整个相对路径匹配；** 可以跨目录"""
     pattern = pattern.strip().replace("\\", "/") or "*"

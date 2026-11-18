@@ -69,12 +69,24 @@ describe('工作窗口的转发（主进程）', () => {
     const { r } = relay()
     await r.create('C:/shop', 'ask', false, 0)
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0 })
+      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0, kind: 'project' })
     }))
     await r.setBudget('s /1', null)
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s%20%2F1/budget', expect.objectContaining({
       method: 'PUT', body: JSON.stringify({ amount: null })
     }))
+  })
+
+  it('电脑任务不传 cwd，保留种类；环境预览只走固定接口', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 'c1', cwd: 'C:/Users/test', kind: 'computer' })))
+    vi.stubGlobal('fetch', fetchMock)
+    const { r } = relay()
+    expect((await r.create(undefined, 'ask', false, null, 'computer')).data?.kind).toBe('computer')
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ mode: 'ask', isolate: false, budget: null, kind: 'computer' })
+    }))
+    await r.computerContext()
+    expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/computer/context', expect.objectContaining({ method: 'GET' }))
   })
 
   it('预算停止通过独立进展通知桌面角色', async () => {

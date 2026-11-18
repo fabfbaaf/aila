@@ -18,6 +18,10 @@
   记在 data/agent_rules.json
 
 Windows 上没有沙箱：命令真正能做什么只能靠上面这些规则把关。危险命令的识别是尽力而为，不是保证。
+
+电脑任务用独立 ComputerPolicy：只读、先问再改；普通命令记在「电脑」范围。
+受保护目录和密钥文件的读取每次问；secret_edit 是受保护编辑，每次问，不能记住。
+危险命令和受保护位置不受「以后都允许」影响，也不能记入电脑规则。
 """
 
 import json
@@ -227,3 +231,77 @@ class Policy:
             self.mcp.allow(command)
         elif kind == "browser_local" and command.isascii() and command.isdecimal() and 0 < int(command) <= 65535:
             self.browser_rules.allow(self.project, command)
+
+
+COMPUTER_SCOPE = "computer"
+COMPUTER_MODES: tuple[Mode, ...] = ("read_only", "ask")
+COMPUTER_DANGEROUS = [
+    (re.compile(r"\b(Restart-Computer|Stop-Computer|Restart-Service|Stop-Service|Suspend-Computer)\b", re.I), "会关机、重启或停止系统服务"),
+    (re.compile(r"\bwinget(?:\.exe)?\s+.*\b(install|uninstall|upgrade|repair)\b", re.I), "会安装、卸载或修改软件"),
+    (re.compile(r"\b(choco|scoop)\s+(install|uninstall|update|upgrade|remove)\b", re.I), "会安装、卸载或修改软件"),
+    (re.compile(r"\b(msiexec|Install-(Package|Module|Script)|Uninstall-(Package|Module|Script))\b", re.I), "会安装或卸载软件"),
+    (re.compile(r"\breg(?:\.exe)?\s+(add|delete|import|restore|load|unload)\b", re.I), "会改注册表"),
+    (re.compile(r"\b(Set|New|Remove|Clear)-Item(?:Property)?\b.*(?:HKLM|HKCU|Registry::|HKEY_)", re.I), "会改注册表"),
+    (re.compile(r"\b(New|Set|Remove|Enable|Disable|Register|Unregister)-ScheduledTask\b", re.I), "会改计划任务"),
+]
+COMPUTER_READS = re.compile(
+    r"^(Get-(Process|Service|Command|Date|ComputerInfo|CimInstance|Item|ItemProperty|FileHash|Volume|PSDrive)"
+    r"|Test-Path|Resolve-Path|where(?:\.exe)?|winget\s+(list|show|search))(?=\s|$)", re.I,
+)
+
+
+def computer_dangerous(command: str) -> str | None:
+    why = dangerous(command)
+    if why:
+        return why
+    for pattern, reason in COMPUTER_DANGEROUS:
+        if pattern.search(command):
+            return reason
+    return None
+
+
+def computer_read_only(command: str) -> bool:
+    # PowerShell 的子表达式、调用和脚本块可能藏在查看命令的参数里。
+    if SHELL_META.search(command) or re.search(r"[$\x60(){}\[\]]", command):
+        return False
+    return read_only_command(command) or bool(COMPUTER_READS.match(command.strip()))
+
+
+class ComputerPolicy(Policy):
+    def __init__(self, home: Path, rules: Rules, mode: Mode = "ask", mcp: McpRules | None = None,
+                 *, data_dir: Path | None = None, env_file: Path | None = None,
+                 remember_commands: bool = True) -> None:
+        from .computerpaths import ProtectedPaths
+
+        if mode not in COMPUTER_MODES:
+            raise ValueError("电脑任务只有只读和先问再改两种模式。")
+        super().__init__(home, rules, mode, mcp)
+        self.protected = ProtectedPaths(home, data_dir, env_file)
+        self.remember_commands = remember_commands
+
+    def decide(self, kind: str, command: str = "") -> Decision:
+        if self.mode not in COMPUTER_MODES:
+            return Decision("deny", "电脑任务只有只读和先问再改两种模式。")
+        if kind == "secret_edit":
+            if self.mode == "read_only":
+                return Decision("deny", "现在是只读模式，不能改受保护位置。")
+            return Decision("ask", "要改受保护位置，每次都要先确认")
+        return super().decide(kind, command)
+
+    def _command(self, command: str) -> Decision:
+        readonly = computer_read_only(self.protected.expand(command))
+        why = computer_dangerous(command)
+        protected = mentions_secret(command) or self.protected.command_touches(command)
+        if self.mode == "read_only" and (why or not readonly):
+            return Decision("deny", "现在是只读模式，这条命令可能改东西，不能执行。")
+        if why or protected:
+            return Decision("ask", why or "命令可能访问受保护位置，每次都要先确认")
+        if readonly or (self.remember_commands and command.strip() in self.rules.commands(COMPUTER_SCOPE)):  # type: ignore[arg-type]
+            return Decision("allow")
+        return Decision("ask", can_remember=self.remember_commands)
+
+    def remember(self, kind: str, command: str = "") -> None:
+        if kind == "edit":
+            self.edits_allowed = True
+        elif kind == "command" and command.strip() and self.decide(kind, command).can_remember:
+            self.rules.allow(COMPUTER_SCOPE, command.strip())  # type: ignore[arg-type]

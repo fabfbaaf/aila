@@ -11,6 +11,11 @@ export interface SessionGroup {
 
 const DAY = 86400000
 
+/** 电脑任务用固定名字，旧服务没有 kind 的会话继续显示项目名。 */
+export function sessionLabel(s: Pick<AgentSessionSummary, 'cwd' | 'kind'>): string {
+  return s.kind === 'computer' ? '电脑' : s.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || s.cwd
+}
+
 /** 分组；输入已经是最近的在前，组内保持原顺序。now 是毫秒时间戳（测试里固定） */
 export function groupSessions(list: AgentSessionSummary[], now = Date.now()): SessionGroup[] {
   const today = new Date(now)
@@ -31,9 +36,9 @@ export function groupSessions(list: AgentSessionSummary[], now = Date.now()): Se
 }
 
 /** 删除确认框里的说明：按这个会话的情况由代码生成 */
-export function deleteNotice(s: Pick<AgentSessionSummary, 'title' | 'branch' | 'running'>): string[] {
+export function deleteNotice(s: Pick<AgentSessionSummary, 'title' | 'branch' | 'running' | 'kind'>): string[] {
   const lines = ['会话记录（她说过的话、改文件的过程、用量）会删掉，删了找不回来。']
   if (s.branch) lines.push(`她在分支 ${s.branch} 上的临时目录会一起放弃；已经合并回去的改动不受影响。`)
-  lines.push('你项目里的文件不会动。')
+  lines.push(s.kind === 'computer' ? '你电脑里的文件不会动。' : '你项目里的文件不会动。')
   return lines
 }

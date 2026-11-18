@@ -23,7 +23,7 @@ from typing import Any
 from ..llm import Usage
 from .shell import BackgroundJobs, DEFAULT_TIMEOUT, Job, JobLimitError, MAX_TIMEOUT, Shell, run
 from .snapshots import Snapshots
-from .workspace import Workspace, WorkspaceError, decode_text, glob_match, read_text
+from .workspace import ComputerWorkspace, Workspace, WorkspaceError, decode_text, glob_match, read_text
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -98,6 +98,7 @@ class CodingTools:
         self.snapshots = snapshots
         self.jobs = BackgroundJobs(on_close)
         self.todos: list[dict[str, str]] = []
+        self._computer_target: tuple[dict[str, Any], Path, bool] | None = None
         # 基本工具在前、额外的（代码库）在后，顺序固定
         self.tools: dict[str, CodingTool] = {t.name: t for t in [*self._build(), *(extra or [])]}
 
@@ -132,7 +133,7 @@ class CodingTools:
                 "list_files",
                 "按文件名模式找文件（遵守 .gitignore）。「*.py」匹配所有目录下的 py 文件，「src/**/*.ts」按路径匹配。",
                 _obj({"pattern": _str("文件名模式，默认 *"), "path": _str("只在这个子目录里找（可选）")}, []),
-                self._list, lambda _: "read", lambda a: f"找文件 {a.get('pattern') or '*'}",
+                self._list, self._scope_kind, lambda a: f"找文件 {a.get('pattern') or '*'}", self._read_preview,
             ),
             CodingTool(
                 "search",
@@ -142,7 +143,7 @@ class CodingTools:
                       "ignore_case": {"type": "boolean", "description": "忽略大小写"},
                       "files_only": {"type": "boolean", "description": "只列出有匹配的文件"},
                       "context": _int("每处匹配前后带几行（0–3），默认 0")}, ["pattern"]),
-                self._search, lambda _: "read", lambda a: f"搜「{str(a.get('pattern', ''))[:40]}」",
+                self._search, self._scope_kind, lambda a: f"搜「{str(a.get('pattern', ''))[:40]}」", self._read_preview,
             ),
             CodingTool(
                 "edit_file",
@@ -151,13 +152,13 @@ class CodingTools:
                 _obj({"path": _str("文件路径"), "old_string": _str("要换掉的原文"), "new_string": _str("换成的新内容"),
                       "replace_all": {"type": "boolean", "description": "替换所有出现的地方，默认 false"}},
                      ["path", "old_string", "new_string"]),
-                self._edit, lambda _: "edit", lambda a: f"改 {a.get('path', '')}", self._edit_preview,
+                self._edit, self._edit_kind, lambda a: f"改 {a.get('path', '')}", self._edit_preview,
             ),
             CodingTool(
                 "write_file",
                 "写一个文件的全部内容：新建文件，或者整个重写已有文件（重写之前必须读过）。小改动用 edit_file。",
                 _obj({"path": _str("文件路径"), "content": _str("文件的全部内容")}, ["path", "content"]),
-                self._write, lambda _: "edit", lambda a: f"写 {a.get('path', '')}", self._write_preview,
+                self._write, self._edit_kind, lambda a: f"写 {a.get('path', '')}", self._write_preview,
             ),
             CodingTool(
                 "run_command",
@@ -168,7 +169,8 @@ class CodingTools:
                       "background": {"type": "boolean", "description": "放到后台跑，默认 false；一个会话最多同时 3 个"}}, ["command"]),
                 self._command, lambda _: "command",
                 lambda a: ("后台：" if a.get("background") is True else "")
-                + str(a.get("description") or a.get("command", ""))[:60], self._command_preview,
+                + str(a.get("command", "") if isinstance(self.ws, ComputerWorkspace)
+                      else a.get("description") or a.get("command", ""))[:60], self._command_preview,
             ),
             CodingTool(
                 "todo_write",
@@ -195,16 +197,50 @@ class CodingTools:
     # ---------- 读 ----------
 
     def _read_kind(self, args: dict[str, Any]) -> str:
+        if isinstance(self.ws, ComputerWorkspace):
+            return self._computer_kind(args)
         try:
             return "secret" if self.ws.is_secret(self.ws.resolve(str(args.get("path", "")))) else "read"
         except WorkspaceError:
             return "read"
 
+    def _scope_kind(self, args: dict[str, Any]) -> str:
+        return self._computer_kind(args, default=True) if isinstance(self.ws, ComputerWorkspace) else "read"
+
+    def _edit_kind(self, args: dict[str, Any]) -> str:
+        return self._computer_kind(args, write=True) if isinstance(self.ws, ComputerWorkspace) else "edit"
+
+    def _computer_kind(self, args: dict[str, Any], *, write: bool = False, default: bool = False) -> str:
+        if self._computer_target is not None and self._computer_target[0] is args:
+            # 确认后的权限复查仍绑定第一次展示的目标，不能顺着新链接换一个文件。
+            path = self._resolve(args, for_write=write, default=default)
+        else:
+            self._computer_target = None
+            try:
+                path = self._resolve(args, for_write=write, default=default)
+            except WorkspaceError:
+                return "edit" if write else "read"
+        raw = Path(str(args.get("path") or path))
+        protected = self.ws.is_secret(path) or self.ws.is_secret(raw)
+        self._computer_target = (args, path, protected)
+        return ("secret_edit" if protected else "edit") if write else ("secret" if protected else "read")
+
+    def _resolve(self, args: dict[str, Any], *, for_write: bool = False, default: bool = False) -> Path:
+        raw = str(args.get("path") or "") if default else str(args.get("path", ""))
+        path = self.ws.root if default and not raw else self.ws.resolve(raw, for_write=for_write)
+        if isinstance(self.ws, ComputerWorkspace) and self._computer_target is not None:
+            original_args, original, protected = self._computer_target
+            if original_args is args and (
+                path != original or protected != (self.ws.is_secret(path) or self.ws.is_secret(Path(raw or path)))
+            ):
+                raise WorkspaceError("文件路径或保护状态变了，重新确认后再操作。")
+        return path
+
     def _read_preview(self, args: dict[str, Any]) -> str:
         return f"{args.get('path', '')}\n这个文件可能存着密码或密钥；读了以后内容会发给大模型。"
 
     async def _read(self, args: dict[str, Any]) -> Outcome:
-        path = self.ws.resolve(str(args.get("path", "")))
+        path = self._resolve(args)
         if not path.is_file():
             raise WorkspaceError(f"{self.ws.rel(path)} 不存在或者不是文件。")
         text, _ = read_text(path)
@@ -234,7 +270,7 @@ class CodingTools:
         return Outcome("\n".join(out))
 
     async def _list(self, args: dict[str, Any]) -> Outcome:
-        base = self.ws.resolve(str(args["path"])) if args.get("path") else self.ws.root
+        base = self._resolve(args, default=True)
         if not base.is_dir():
             raise WorkspaceError(f"{self.ws.rel(base)} 不是目录。")
         pattern = str(args.get("pattern") or "*")
@@ -251,7 +287,7 @@ class CodingTools:
             rx = re.compile(str(args.get("pattern", "")), flags)
         except re.error as err:
             return Outcome(f"正则表达式写错了：{err}", ok=False)
-        base = self.ws.resolve(str(args["path"])) if args.get("path") else self.ws.root
+        base = self._resolve(args, default=True)
         glob = str(args.get("glob") or "")
         context = max(0, min(int(args.get("context") or 0), 3))
         files_only = bool(args.get("files_only"))
@@ -259,10 +295,11 @@ class CodingTools:
         hits: list[str] = []
         files: list[str] = []
         count = 0
+        explicit_protected = isinstance(self.ws, ComputerWorkspace) and self.ws.is_secret(base)
         candidates = [base] if base.is_file() else self.ws.files(base)
         for path in candidates:
             rel = self.ws.rel(path)
-            if (glob and not glob_match(rel, glob)) or self.ws.is_secret(path):
+            if (glob and not glob_match(rel, glob)) or (self.ws.is_secret(path) and not explicit_protected):
                 continue
             try:
                 if path.stat().st_size > SEARCH_FILE_BYTES:
@@ -303,7 +340,7 @@ class CodingTools:
 
     def _plan_edit(self, args: dict[str, Any]) -> _EditPlan:
         raw = str(args.get("path", ""))
-        path = self.ws.resolve(raw, for_write=True)
+        path = self._resolve(args, for_write=True)
         old, new = str(args.get("old_string", "")), str(args.get("new_string", ""))
         if not path.is_file():
             raise WorkspaceError(f"{self.ws.rel(path)} 不存在；新建文件用 write_file。")
@@ -336,7 +373,7 @@ class CodingTools:
 
     def _plan_write(self, args: dict[str, Any]) -> _EditPlan:
         raw = str(args.get("path", ""))
-        path = self.ws.resolve(raw, for_write=True)
+        path = self._resolve(args, for_write=True)
         secret = self.ws.is_secret(path) or self.ws.is_secret(Path(raw.strip()))
         content = str(args.get("content", ""))
         if path.is_dir():
@@ -391,7 +428,7 @@ class CodingTools:
         return result
 
     def _changed(self, path: Path, before: str, after: str, created: bool = False) -> Outcome:
-        rel = path.relative_to(self.ws.root).as_posix()
+        rel = self.ws.rel(path)
         diff = make_diff(rel, before, after)
         added = sum(1 for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
         removed = sum(1 for line in diff.splitlines() if line.startswith("-") and not line.startswith("---"))
@@ -401,7 +438,7 @@ class CodingTools:
     # ---------- 命令 ----------
 
     def _command_preview(self, args: dict[str, Any]) -> str:
-        desc = str(args.get("description") or "").strip()
+        desc = "" if isinstance(self.ws, ComputerWorkspace) else str(args.get("description") or "").strip()
         return f"{args.get('command', '')}" + (f"\n（{desc}）" if desc else "") + f"\n在 {self.ws.root} 里执行" + (
             "（后台）" if args.get("background") is True else ""
         )

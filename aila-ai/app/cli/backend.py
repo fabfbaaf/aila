@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from ..computer import computer_shell
 from ..runtime.mcp import McpError
 from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
@@ -24,7 +25,8 @@ class BackendError(Exception):
 class Backend(Protocol):
     label: str
 
-    async def create(self, cwd: str, mode: str, isolate: bool = False, budget: float | None = None) -> dict[str, Any]: ...
+    async def create(self, cwd: str | None, mode: str, isolate: bool = False, budget: float | None = None,
+                     *, kind: str = "project") -> dict[str, Any]: ...
     async def merge(self, sid: str, run_tests: bool = True) -> Event: ...
     async def context(self, sid: str) -> dict[str, Any]: ...
     async def discard(self, sid: str) -> Event: ...
@@ -61,12 +63,14 @@ class EmbeddedBackend:
     def __init__(self, runtime: Runtime) -> None:
         self.rt = runtime
 
-    async def create(self, cwd: str, mode: str, isolate: bool = False, budget: float | None = None) -> dict[str, Any]:
+    async def create(self, cwd: str | None, mode: str, isolate: bool = False, budget: float | None = None,
+                     *, kind: str = "project") -> dict[str, Any]:
         try:
-            session = self.rt.create(cwd, mode, isolate, budget=budget)  # type: ignore[arg-type]
+            session = self.rt.create(cwd, mode, isolate, budget=budget, kind=kind)  # type: ignore[arg-type]
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
-        return {**session.summary(), "shell": self.rt.shell.label}
+        shell = computer_shell() if session.kind == "computer" else self.rt.shell
+        return {**session.summary(), "shell": shell.label}
 
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         try:
@@ -109,7 +113,7 @@ class EmbeddedBackend:
             session = self.rt.agent(sid).session
         except RuntimeError_ as err:
             raise BackendError(str(err)) from err
-        return {**session.summary(), "running": self.rt.running(sid), "shell": self.rt.shell.label, "events": session.events}
+        return {**session.summary(), "running": self.rt.running(sid), "shell": self.rt.agent(sid).tools.shell.label, "events": session.events}
 
     async def run(self, sid: str, text: str, review: bool = False, plan: bool = False) -> AsyncIterator[Event]:
         try:
@@ -146,7 +150,10 @@ class EmbeddedBackend:
         self.rt.interrupt(sid)
 
     async def set_mode(self, sid: str, mode: str) -> None:
-        self.rt.set_mode(sid, mode)  # type: ignore[arg-type]
+        try:
+            self.rt.set_mode(sid, mode)  # type: ignore[arg-type]
+        except RuntimeError_ as err:
+            raise BackendError(str(err)) from err
 
     async def compact(self, sid: str) -> None:
         try:
@@ -161,12 +168,14 @@ class EmbeddedBackend:
         await self.rt.shutdown()
 
     async def rules(self) -> list[dict[str, Any]]:
-        return [{"project": project, "commands": commands} for project, commands in sorted(self.rt.rules.all().items())]
+        groups = {**self.rt.rules.all(), **self.rt.computer_rules.all()}
+        return [{"project": project, "commands": commands} for project, commands in sorted(groups.items())]
 
     async def forget_rule(self, project: str, command: str) -> None:
-        if command not in self.rt.rules.commands(Path(project)):
+        rules = self.rt.computer_rules if project == "computer" else self.rt.rules
+        if command not in rules.commands(Path(project)):
             raise BackendError("没有这条记住的命令，可能已经删掉了。")
-        self.rt.rules.forget(Path(project), command)
+        rules.forget(Path(project), command)
 
     async def memory(self, cwd: str) -> list[dict[str, Any]]:
         return [asdict(n) for n in self.rt.memory.notes(cwd)]
@@ -228,8 +237,10 @@ class HttpBackend:
             raise BackendError(_detail(res))
         return res.json()
 
-    async def create(self, cwd: str, mode: str, isolate: bool = False, budget: float | None = None) -> dict[str, Any]:
-        return await self._call("POST", "/agent/sessions", json={"cwd": cwd, "mode": mode, "isolate": isolate, "budget": budget})
+    async def create(self, cwd: str | None, mode: str, isolate: bool = False, budget: float | None = None,
+                     *, kind: str = "project") -> dict[str, Any]:
+        return await self._call("POST", "/agent/sessions", json={"cwd": cwd, "mode": mode, "isolate": isolate,
+                                                                 "budget": budget, "kind": kind})
 
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         return await self._call("POST", f"/agent/sessions/{sid}/merge", json={"run_tests": run_tests}, timeout=660)
@@ -369,4 +380,4 @@ def _local_runtime() -> Runtime:
 
     config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
     return Runtime(settings.data_dir, get_coder_model, config=config, code_projects=get_code_projects,
-                   fast_factory=get_coder_fast_model)
+                   fast_factory=get_coder_fast_model, computer_inventory=settings.computer_inventory)

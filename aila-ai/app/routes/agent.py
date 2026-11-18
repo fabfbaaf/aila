@@ -40,6 +40,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from ..computer import computer_shell
 from ..deps import get_runtime
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
@@ -62,7 +63,8 @@ def _budget_input(value: object) -> float | None:
 
 
 class NewSession(BaseModel):
-    cwd: str = Field(min_length=1, max_length=1000)
+    cwd: str | None = Field(default=None, min_length=1, max_length=1000)
+    kind: Literal["project", "computer"] = "project"
     mode: ModeName = "ask"
     isolate: bool = False  # 在新分支上做
     budget: float | None = Field(default=None, ge=0, allow_inf_nan=False, strict=True)
@@ -80,6 +82,7 @@ class NewTask(BaseModel):
     cwd: str | None = Field(default=None, max_length=1000)
     project: str | None = Field(default=None, max_length=64)  # 代码库里登记的项目 id
     mode: ModeName = "ask"
+    kind: Literal["project", "computer"] = "project"
 
 
 class Say(BaseModel):
@@ -126,19 +129,23 @@ def _session_or_404(rt: Runtime, sid: str):  # noqa: ANN202
 @router.post("/sessions", status_code=201)
 async def create_session(req: NewSession, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
-        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget)
+        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind)
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
-    return {**session.summary(), "shell": rt.shell.label, "modes": MODE_LABELS}
+    modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k != "auto"}
+    shell = computer_shell() if session.kind == "computer" else rt.shell
+    return {**session.summary(), "shell": shell.label, "modes": modes}
 
 
 @router.post("/tasks", status_code=201)
 async def new_task(req: NewTask, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
+        if req.kind == "computer" and req.project:
+            raise RuntimeError_("电脑任务不用选项目。")
         cwd = rt.project_dir(req.project) if req.project else req.cwd
-        if not cwd:
+        if req.kind == "project" and not cwd:
             raise RuntimeError_("要告诉我在哪个项目里做。")
-        session = rt.create(cwd, req.mode)
+        session = rt.create(cwd, req.mode, kind=req.kind)
         rt.start(session.id, req.text)
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
@@ -153,7 +160,8 @@ async def list_sessions(rt: Runtime = Depends(get_runtime), q: str | None = None
 @router.get("/sessions/{sid}")
 async def get_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
     session = _session_or_404(rt, sid)
-    return {**session.summary(), "running": rt.running(sid), "shell": rt.shell.label, "events": session.events}
+    shell = computer_shell() if session.kind == "computer" else rt.shell
+    return {**session.summary(), "running": rt.running(sid), "shell": shell.label, "events": session.events}
 
 
 @router.post("/sessions/{sid}/messages")
@@ -181,7 +189,10 @@ async def interrupt(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
 @router.put("/sessions/{sid}/mode")
 async def set_mode(sid: str, req: SetMode, rt: Runtime = Depends(get_runtime)) -> dict:
     _session_or_404(rt, sid)
-    rt.set_mode(sid, req.mode)
+    try:
+        rt.set_mode(sid, req.mode)
+    except RuntimeError_ as err:
+        raise HTTPException(400, str(err)) from err
     return {"mode": req.mode, "label": MODE_LABELS[req.mode]}
 
 
@@ -235,14 +246,16 @@ class ForgetRule(BaseModel):
 @router.get("/rules")
 async def list_rules(rt: Runtime = Depends(get_runtime)) -> list[dict]:
     """按项目列出用户记住的命令，不执行其中任何内容。"""
-    return [{"project": project, "commands": commands} for project, commands in sorted(rt.rules.all().items())]
+    groups = {**rt.rules.all(), **rt.computer_rules.all()}
+    return [{"project": project, "commands": commands} for project, commands in sorted(groups.items())]
 
 
 @router.delete("/rules")
 async def forget_rule(req: ForgetRule, rt: Runtime = Depends(get_runtime)) -> dict:
-    if req.command not in rt.rules.commands(req.project):  # type: ignore[arg-type]
+    rules = rt.computer_rules if req.project == "computer" else rt.rules
+    if req.command not in rules.commands(req.project):  # type: ignore[arg-type]
         raise HTTPException(404, "没有这条记住的命令，可能已经删掉了。")
-    rt.rules.forget(req.project, req.command)  # type: ignore[arg-type]
+    rules.forget(req.project, req.command)  # type: ignore[arg-type]
     return {"ok": True}
 
 

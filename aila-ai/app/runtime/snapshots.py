@@ -8,7 +8,7 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
-from .workspace import Workspace, WorkspaceError, digest_bytes
+from .workspace import ComputerWorkspace, Workspace, WorkspaceError, digest_bytes
 
 if TYPE_CHECKING:
     from .session import Event
@@ -111,6 +111,18 @@ class Snapshots:
     @staticmethod
     def _target(workspace: Workspace, rel: str) -> Path:
         name = _relative(rel)
+        if isinstance(workspace, ComputerWorkspace):
+            original = Path(rel)
+            if (not name.parts or ".." in name.parts or (os.name == "nt" and PureWindowsPath(rel).drive
+                                                       and not original.is_absolute())):
+                raise WorkspaceError("这不是可撤销的电脑文件路径。")
+            original = original if original.is_absolute() else workspace.root / original
+            if workspace.is_secret(original):
+                raise WorkspaceError("受保护位置不自动撤销。")
+            path = workspace.resolve(rel, for_write=True)
+            if path != original:
+                raise WorkspaceError("文件指向的位置变了。")
+            return path
         if (name.is_absolute() or (os.name == "nt" and PureWindowsPath(rel).drive)
                 or not name.parts or ".." in name.parts or ".git" in (os.path.normcase(p) for p in name.parts)):
             raise WorkspaceError("这不是可撤销的项目文件路径。")

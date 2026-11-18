@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionSummary } from '../../../shared/agent'
-import { deleteNotice, groupSessions } from './sessions'
+import { deleteNotice, groupSessions, sessionLabel } from './sessions'
 
 function s(id: string, updated: Date): AgentSessionSummary {
   return {
@@ -44,6 +44,12 @@ describe('groupSessions', () => {
 })
 
 describe('deleteNotice', () => {
+  it('电脑显示固定范围，旧项目保留目录名；删除说明不会暗示清理电脑文件', () => {
+    expect(sessionLabel({ cwd: 'C:/Users/test', kind: 'computer' })).toBe('电脑')
+    expect(sessionLabel({ cwd: 'C:/code/shop/' })).toBe('shop')
+    expect(sessionLabel({ cwd: 'C:\\code\\shop\\', kind: 'project' })).toBe('shop')
+    expect(deleteNotice({ title: '电脑任务', kind: 'computer' }).at(-1)).toBe('你电脑里的文件不会动。')
+  })
   it('在分支上做的会话说明临时目录会放弃', () => {
     expect(deleteNotice({ title: 't', branch: null }).join('')).not.toContain('分支')
     const lines = deleteNotice({ title: 't', branch: 'aila/fix-1' })

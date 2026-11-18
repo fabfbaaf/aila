@@ -56,12 +56,14 @@ def parse(text: str) -> tuple[str, str]:
     return ALIASES.get(name, name), arg.strip()
 
 
-def next_mode(mode: str, arg: str = "") -> str | None:
+def next_mode(mode: str, arg: str = "", *, computer: bool = False) -> str | None:
     """/mode 的参数 → 要换成的模式；不带参数就换到下一个；参数不对返回 None"""
     if not arg:
+        if computer:
+            return "read_only" if mode == "ask" else "ask"
         return MODE_CYCLE.get(mode, "ask")
     arg = {"只读": "read_only", "先问再改": "ask", "自动": "auto", "readonly": "read_only"}.get(arg, arg)
-    return arg if arg in MODES else None
+    return arg if arg in MODES and (not computer or arg != "auto") else None
 
 
 def changed_files(events: list[dict[str, Any]]) -> list[tuple[str, int]]:

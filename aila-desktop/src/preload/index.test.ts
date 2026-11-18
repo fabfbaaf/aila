@@ -14,9 +14,18 @@ describe('会话管理的预加载桥', () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi
     await api.agentCreate('C:/shop', 'ask', false, 0)
-    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', 'C:/shop', 'ask', false, 0)
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', 'C:/shop', 'ask', false, 0, 'project')
     await api.agentSetBudget('s1', null)
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:budget', 's1', null)
+  })
+
+  it('电脑创建和环境预览各走固定通道', async () => {
+    const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
+    const api = exposed?.[1] as AilaApi
+    await api.agentCreate(undefined, 'read_only', false, null, 'computer')
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', undefined, 'read_only', false, null, 'computer')
+    await api.agentComputerContext()
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:computer-context')
   })
 
   it('撤销只转发会话和已确认的轮次', async () => {

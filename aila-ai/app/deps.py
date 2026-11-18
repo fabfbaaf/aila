@@ -30,6 +30,7 @@ from .tools import Skill, SkillRegistry
 from .tools.browser import browse_skill, browser_skill
 from .tools.code import code_skill
 from .tools.coding import coding_skill
+from .tools.computer import computer_skill, computer_task_skill
 from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
@@ -87,7 +88,8 @@ def get_runtime() -> Runtime:
     config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
     # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
     runtime = Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
-                      fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config)
+                      fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
+                      computer_inventory=settings.computer_inventory)
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     return runtime
 
@@ -203,6 +205,7 @@ def get_registry() -> SkillRegistry:
     registry = SkillRegistry([
         web_skill(http_client, search), knowledge_skill(get_knowledge()), code_skill(get_code_projects()),
         browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()), reminder_skill(),
+        computer_skill(), computer_task_skill(lambda: get_runtime()),
     ])
     for skill in _mcp_skills:
         registry.add(skill)
@@ -227,6 +230,10 @@ def apply(updates: dict[str, str]) -> list[str]:
     settings = load_settings()
 
     reloaded = []
+    if "AILA_COMPUTER_INVENTORY" in updates:
+        if get_runtime.cache_info().currsize:
+            get_runtime().computer_inventory = settings.computer_inventory
+        reloaded.append("computer")
     if any(k in updates for k in LLM_KEYS):
         get_model.cache_clear()
         reloaded.append("model")

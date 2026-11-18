@@ -52,7 +52,7 @@ import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
-import { validBudget } from '../shared/budget'
+import { registerAgentCreateIpc } from './agentCreateIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
 import type { SocketLike } from './cloud/sync'
@@ -615,12 +615,7 @@ function registerIpc(): void {
     fromAgent(e) ? agentRelay.list(typeof q === 'string' ? q.slice(0, 200) : '') : notAllowed
   )
   ipcMain.handle('agent:get', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.get(sid) : notAllowed))
-  ipcMain.handle('agent:create', (e, cwd: unknown, mode: unknown, isolate: unknown, budget: unknown) => {
-    if (!fromAgent(e) || typeof cwd !== 'string' || cwd.length > 1000) return notAllowed
-    const amount = budget === undefined ? null : budget
-    if (!validBudget(amount)) return { ok: false, error: '花费上限要是有限的非负金额，null 表示不限。' }
-    return agentRelay.create(cwd, AGENT_MODES.includes(mode as AgentMode) ? (mode as AgentMode) : 'ask', isolate === true, amount)
-  })
+  registerAgentCreateIpc(ipcMain, agentRelay, fromAgent)
   registerAgentBudgetIpc(ipcMain, agentRelay, fromAgent, sidOk)
   ipcMain.handle('agent:merge', (e, sid: unknown, runTests: unknown) =>
     fromAgent(e) && sidOk(sid) ? agentRelay.merge(sid, runTests !== false) : notAllowed
