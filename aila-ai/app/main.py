@@ -31,15 +31,12 @@ __all__ = [
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # 语音和向量模型加载要几秒，放到后台，文字对话不用等
-    jobs = [asyncio.to_thread(get_embedder)]
-    if deps.settings.voice:
-        jobs += [asyncio.to_thread(get_ears), asyncio.to_thread(get_voice)]
-    preload = asyncio.gather(*jobs)
-    mcp = deps.start_mcp()  # 外部 MCP 服务也在后台连接
+    # 向量模型（记忆、资料库）加载要几秒，放到后台，文字对话不用等。
+    # 语音的两个模型占好几百 MB，不在这里加载：桌面端开着「说话」「唤醒」时调 /voice/warmup，或者第一次用到时再加载
+    preload = asyncio.gather(asyncio.to_thread(get_embedder))
+    deps.start_mcp()  # 外部 MCP 服务也在后台连接（设置页改了配置会重连，见 deps.restart_mcp）
     yield
-    if mcp:
-        await mcp.stop()
+    await deps.stop_mcp()
     if deps.get_runtime.cache_info().currsize:  # 正在做的编程任务：打断（日志会补完整，下次可以接着做）
         await deps.get_runtime().shutdown()
     if deps.get_browser.cache_info().currsize:  # 打开过浏览器的话关掉

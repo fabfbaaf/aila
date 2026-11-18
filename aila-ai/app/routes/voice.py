@@ -1,8 +1,13 @@
-"""语音：/tts（一句话转语音）、/voice（麦克风音频进来，唤醒和识别结果出去）"""
+"""语音：/tts（一句话转语音）、/voice（麦克风音频进来，唤醒和识别结果出去）、/voice/warmup（提前加载模型）
+
+语音模型占好几百 MB，服务启动时不加载：桌面端开着「说话」或「唤醒」时调 /voice/warmup 在后台先加载，
+没调的话第一次用到时加载（那一次会慢几秒）。
+"""
 
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -20,6 +25,21 @@ router = APIRouter()
 class TtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
+
+
+class Warmup(BaseModel):
+    tts: bool = False
+    ears: bool = False
+
+
+@router.post("/voice/warmup")
+async def warmup(req: Warmup) -> dict[str, str]:
+    """在后台加载要用的语音模型（已经加载好、正在加载的不重复），马上返回现在的状态"""
+    for wanted, kind, load in ((req.tts, "tts", get_voice), (req.ears, "ears", get_ears)):
+        if wanted and status[kind] == "idle":
+            status[kind] = "loading"  # 先占上，免得连着两次请求开两个线程
+            threading.Thread(target=load, daemon=True).start()
+    return {"tts": status["tts"], "ears": status["ears"]}
 
 
 @router.post("/tts")

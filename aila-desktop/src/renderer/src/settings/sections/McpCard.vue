@@ -97,7 +97,7 @@ onActivated(load)
     <p class="mcp-note">
       MCP 服务是别人写好的工具程序（数据库、浏览器、GitHub……），装上以后她做任务时能用。每个服务都是这台电脑上跑的一个程序，只加你信得过的。
       服务标了只读的工具她直接用；其他的每次都先问你，可以选「这个工具以后都不用问」。
-      配置和对话共用 aila-ai/mcp.json：这里加的服务，对话里（右键菜单的技能包）要重启 AI 服务后才看得到。
+      配置和对话共用 aila-ai/mcp.json：这里加的服务，对话里（右键菜单的技能包）也会自动连上。
     </p>
 
     <p v-if="error" class="msg error" role="alert">{{ error }}</p>

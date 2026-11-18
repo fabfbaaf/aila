@@ -307,3 +307,30 @@ async def test_mock_model_can_demo_a_plan(tmp_path: Path) -> None:
     events = [e async for e in rt.drive_plan(sid)]
     assert events[-1]["type"] == "plan_end"
     await rt.shutdown()
+
+
+@pytest.mark.anyio
+async def test_waiting_marks_for_inbox(tmp_path: Path) -> None:
+    """「等你」收件箱：等你同意、等你看计划、计划停了，各标一下；做完了就不标"""
+    root = project(tmp_path)
+    model = Scripted([
+        [call("propose_plan", **TWO)], ["交了"],
+        [call("stage_blocked", reason="要你定折扣")], ["卡住了"],
+        [call("write_file", path="x.py", content="1")], ["写好了"],
+    ])
+    rt = runtime(tmp_path, model)
+    sid = rt.create(str(root), "ask").id
+    session = rt.agent(sid).session
+    assert session.waiting() is None
+    await propose(rt, sid)
+    assert session.summary()["waiting"] == "plan"
+    rt.decide_plan(sid, True)
+    [e async for e in rt.drive_plan(sid)]
+    assert session.waiting() == "paused"
+    # 有个改文件的操作在等你同意
+    async for e in rt.run(sid, "先随便写个文件"):
+        if e["type"] == "confirm":
+            assert session.waiting() == "confirm"
+            rt.confirms.answer(e["id"], False)
+    assert session.waiting() == "paused"  # 你回答了，回到计划停着的状态
+    await rt.shutdown()

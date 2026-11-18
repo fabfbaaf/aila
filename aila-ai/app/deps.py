@@ -45,7 +45,8 @@ ENV_FILE = CONFIG_ENV_FILE
 http_client = httpx.AsyncClient()
 
 # /health 用：off / loading / ready / 出错原因
-status: dict[str, str] = {"ears": "off", "tts": "off", "embed": "off"}
+# idle：开着但还没用到（语音模型用到时才加载）；off：关掉了（AILA_VOICE=off）
+status: dict[str, str] = {"ears": "idle" if settings.voice else "off", "tts": "idle" if settings.voice else "off", "embed": "off"}
 # 正在等用户回答的工具确认（所有对话共用）
 confirmations = Confirmations()
 
@@ -85,8 +86,10 @@ def get_coder_fast_model() -> CoderModel:
 def get_runtime() -> Runtime:
     config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
     # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
-    return Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
-                   fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config)
+    runtime = Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
+                      fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config)
+    runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
+    return runtime
 
 
 def _load(kind: str, build: Any) -> Any:
@@ -277,6 +280,25 @@ def start_mcp(on_skill: Any = None) -> McpRunner | None:
 
     mcp_runner = McpRunner(McpHub(configs, on_skill or add))
     return mcp_runner
+
+
+async def restart_mcp() -> None:
+    """mcp.json 改了（设置页加、改、停用、删了服务）：对话这边断开重连，不用重启 AI 服务"""
+    global mcp_runner
+    old, mcp_runner = mcp_runner, None
+    if old is not None:
+        await old.stop()
+    registry = get_registry()
+    for skill in _mcp_skills:
+        registry.remove(skill.id)
+    _mcp_skills.clear()
+    start_mcp()
+
+
+async def stop_mcp() -> None:
+    """服务关的时候：停掉对话这边现在连着的 MCP 服务（可能已经重连过）"""
+    if mcp_runner is not None:
+        await mcp_runner.stop()
 
 
 def mcp_status() -> list[dict[str, Any]]:

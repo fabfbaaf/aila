@@ -24,6 +24,8 @@ const KnowledgeSection = defineAsyncComponent(() => import('../settings/sections
 const MemorySection = defineAsyncComponent(() => import('../settings/sections/MemorySection.vue'))
 
 const route = ref<ShellRoute>(parseHash(location.hash))
+/** 「等你」收件箱：有几个任务在等你（任务页报上来） */
+const waiting = ref(0)
 const offs: (() => void)[] = []
 
 const page = computed<{ component: Component; props: Record<string, unknown> }>(() => {
@@ -89,6 +91,7 @@ onBeforeUnmount(() => {
         @click="go(p.id === 'projects' ? { page: 'projects', tab: route.tab ?? 'list' } : { page: p.id })"
       >
         <Icon :name="p.id" :size="20" />
+        <b v-if="p.id === 'tasks' && waiting" class="badge" :title="`${waiting} 个任务在等你`">{{ waiting }}</b>
         <span>{{ p.name }}</span>
       </button>
     </nav>
@@ -99,6 +102,7 @@ onBeforeUnmount(() => {
           :key="route.page"
           v-bind="page.props"
           @go="go"
+          @waiting="(n: number) => (waiting = n)"
         />
       </KeepAlive>
     </main>
@@ -198,6 +202,23 @@ onBeforeUnmount(() => {
 .ic:focus-visible {
   outline: none;
   box-shadow: var(--ui-ring);
+}
+
+.badge {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ui-warn);
+  color: #1d1300;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
 
 .ic.end {

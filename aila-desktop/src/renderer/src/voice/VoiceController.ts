@@ -53,6 +53,8 @@ export class VoiceController {
   muted = false
   /** 听到一句话、交给对话之前：返回 true 表示外面接手了（比如提到剪贴板，要先把剪贴板的内容带上） */
   onHeard: (text: string) => boolean = () => false
+  /** 提前加载语音模型：AI 服务启动时不加载，开着「说话」「唤醒」时先叫它在后台加载 */
+  warm: (parts: { tts?: boolean; ears?: boolean }) => void = () => {}
 
   private prefs: Prefs
   private session: 'idle' | 'awaiting' | 'conversing' = 'idle'
@@ -87,6 +89,7 @@ export class VoiceController {
 
   /** 启动时：上次开着唤醒就继续听 */
   async init(): Promise<void> {
+    if (this.prefs.speak || this.prefs.wake) this.warm({ tts: this.prefs.speak, ears: this.prefs.wake })
     if (this.prefs.wake && !(await this.openMic())) this.setPrefs({ wake: false })
     this.toIdle()
   }
@@ -98,6 +101,7 @@ export class VoiceController {
       this.conversation.announce(lines.wakeOff)
       return
     }
+    this.warm({ ears: true })
     if (!(await this.openMic())) return
     this.setPrefs({ wake: true })
     this.toIdle()
@@ -106,13 +110,17 @@ export class VoiceController {
 
   toggleSpeak(): void {
     this.setPrefs({ speak: !this.prefs.speak })
+    if (this.prefs.speak) this.warm({ tts: true })
     this.onSettingChanged(SPEAK_SETTING, this.prefs.speak)
     this.conversation.announce(this.prefs.speak ? lines.speakOn : lines.speakOff)
   }
 
   /** 别的设备改了设置，同步过来（安静地生效，不说话） */
   applySetting(key: string, value: unknown, deleted: boolean): void {
-    if (key === SPEAK_SETTING && !deleted && typeof value === 'boolean') this.setPrefs({ speak: value })
+    if (key === SPEAK_SETTING && !deleted && typeof value === 'boolean') {
+      this.setPrefs({ speak: value })
+      if (value) this.warm({ tts: true })
+    }
   }
 
   /** 不用唤醒词，直接开始听（快捷键、菜单「听我说」） */

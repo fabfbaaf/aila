@@ -37,6 +37,8 @@ class FakeTransport implements ChatTransport {
     return true
   }
 
+  warmup(): void {}
+
   async synthesize(): Promise<ArrayBuffer | null> {
     return null
   }

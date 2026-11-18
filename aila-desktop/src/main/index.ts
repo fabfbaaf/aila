@@ -435,6 +435,15 @@ async function synthesize(text: string): Promise<ArrayBuffer | null> {
   return res.arrayBuffer()
 }
 
+/** 提前加载语音模型（开着「说话」「唤醒」时）：AI 服务启动时不加载这两个大模型 */
+async function voiceWarmup(parts: { tts: boolean; ears: boolean }): Promise<void> {
+  await fetch(`${AI_URL}/voice/warmup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parts)
+  }).catch(() => undefined) // 服务还没起来也没关系：第一次用到时会自己加载
+}
+
 // ---------- 对话：转发给本地 AI 服务 ----------
 // 由主进程发请求，渲染层不用放开 CSP 和跨域，打包后也一样能用
 
@@ -508,6 +517,10 @@ function registerIpc(): void {
     return answerConfirm(AI_URL, id, approved)
   })
   ipcMain.handle('tts:synthesize', (_e, text: string) => synthesize(text))
+  ipcMain.handle('voice:warmup', (_e, parts: unknown) => {
+    const p = (parts ?? {}) as { tts?: unknown; ears?: unknown }
+    return voiceWarmup({ tts: p.tts === true, ears: p.ears === true })
+  })
 
   ipcMain.handle('history:load', () => account?.history.visible() ?? [])
   ipcMain.on('history:append', (_e, m: unknown) => {

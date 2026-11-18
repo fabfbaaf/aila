@@ -181,6 +181,8 @@ data: {"type": "done"}
 
 ### 语音
 
+**用到时再加载**：两个语音模型（听、说）一共好几百 MB，服务启动时不加载，`/health` 里显示 `idle`。桌面端开着「说话」或「唤醒」时调 `POST /voice/warmup {"tts": true, "ears": true}` 在后台先加载（马上返回现在的状态，正在加载的不重复）；没调的话第一次用到时加载，那一次会慢几秒。向量模型（记忆、资料库）照旧启动时在后台加载。
+
 目标是从说完到她开口不超过 1.5 秒。链路：唤醒词 → 断句 → 识别 →（大模型）→ 按句合成。全部用 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 跑在 CPU 上，不需要显卡。
 
 | 环节 | 模型 | 实测（Ryzen 7 H 255） |
@@ -348,7 +350,7 @@ data: {"type": "done"}
 - **权限**：读不用问；读 `.env`、私钥这类文件要问（内容会发给大模型，`cat .env` 这种命令也一样）。三种模式：只读 / 先问再改 / 工作区内自动。明显只读的命令（`git status`、`ls`，不带 `; & | >` 这些）直接跑；危险命令（删除、强推、reset --hard、发布、下载即执行、改系统设置、结束进程）任何模式都要问，也不能「以后都允许」；其他命令可以按项目记住（一字不差，存在 `data/agent_rules.json`）。确认时给你看的 diff、命令都由代码生成。
 - **循环**：一步 = 一次模型请求 + 它要的工具；一轮最多 `AILA_CODER_MAX_STEPS` 步。你拒绝（或者半小时没回答）一个操作，这一轮立刻结束，同一步里后面的调用也不执行，等你说怎么办。钩子：`turn_start`、`pre_step`、`post_step`、`pre_tool`、`post_tool`、`turn_end`（以后她的动作、星图标出改过的文件都挂在这里）。
 - **打断和出错**：一轮在后台任务里跑；打断时正在跑的前台命令连进程树一起停，常驻的后台命令继续跑；没执行的工具调用记成「被打断」，说了一半的话也记下来——日志始终能推出合法的消息，接着说不会被模型服务拒绝。
-- **外部工具（MCP）**（`runtime/mcp.py`）：接 MCP 生态里现成的工具服务（数据库、浏览器、GitHub……）。自己写的最小 stdio 客户端（JSON-RPC，一行一条），不加依赖：初始化、分页列工具、调工具、回应服务端的 ping；远程（url）服务暂不支持。配置和对话那边（`app/tools/mcp.py`，每个服务是一个技能包）共用 `aila-ai/mcp.json`：`servers`、`mcpServers`（Claude Desktop）两种写法都认，字段有 `command`、`args`、`env`、`disabled`、`readOnly`（整个服务只读）、`name`（显示名），这边另外用 `alwaysAllow`、`timeout`；写回时保留原来的写法和不认识的字段。两边各自连服务，对话那边要重启 AI 服务才看到新加的；远程（url）服务目前只有对话里能用，只有你能加服务（设置页 → 编程，或者手改文件），她没有加服务的工具。服务子进程的环境变量去掉艾拉自己的密钥，再加上配置里给它的；`env` 的值不回传给界面。工具名是 `mcp__服务__工具`，排在工具列表最后，**只在一轮开始前对齐**（变了才换，一轮里不变）。权限：服务标了只读（`readOnlyHint`）的不用问；其他的只读模式不让用，先问再改和工作区内自动都要问（在项目以外做事），给你看的是代码拼的服务名、工具名和参数，可以选「这个工具以后都不用问」（记在 `alwaysAllow`）。结果只当数据，最多 2 万字；默认 120 秒超时。接口：`GET /agent/mcp`、`POST /agent/mcp/preview|import {json}`、`POST /agent/mcp/{name}/restart`、`PUT /agent/mcp/{name}/disabled`、`DELETE /agent/mcp/{name}`、`DELETE /agent/mcp/{name}/allow {tool}`；终端 `/mcp`、`/mcp restart 名字`
+- **外部工具（MCP）**（`runtime/mcp.py`）：接 MCP 生态里现成的工具服务（数据库、浏览器、GitHub……）。自己写的最小 stdio 客户端（JSON-RPC，一行一条），不加依赖：初始化、分页列工具、调工具、回应服务端的 ping；远程（url）服务暂不支持。配置和对话那边（`app/tools/mcp.py`，每个服务是一个技能包）共用 `aila-ai/mcp.json`：`servers`、`mcpServers`（Claude Desktop）两种写法都认，字段有 `command`、`args`、`env`、`disabled`、`readOnly`（整个服务只读）、`name`（显示名），这边另外用 `alwaysAllow`、`timeout`；写回时保留原来的写法和不认识的字段。两边各自连服务；设置页加、改、停用、删了服务以后，对话那边自动断开重连（`deps.restart_mcp`），不用重启 AI 服务；远程（url）服务目前只有对话里能用，只有你能加服务（设置页 → 编程，或者手改文件），她没有加服务的工具。服务子进程的环境变量去掉艾拉自己的密钥，再加上配置里给它的；`env` 的值不回传给界面。工具名是 `mcp__服务__工具`，排在工具列表最后，**只在一轮开始前对齐**（变了才换，一轮里不变）。权限：服务标了只读（`readOnlyHint`）的不用问；其他的只读模式不让用，先问再改和工作区内自动都要问（在项目以外做事），给你看的是代码拼的服务名、工具名和参数，可以选「这个工具以后都不用问」（记在 `alwaysAllow`）。结果只当数据，最多 2 万字；默认 120 秒超时。接口：`GET /agent/mcp`、`POST /agent/mcp/preview|import {json}`、`POST /agent/mcp/{name}/restart`、`PUT /agent/mcp/{name}/disabled`、`DELETE /agent/mcp/{name}`、`DELETE /agent/mcp/{name}/allow {tool}`；终端 `/mcp`、`/mcp restart 名字`
 - **项目记忆**（`runtime/memory.py`）：她弄清了以后在这个项目里还用得上的事（测试和构建命令、代码约定、不能碰的地方、踩过的坑），用 `remember` 工具记一句；你也可以在终端 `/memory add`、任务页右边「项目记忆」里加。存在 `data/project_memory.json`，按项目路径分开（大小写、斜杠不同也算同一个项目；在新分支上做时记到原来的项目），不往你的仓库写文件。新会话开头的环境说明里带上 `<项目记忆>` 一段（总长有上限，放不下时丢最早的）；已经开着的会话开头不变，保住前缀缓存。权限：只读模式不让记，先问再改要问你（给你看的是要存下的原话），工作区内自动直接记——记下的话会进以后每个会话，所以你随时看得到、删得掉。一条最多 300 字，一个项目最多 40 条。接口：`GET /agent/memory?cwd=`、`POST /agent/memory {cwd, text}`、`DELETE /agent/memory {cwd, id}`
 - **长任务和整体规划**（`runtime/planning.py`）：终端 `/plan 目标`，或任务页输入框下的「出方案」、新任务里勾「先出方案再动手」。
   - 出方案那一轮只读（复用 /review 的只读把关），请求由代码生成（`PLAN_PROMPT`）；她用 `propose_plan` 交 2～8 个阶段，每阶段写目标和怎么验收，交完就停，等你决定

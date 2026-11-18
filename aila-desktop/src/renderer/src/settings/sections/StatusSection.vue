@@ -52,6 +52,7 @@ function describe(state: string): { text: string; cls: string } {
   if (state === 'ready') return { text: '正常', cls: 'good' }
   if (state === 'loading') return { text: '加载中', cls: '' }
   if (state === 'off') return { text: '没启用', cls: '' }
+  if (state === 'idle') return { text: '用到时再加载', cls: '' }
   return { text: '出错了', cls: 'warn' }
 }
 

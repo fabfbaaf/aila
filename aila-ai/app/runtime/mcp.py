@@ -25,7 +25,7 @@ import re
 import shutil
 import subprocess
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -401,6 +401,8 @@ class McpManager:
     def __init__(self, path: Path, client_factory: Callable[..., StdioClient] = StdioClient) -> None:
         self.path = path
         self.client_factory = client_factory
+        # 配置改了以后叫一声（对话那边用它重连，不用重启 AI 服务）
+        self.on_change: Callable[[], Awaitable[None]] | None = None
         self.servers: dict[str, ServerState] = {}
         self._started = False
         self._lock = asyncio.Lock()
@@ -534,6 +536,7 @@ class McpManager:
         configs[config.name] = config
         self._write(configs)
         await self.restart(config.name)
+        await self._changed()
 
     async def remove(self, name: str) -> None:
         configs = self.configs()
@@ -543,6 +546,7 @@ class McpManager:
         self._write(configs)
         async with self._lock:
             await self._stop(name)
+        await self._changed()
 
     async def set_disabled(self, name: str, disabled: bool) -> None:
         configs = self.configs()
@@ -551,6 +555,15 @@ class McpManager:
         configs[name].disabled = disabled
         self._write(configs)
         await self.restart(name)
+        await self._changed()
+
+    async def _changed(self) -> None:
+        if self.on_change is None:
+            return
+        try:
+            await self.on_change()
+        except Exception:  # 对话那边重连失败不影响这边已经保存的配置
+            log.exception("通知 MCP 配置改了的时候出错")
 
     # ----- 权限：「这个工具以后都不用问」 -----
 
