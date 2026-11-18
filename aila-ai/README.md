@@ -106,7 +106,7 @@ data: {"type": "done"}
 
 `GET /code/fixes`：修代码的统计（修过几次、测试通过几次、改进用户代码几次）。
 
-代码星图用的：`GET /code/projects/{id}/graph`（文件是星球、文件之间的调用汇总成光线、没提交的改动标出来）、`GET /code/projects/{id}/outline?file=`（文件里的函数和类）、`GET /code/projects/{id}/chunk?file=&line=`（包含那一行的函数，带现在的代码）、`POST /code/locate {"text"}`（报错落在哪个项目的哪个函数、往上的调用链；不在任何项目里返回 null）。
+代码星图用的：`GET /code/projects/{id}/graph`（文件是星球，带所在目录和是不是测试文件；文件之间的调用汇总成光线；没提交的改动标出来；另外扫出跨进程的光线：谁请求了哪个 HTTP 接口连到提供它的文件——FastAPI、Spring、Express 的路由，谁发了哪个 IPC 消息连到处理它的文件，见 `app/code/endpoints.py`）、`GET /code/projects/{id}/outline?file=`（文件里的函数和类）、`GET /code/projects/{id}/chunk?file=&line=`（包含那一行的函数，带现在的代码）、`POST /code/locate {"text"}`（报错落在哪个项目的哪个函数、往上的调用链；不在任何项目里返回 null）。
 
 `/code/projects`：代码库。`GET` 列出登记的项目和索引状态；`POST {"path": "..."}` 登记并在后台建索引；`DELETE /{id}` 不再登记（代码不动）；`POST /{id}/refresh` 增量更新；`POST /{id}/search {"query"}`、`POST /{id}/locate {"text"}` 调试用。
 

@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { FIX_ACTION, FIX_SKILL, pendingFixOf, type CodeGraph, type GraphNode } from '../../../shared/workbench'
 import { diffLines } from '../components/bubble'
-import { PALETTE, groupAnchors, groupColors, highlightFrom, labelled, linkKey, nodeRadius, searchNodes, starOf } from './layout'
+import {
+  PALETTE,
+  buildModules,
+  crossLinks,
+  groupAnchors,
+  groupColors,
+  highlightFrom,
+  labelled,
+  linkKey,
+  moduleAnchors,
+  moduleLabels,
+  nodeRadius,
+  placeLabels,
+  searchNodes,
+  starOf,
+  textWidth,
+  withoutTests,
+  zoomLevel
+} from './layout'
 
 const node = (id: string, group: string, lines = 100): GraphNode => ({
   id,
@@ -41,11 +59,95 @@ describe('星图布局', () => {
     expect(nodeRadius(800)).toBeGreaterThan(nodeRadius(100))
   })
 
-  it('每个子项目一个星系中心，彼此分开', () => {
+  it('每个子项目一个星系中心，彼此分开；从正面看也不会前后挡住', () => {
     const anchors = groupAnchors(['ai', 'desktop', 'server'])
-    const [a, b] = [anchors.get('ai')!, anchors.get('desktop')!]
-    expect(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])).toBeGreaterThan(50)
+    const list = [...anchors.values()]
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const [a, b] = [list[i], list[j]]
+        expect(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])).toBeGreaterThan(50)
+        expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeGreaterThan(80) // 投到屏幕上（镜头在正前方）也分得开
+      }
+    }
     expect(groupAnchors(['only']).get('only')).toEqual([0, 0, 0])
+  })
+
+  it('模块的名字：去掉子项目、src、Java 的包前缀', () => {
+    const labels = moduleLabels([
+      { id: 'aila-desktop/src/renderer/src/agent', group: 'aila-desktop' },
+      { id: 'aila-desktop/src/main', group: 'aila-desktop' },
+      { id: 'aila-desktop', group: 'aila-desktop' },
+      { id: 'srv/src/main/java/com/x/app', group: 'srv' },
+      { id: 'srv/src/main/java/com/x/app/auth', group: 'srv' },
+      { id: 'srv/src/test/java/com/x/app', group: 'srv' }
+    ])
+    expect(labels.get('aila-desktop/src/renderer/src/agent')).toBe('renderer/agent')
+    expect(labels.get('aila-desktop/src/main')).toBe('main')
+    expect(labels.get('aila-desktop')).toBe('aila-desktop') // 子项目根目录下的文件
+    expect(labels.get('srv/src/main/java/com/x/app/auth')).toBe('auth')
+    expect(labels.get('srv/src/main/java/com/x/app')).toBe('app')
+    expect(labels.get('srv/src/test/java/com/x/app')).toBe('test/app')
+  })
+
+  it('按目录聚成模块；模块之间的光线按种类加起来，模块里面的不算', () => {
+    const graph: CodeGraph = {
+      nodes: [...GRAPH.nodes, { ...node('ai/tests/test_agent.py', 'ai'), test: true }],
+      links: [
+        ...GRAPH.links,
+        { source: 'desktop/src/App.vue', target: 'ai/app/routes/chat.py', weight: 2, kind: 'http', via: ['/chat'] },
+        { source: 'ai/tests/test_agent.py', target: 'ai/app/agent.py', weight: 1 }
+      ]
+    }
+    const { modules, links } = buildModules(graph)
+    const byId = new Map(modules.map((m) => [m.id, m]))
+    expect(byId.get('ai/app')).toMatchObject({ files: ['ai/app/agent.py'], lines: 400, test: false })
+    expect(byId.get('ai/tests')?.test).toBe(true)
+    expect(links).toContainEqual({ source: 'desktop/src', target: 'ai/app/routes', kind: 'http', weight: 2 })
+    expect(links).toContainEqual({ source: 'desktop/src', target: 'ai/app', kind: 'call', weight: 1 })
+    expect(links.every((l) => l.source !== l.target)).toBe(true)
+    // 模块按大小撒在星系周围：最大的在中心，彼此不重合
+    const anchors = moduleAnchors(modules, groupAnchors(['ai', 'desktop', 'server']))
+    const ai = [...anchors.entries()].filter(([id]) => id.startsWith('ai/')).map(([, p]) => p.join(','))
+    expect(new Set(ai).size).toBe(ai.length)
+    expect(anchors.size).toBe(modules.length)
+  })
+
+  it('跨进程的光线和函数调用分开记，选中文件时列出来', () => {
+    const http = { source: 'desktop/src/App.vue', target: 'ai/app/routes/chat.py', weight: 1, kind: 'http' as const }
+    expect(linkKey(http)).not.toBe(linkKey({ ...http, kind: 'call' }))
+    expect(linkKey({ source: 'a', target: 'b' })).toBe(linkKey({ source: 'a', target: 'b', kind: 'call' }))
+    const g = { ...GRAPH, links: [...GRAPH.links, http] }
+    expect(crossLinks(g, 'desktop/src/App.vue')).toEqual({ out: [http], in: [] })
+    expect(crossLinks(g, 'ai/app/routes/chat.py').in).toEqual([http])
+  })
+
+  it('隐藏测试文件：连着它们的光线一起去掉', () => {
+    const g: CodeGraph = {
+      nodes: [...GRAPH.nodes, { ...node('ai/tests/test_x.py', 'ai'), test: true }],
+      links: [...GRAPH.links, { source: 'ai/tests/test_x.py', target: 'ai/app/agent.py', weight: 1 }]
+    }
+    const shown = withoutTests(g)
+    expect(shown.nodes.map((n) => n.id)).not.toContain('ai/tests/test_x.py')
+    expect(shown.links).toEqual(GRAPH.links)
+  })
+
+  it('拉远看模块、拉近看文件：看全部时是模块，拉近一半是文件，中间平滑过渡', () => {
+    expect(zoomLevel(300, 300)).toBe(1)
+    expect(zoomLevel(120, 300)).toBe(0)
+    const mid = zoomLevel(190, 300)
+    expect(mid).toBeGreaterThan(0)
+    expect(mid).toBeLessThan(1)
+    expect(zoomLevel(200, 300)).toBeGreaterThan(mid)
+  })
+
+  it('名字防重叠：优先级高的先摆，挡住的不显示', () => {
+    const shown = placeLabels([
+      { id: 'small', x: 100, y: 100, w: 60, h: 18, priority: 1 },
+      { id: 'big', x: 110, y: 104, w: 80, h: 18, priority: 9 },
+      { id: 'far', x: 400, y: 100, w: 60, h: 18, priority: 0 }
+    ])
+    expect(shown).toEqual(new Set(['big', 'far']))
+    expect(textWidth('ab', 10)).toBeLessThan(textWidth('模块', 10))
   })
 
   it('报错：出错的文件标红，调用链上的标橙，只亮它们之间的光线', () => {
