@@ -1,0 +1,8 @@
+{
+  "label": "害羞（被夸的时候）",
+  "phases": [
+    { "dur": 0.4, "expr": { "relaxed": 0.5, "happy": 0.2 }, "pose": { "headPitch": 0.25, "headYaw": 0.3, "headRoll": 0.12 } },
+    { "dur": 1.0, "expr": { "relaxed": 0.6, "happy": 0.25, "blink": 0.3 }, "pose": { "headPitch": 0.3, "headYaw": 0.35, "headRoll": 0.15 } },
+    { "dur": 0.5, "expr": { "relaxed": 0.3 }, "pose": { "headPitch": 0.05, "headYaw": 0 } }
+  ]
+}

@@ -5,7 +5,7 @@
  * 密钥类设置只显示填没填，不回显。
  */
 import { onActivated, onMounted, ref } from 'vue'
-import { summarize, type ExtensionInfo, type ExtensionPlan, type ExtensionUpdate } from '../../../../shared/extensions'
+import { summarize, type CatalogListing, type ExtensionInfo, type ExtensionPlan, type ExtensionUpdate } from '../../../../shared/extensions'
 import { MCP_STATUS_LABELS } from '../../../../shared/mcp'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
@@ -106,6 +106,70 @@ async function remove(e: ExtensionInfo): Promise<void> {
   apply(await run(`remove:${e.id}`, () => bridge!.extRemove(e.id), `卸载了「${e.name}」，它的工具服务也停了。`))
 }
 
+// ----- 第二、三期：台词、形象、页面 -----
+
+const LINE_NAMES: Record<string, string> = {
+  chatOpen: '打开对话', pokeHead: '被戳头', pokeHeadMany: '一直被戳', pokeBody: '被戳身上', dragStart: '被拖起来',
+  dragEnd: '被放下', wake: '睡醒', sleepy: '犯困', wakeHere: '被叫醒', forgetOne: '忘掉一件事', agentStart: '开始做任务',
+  agentTaskStarted: '任务开始了', testsRecovered: '测试修好了', testsStruggling: '测试一直挂', workMaking: '在写作品', lateNight: '深夜'
+}
+
+function linesText(lines: Record<string, number>, replace: boolean): string {
+  const parts = Object.entries(lines).map(([k, n]) => `${LINE_NAMES[k] ?? k} ${n} 句`)
+  return (replace ? '整组换掉：' : '加进去：') + parts.join('、')
+}
+
+function mb(bytes: number): string {
+  return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)}MB` : `${Math.max(1, Math.round(bytes / 1e3))}KB`
+}
+
+function isEmpty(p: ExtensionPlan): boolean {
+  return !p.commands.length && !p.skills.length && !p.servers.length && !p.motions.length && !Object.keys(p.lines).length
+    && !p.avatars.length && !p.pages.length
+}
+
+async function useAvatar(e: ExtensionInfo, name: string): Promise<void> {
+  await run(`avatar:${e.id}`, () => bridge!.extUseAvatar(e.id, name), `换上了「${name}」。想换回来就去「形象」点「换回艾拉自己的形象」。`)
+}
+
+async function openPage(e: ExtensionInfo, name: string, title: string): Promise<void> {
+  await run('', () => bridge!.extOpenPage(e.id, name, title))
+}
+
+// ----- 第三期：目录 -----
+
+const catalogs = ref<CatalogListing['catalogs']>([])
+const sourcesText = ref('')
+const catalogLoading = ref(false)
+
+async function loadCatalog(): Promise<void> {
+  if (!bridge) return
+  catalogLoading.value = true
+  const data = await run('', () => bridge!.extCatalog())
+  catalogLoading.value = false
+  if (data) {
+    catalogs.value = data.catalogs
+    sourcesText.value = data.sources.join('\n')
+  }
+}
+
+async function saveSources(): Promise<void> {
+  const urls = sourcesText.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  catalogLoading.value = true
+  const data = await run('sources', () => bridge!.extCatalogSources(urls), urls.length ? '目录地址保存了。' : '目录地址都清掉了。')
+  catalogLoading.value = false
+  if (data) catalogs.value = data.catalogs
+}
+
+async function fromCatalog(source: string, id: string): Promise<void> {
+  if (staged.value) await discard()
+  const data = await run(`catalog:${id}`, () => bridge!.extCatalogInspect(source, id))
+  if (data) {
+    staged.value = data
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
 onMounted(load)
 onActivated(load)
 </script>
@@ -133,7 +197,7 @@ onActivated(load)
       </div>
       <p class="hint">
         扩展包是一个带 <code>aila-extension.json</code> 的文件夹（或者把它压成 zip）。仓库里的
-        <code>examples/extensions</code> 有两个例子；怎么写见 <code>docs/extensions.md</code>。
+        <code>examples/extensions</code> 有三个例子；怎么写见 <code>docs/extensions.md</code>。
       </p>
 
       <div v-if="staged" class="plan" role="region" aria-label="装之前的清单">
@@ -163,7 +227,23 @@ onActivated(load)
             <span class="k">要填</span>
             <span>{{ s.label }}<template v-if="s.secret">（密钥）</template><template v-if="s.required">，必填</template></span>
           </li>
-          <li v-if="!staged.plan.commands.length && !staged.plan.skills.length && !staged.plan.servers.length">
+          <li v-if="staged.plan.motions.length">
+            <span class="k">动作</span>
+            <span><span v-for="m in staged.plan.motions" :key="m.name" class="chip">[{{ m.name }}] {{ m.label }}</span></span>
+          </li>
+          <li v-if="Object.keys(staged.plan.lines).length">
+            <span class="k">台词</span>
+            <span>{{ linesText(staged.plan.lines, staged.plan.linesReplace) }}</span>
+          </li>
+          <li v-if="staged.plan.avatars.length">
+            <span class="k">形象</span>
+            <span>{{ staged.plan.avatars.map((a) => `${a.name}（${mb(a.size)}）`).join('、') }}</span>
+          </li>
+          <li v-if="staged.plan.pages.length">
+            <span class="k">页面</span>
+            <span>{{ staged.plan.pages.map((p) => p.title).join('、') }}</span>
+          </li>
+          <li v-if="isEmpty(staged.plan)">
             <span class="k"></span><span class="muted">里面什么都没有</span>
           </li>
         </ul>
@@ -211,6 +291,33 @@ onActivated(load)
             </div>
             <div v-for="s in e.skills" :key="s.name" class="block">
               <span class="k">本事</span><span><b>{{ s.name }}</b>：{{ s.description }}</span>
+            </div>
+            <div v-if="e.motions.length" class="block">
+              <span class="k">动作</span>
+              <span>
+                <span v-for="m in e.motions" :key="m.name" class="chip">
+                  [{{ m.name }}] {{ m.label }}
+                  <button class="link" :disabled="!e.enabled" title="让桌面上的她做一遍" @click="bridge!.extPlay(m.name)">试一下</button>
+                </span>
+                <span class="hint">对话里她也会用（写成 [{{ e.motions[0].name }}] 这样的标签）</span>
+              </span>
+            </div>
+            <div v-if="Object.keys(e.lines).length" class="block">
+              <span class="k">台词</span><span>{{ linesText(e.lines, e.linesReplace) }}</span>
+            </div>
+            <div v-for="a in e.avatars" :key="a.name" class="block">
+              <span class="k">形象</span>
+              <span>
+                {{ a.name }}（{{ mb(a.size) }}）
+                <button class="link" :disabled="!e.enabled || Boolean(busy)" @click="useAvatar(e, a.name)">换上</button>
+              </span>
+            </div>
+            <div v-for="p in e.pages" :key="p.name" class="block">
+              <span class="k">页面</span>
+              <span>
+                {{ p.title }}
+                <button class="link" :disabled="!e.enabled" @click="openPage(e, p.name, p.title)">打开</button>
+              </span>
             </div>
 
             <div v-for="s in e.servers" :key="s.name" class="server">
@@ -261,6 +368,44 @@ onActivated(load)
       </ul>
       <p v-if="folder" class="hint where">装在 <code>{{ folder }}</code></p>
     </div>
+
+    <div class="card">
+      <div class="heading">
+        <h3>目录</h3>
+        <button class="btn" :disabled="catalogLoading || Boolean(busy)" @click="loadCatalog">
+          {{ catalogLoading ? '正在读取…' : catalogs.length ? '刷新' : '看看目录' }}
+        </button>
+      </div>
+      <p class="hint">
+        目录是一份 <code>catalog.json</code>，列着能装的扩展。地址可以是 https 网址，也可以是这台电脑上的完整路径，一行一个。
+        从目录装和导入一样：下载、核对 sha256、先给你看清单。现在还没有官方目录；仓库里的
+        <code>examples/extensions/make_catalog.py</code> 能生成一份本机目录试试。
+      </p>
+      <textarea v-model="sourcesText" rows="3" class="sources" placeholder="https://example.com/aila/catalog.json&#10;D:\aila-extensions\catalog.json"></textarea>
+      <div class="actions">
+        <button class="btn" :disabled="Boolean(busy)" @click="saveSources">{{ busy === 'sources' ? '正在保存…' : '保存目录地址' }}</button>
+      </div>
+      <div v-for="c in catalogs" :key="c.source" class="catalog">
+        <div class="catalog-head"><b>{{ c.name }}</b><span v-if="c.name !== c.source" class="ver">{{ c.source }}</span></div>
+        <p v-if="c.error" class="msg error">{{ c.error }}</p>
+        <p v-else-if="!c.extensions.length" class="empty">这个目录里没有扩展。</p>
+        <ul class="entries">
+          <li v-for="x in c.extensions" :key="x.id">
+            <div class="entry-head">
+              <b>{{ x.name }}</b>
+              <span class="ver">{{ x.id }} · {{ x.version }}<template v-if="x.size"> · {{ mb(x.size) }}</template></span>
+              <span v-if="x.installed && !x.upgrade" class="tag good">装了</span>
+              <span v-else-if="x.upgrade" class="tag warn">有新版（装的是 {{ x.installed }}）</span>
+              <span class="spacer"></span>
+              <button class="btn" :disabled="Boolean(busy) || Boolean(x.installed && !x.upgrade)" @click="fromCatalog(c.source, x.id)">
+                {{ busy === `catalog:${x.id}` ? '正在下载…' : x.upgrade ? '看看新版' : '看看' }}
+              </button>
+            </div>
+            <p v-if="x.description" class="desc">{{ x.description }}</p>
+          </li>
+        </ul>
+      </div>
+    </div>
   </template>
 </template>
 
@@ -303,4 +448,23 @@ onActivated(load)
 .settings { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--line); }
 .settings input { width: 280px; }
 .where { margin-top: 10px; }
+.chip .link { margin-left: 4px; font-size: 12px; }
+.sources {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--ui-r-s, 6px);
+  background: var(--bg);
+  color: var(--text);
+  font: 12.5px/1.55 var(--ui-mono, Consolas, monospace);
+  resize: vertical;
+}
+.catalog { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.catalog-head, .entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.entries { margin: 6px 0 0; padding: 0; list-style: none; }
+.entries li { padding: 8px 0; border-top: 1px dashed var(--line); }
+.entries li:first-child { border-top: 0; }
+.entry-head .btn { padding: 3px 10px; font-size: 12px; }
 </style>

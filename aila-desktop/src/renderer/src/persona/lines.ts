@@ -1,5 +1,6 @@
 // 艾拉的台词：句子短、礼貌、偶尔停顿，不撒娇、不长篇大论
 import type { ChatErrorCode } from '../../../shared/chat'
+import { mergeLines, type Companion } from '../../../shared/extensions'
 
 const chatError: Record<ChatErrorCode, string> = {
   offline: '……我好像连不上自己的大脑了。请先启动 aila-ai 服务。',
@@ -111,4 +112,15 @@ export function greeting(hour: number): string {
 
 export function pick<T>(list: readonly T[]): T {
   return list[Math.floor(Math.random() * list.length)]
+}
+
+// 扩展包带的台词（shared/extensions.ts 的 mergeLines）：记下内置的，每次都从内置的重新合，扩展停用了就回到原样
+type LinePools = Record<string, string[]>
+const pools = lines as unknown as LinePools
+const BUILTIN_LINES: Record<string, readonly string[]> = Object.fromEntries(
+  Object.entries(pools).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, [...v]])
+)
+
+export function applyExtensionLines(extra: Companion['lines'] | undefined): void {
+  for (const [key, list] of Object.entries(mergeLines(BUILTIN_LINES, extra))) pools[key] = list
 }

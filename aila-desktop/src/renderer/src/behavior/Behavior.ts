@@ -1,5 +1,6 @@
 import { Vector3 } from 'three'
-import type { Emotion, Gesture } from '../../../shared/chat'
+import type { BuiltinGesture, Emotion, Gesture } from '../../../shared/chat'
+import type { MotionPhase } from '../../../shared/extensions'
 import { emptyExpressions, VOWELS, type Expressions, type Mouth, type PoseState } from '../avatar/types'
 import { greeting, lines, pick } from '../persona/lines'
 
@@ -36,7 +37,7 @@ const MOODS: Record<Exclude<Emotion, 'neutral'>, Partial<Expressions>> = {
 }
 
 /** 动作标签 → 一小段姿态 */
-const GESTURES: Record<Gesture, Phase[]> = {
+const GESTURES: Record<BuiltinGesture, Phase[]> = {
   nod: [
     { dur: 0.16, pose: { headPitch: 0.3 } },
     { dur: 0.16, pose: { headPitch: -0.02 } },
@@ -106,6 +107,7 @@ export class Behavior {
   private nextGlance = 0
   private sleepy = false
   private reaction: { phases: Phase[]; t: number } | null = null
+  private extraGestures: Record<string, Phase[]> = {}
   private pokeTimes: number[] = []
   private dragging = false
   private dragVel = 0
@@ -191,12 +193,19 @@ export class Behavior {
   }
 
   gesture(name: Gesture): void {
+    const phases = (GESTURES as Record<string, Phase[]>)[name] ?? this.extraGestures[name]
+    if (!phases) return // 不认识的动作（比如扩展刚停用）：不动
     this.markActive()
     if (name === 'think') {
       this.lookGoal.set(-0.7, 2.0, 2)
       this.nextGlance = this.time + 2.5
     }
-    this.play(GESTURES[name])
+    this.play(phases)
+  }
+
+  /** 扩展包带的动作（已经由 shared/extensions.ts 的 cleanMotions 检查、截过范围）；和内置的重名时内置的优先 */
+  setExtraGestures(motions: Record<string, MotionPhase[]>): void {
+    this.extraGestures = motions as Record<string, Phase[]>
   }
 
   /** 一次回复说完：表情再保持一会儿再淡出 */

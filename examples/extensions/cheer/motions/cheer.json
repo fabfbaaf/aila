@@ -1,0 +1,10 @@
+{
+  "label": "欢呼（测试过了、事情做成了的时候）",
+  "phases": [
+    { "dur": 0.25, "expr": { "happy": 0.6 }, "pose": { "armsUp": 0.8, "headPitch": -0.1 } },
+    { "dur": 0.2, "expr": { "happy": 0.8 }, "pose": { "armsUp": 1, "headPitch": -0.15, "bodyLean": 0.05 } },
+    { "dur": 0.2, "expr": { "happy": 0.8 }, "pose": { "armsUp": 0.7, "headPitch": -0.05 } },
+    { "dur": 0.2, "expr": { "happy": 0.8 }, "pose": { "armsUp": 1, "headPitch": -0.15, "bodyLean": 0.05 } },
+    { "dur": 0.5, "expr": { "happy": 0.4 }, "pose": { "armsUp": 0 } }
+  ]
+}

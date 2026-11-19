@@ -2,7 +2,10 @@
 
 export type Emotion = 'happy' | 'sad' | 'surprised' | 'relaxed' | 'neutral'
 /** wave 挥手（大模型也能用）；stretch 伸懒腰（只在本地用：久坐提醒、睡醒） */
-export type Gesture = 'nod' | 'shake' | 'tilt' | 'think' | 'bow' | 'wave' | 'stretch'
+export type BuiltinGesture = 'nod' | 'shake' | 'tilt' | 'think' | 'bow' | 'wave' | 'stretch'
+export const BUILTIN_GESTURES: readonly BuiltinGesture[] = ['nod', 'shake', 'tilt', 'think', 'bow', 'wave', 'stretch']
+/** 内置的，或者扩展包带的动作名（见 shared/extensions.ts；不认识的名字播放时忽略） */
+export type Gesture = BuiltinGesture | (string & {})
 
 export interface ChatMessage {
   role: 'user' | 'assistant'

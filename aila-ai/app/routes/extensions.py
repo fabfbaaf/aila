@@ -1,6 +1,11 @@
 """扩展包接口（格式和安全边界见 app/extensions.py）
 
-  GET    /extensions                   装好的扩展：命令、本事、工具服务（含运行状态）、设置（密钥只说填没填）
+  GET    /extensions                   装好的扩展：命令、本事、工具服务（含运行状态）、设置（密钥只说填没填）、动作、台词、形象、页面
+  GET    /extensions/companion         桌面伙伴用：启用的扩展带的动作（姿态段）、台词、能换的形象
+  GET    /extensions/{id}/pages/{名字}  扩展自带的页面（沙盒 CSP，不能联网）
+  GET    /extensions/catalog           目录里的扩展（目录地址在 PUT /extensions/catalogs 里设）
+  PUT    /extensions/catalogs          {urls}：目录地址（https，或者本机的 catalog.json）
+  POST   /extensions/catalog/inspect   {catalog, id}：从目录下载（校验 sha256）放进暂存区，返回 {token, plan}，后面和导入一样
   POST   /extensions/inspect           {path}：把 zip 或文件夹放进暂存区检查，返回 {token, plan}（装之前给你看的清单）
   POST   /extensions/install           {token}：看过清单、点了「装」才调；同 id 的旧版本先停掉服务再换
   POST   /extensions/discard           {token}：不装了，删掉暂存的
@@ -12,10 +17,16 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
+from .studio import WORK_CSP
+
+import httpx
+
+from .. import deps
 from ..deps import get_runtime
+from ..extension_catalog import browse, fetch_and_stage, load_sources, save_sources
 from ..extensions import ExtensionError
 from ..runtime.mcp import McpError
 from ..runtime.runner import Runtime
@@ -67,6 +78,23 @@ async def _listing(rt: Runtime, settle: bool = False) -> dict:
 @router.get("")
 async def list_extensions(rt: Runtime = Depends(get_runtime)) -> dict:
     return await _listing(rt)
+
+
+@router.get("/companion")
+async def companion(rt: Runtime = Depends(get_runtime)) -> dict:
+    """桌面伙伴用：启用的扩展带的动作、台词、形象"""
+    return rt.extensions.companion()
+
+
+@router.get("/{ext_id}/pages/{name}")
+async def page(ext_id: str, name: str, rt: Runtime = Depends(get_runtime)) -> Response:
+    """扩展自带的页面：和她的作品一样当网页看，最严的 CSP（沙盒、不能联网、不加载外面的东西）"""
+    try:
+        path = rt.extensions.page(ext_id, name)
+    except ExtensionError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    headers = {"Content-Security-Policy": WORK_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"}
+    return Response(path.read_bytes(), media_type="text/html; charset=utf-8", headers=headers)
 
 
 @router.post("/inspect")
@@ -127,3 +155,38 @@ async def uninstall(ext_id: str, rt: Runtime = Depends(get_runtime)) -> dict:
         raise _bad(err) from err
     await rt.mcp.reload()
     return await _listing(rt)
+
+
+# ---------- 目录（第三期） ----------
+
+
+class CatalogSources(BaseModel):
+    urls: list[str] = Field(default_factory=list, max_length=10)
+
+
+class CatalogPick(BaseModel):
+    catalog: str = Field(min_length=1, max_length=1000)
+    id: str = Field(min_length=1, max_length=24)
+
+
+@router.get("/catalog")
+async def catalog(rt: Runtime = Depends(get_runtime)) -> dict:
+    return {"sources": load_sources(rt.extensions), "catalogs": await browse(rt.extensions, deps.http_client)}
+
+
+@router.put("/catalogs")
+async def set_catalogs(req: CatalogSources, rt: Runtime = Depends(get_runtime)) -> dict:
+    try:
+        save_sources(rt.extensions, req.urls)
+    except ExtensionError as err:
+        raise _bad(err) from err
+    return await catalog(rt)
+
+
+@router.post("/catalog/inspect")
+async def catalog_inspect(req: CatalogPick, rt: Runtime = Depends(get_runtime)) -> dict:
+    try:
+        token, plan = await fetch_and_stage(rt.extensions, req.catalog, req.id, deps.http_client)
+    except (ExtensionError, OSError, httpx.HTTPError) as err:
+        raise _bad(err) from err
+    return {"token": token, "plan": plan}

@@ -27,13 +27,14 @@ NOT_DONE: dict[Result, str] = {
 
 
 async def run_agent(
-    model: ChatModel, messages: list[Message], toolbox: Toolbox, confirms: Confirmations | None = None
+    model: ChatModel, messages: list[Message], toolbox: Toolbox, confirms: Confirmations | None = None,
+    extra_actions: frozenset[str] = frozenset(),
 ) -> AsyncIterator[Event]:
-    """confirms 为 None 时没法问用户，要确认的工具一律不执行"""
+    """confirms 为 None 时没法问用户，要确认的工具一律不执行。extra_actions：扩展包带的动作名"""
     # 只往后追加，不改前面的（旧网页快照也原样留着）：每一轮发给大模型的前缀和上一轮一样，能命中缓存。
     # 一次回复最多 MAX_TOOL_ROUNDS 轮，留着旧快照多出来的那点长度，按缓存价算比改写后整段重算便宜
     convo = list(messages)
-    parser = TagParser()
+    parser = TagParser(extra_actions)
 
     def add_result(call: ToolCall, content: str) -> None:
         convo.append({"role": "tool", "tool_call_id": call.id, "content": content})

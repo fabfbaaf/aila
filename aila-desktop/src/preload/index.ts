@@ -33,7 +33,7 @@ import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
 import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 import type { ModelDownloadState } from '../shared/models'
-import type { ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
+import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -190,6 +190,18 @@ const api = {
   extDiscard: (token: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('ext:discard', token),
   extUpdate: (id: string, update: ExtensionUpdate): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:update', id, update),
   extRemove: (id: string): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:remove', id),
+  // 第二期：桌面伙伴的动作、台词、形象
+  extCompanion: (): Promise<AiResult<Companion>> => ipcRenderer.invoke('ext:companion'),
+  onExtChanged: (cb: () => void): Unsubscribe => listen('ext:changed', cb),
+  extPlay: (name: string): void => ipcRenderer.send('ext:play', name),
+  onExtPlay: (cb: (name: string) => void): Unsubscribe => listen('ext:play', cb),
+  extUseAvatar: (id: string, name: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('ext:use-avatar', id, name),
+  // 第三期：页面、目录
+  extOpenPage: (id: string, name: string, title: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('ext:open-page', id, name, title),
+  extCatalog: (): Promise<AiResult<CatalogListing>> => ipcRenderer.invoke('ext:catalog'),
+  extCatalogSources: (urls: string[]): Promise<AiResult<CatalogListing>> => ipcRenderer.invoke('ext:catalog-sources', urls),
+  extCatalogInspect: (catalog: string, id: string): Promise<AiResult<{ token: string; plan: ExtensionPlan }>> =>
+    ipcRenderer.invoke('ext:catalog-inspect', catalog, id),
   agentForgetRule: (project: string, command: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:rules:forget', project, command),
   agentScreenshot: (sid: string, name: string): Promise<AiResult<string>> => ipcRenderer.invoke('agent:screenshot', sid, name),
   onAgentEvent: (cb: (sid: string, event: AgentEvent) => void): Unsubscribe => listen('agent:event', cb),

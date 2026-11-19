@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from .. import deps
 from ..agent import run_agent
 from ..confirm import Confirmations
+from ..extension_extras import motions_prompt
 from ..deps import get_confirmations, get_embedder, get_model, get_registry, status
 from ..llm import ChatModel, Message, classify_error
 from ..memory import Memory, Turn, describe, extract, recall
@@ -125,14 +126,16 @@ async def chat(
     if req.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="最后一条必须是用户消息")
     s = deps.settings
+    # 扩展包带的动作：系统提示词里列出来（装卸扩展时才变，平时前缀不变），标签解析也认
+    motions = deps.get_extensions().motions()
     messages = build_messages(req.messages, s.max_history, await memory_context(req, embedder),
-                              system_prompt(s.persona_style, s.persona_call, s.persona_catchphrase))
+                              system_prompt(s.persona_style, s.persona_call, s.persona_catchphrase) + motions_prompt(motions))
     # 这次能用哪些工具：用户开着的技能包里的（资料库空着时不给）
     toolbox = await asyncio.to_thread(registry.toolbox, req.skills)
 
     async def events() -> AsyncIterator[str]:
         try:
-            async for event in run_agent(model, messages, toolbox, confirms):
+            async for event in run_agent(model, messages, toolbox, confirms, frozenset(m.name for m in motions)):
                 yield sse(event)
             yield sse({"type": "done"})
         except Exception as err:  # 出错也要告诉桌面端，让艾拉有反应，而不是一直等

@@ -23,7 +23,7 @@ import type {
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
-import type { ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
+import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 
 export interface RelayHooks {
   /** 一个事件 → 工作窗口 */
@@ -188,6 +188,25 @@ export class AgentRelay {
 
   extRemove(id: string): Promise<AiResult<ExtensionList>> {
     return this.call('DELETE', `/extensions/${encodeURIComponent(id)}`, undefined, 60000)
+  }
+
+  /** 桌面伙伴用：动作、台词、能换的形象 */
+  extCompanion(): Promise<AiResult<Companion>> {
+    return this.call('GET', '/extensions/companion')
+  }
+
+  /** 目录要联网读，给长一点 */
+  extCatalog(): Promise<AiResult<CatalogListing>> {
+    return this.call('GET', '/extensions/catalog', undefined, 60000)
+  }
+
+  extCatalogSources(urls: string[]): Promise<AiResult<CatalogListing>> {
+    return this.call('PUT', '/extensions/catalogs', { urls }, 60000)
+  }
+
+  /** 下载扩展包（最大 50MB）再检查 */
+  extCatalogInspect(catalog: string, id: string): Promise<AiResult<{ token: string; plan: ExtensionPlan }>> {
+    return this.call('POST', '/extensions/catalog/inspect', { catalog, id }, 300000)
   }
 
   mcpRemove(name: string): Promise<AiResult<McpServerInfo[]>> {
