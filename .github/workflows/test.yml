@@ -1,0 +1,77 @@
+# 每次推送、每个 PR 都跑三套测试（和 AGENTS.md 里写的一样）。
+# 本地 AI 服务和桌面端主要在 Windows 上用，所以在 Windows 上测；云端服务部署在 Linux 上，就在 Linux 上测。
+# 测试不连网、不用真的大模型（假模型、剧本模型），也不用语音模型（没下载时那几个测试会跳过）。
+name: 测试
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  aila-ai:
+    name: AI 服务（Python）
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: aila-ai
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: aila-ai/requirements*.txt
+      - name: 装依赖
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install -q -r requirements-dev.txt
+      - name: 跑测试
+        run: .venv\Scripts\python -X utf8 -m pytest -q -p no:cacheprovider
+
+  aila-desktop:
+    name: 桌面端（TypeScript）
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: aila-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: aila-desktop/package-lock.json
+      - name: 装依赖
+        run: npm ci
+        env:
+          # 测试用不到 Electron 本体，不下载
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: 类型检查
+        run: npm run typecheck
+      - name: 跑测试
+        run: npx vitest run
+
+  aila-server:
+    name: 云端（Java）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: aila-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: 跑测试（内嵌 PostgreSQL，不用另装数据库）
+        run: ./mvnw -q -B test
