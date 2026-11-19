@@ -313,9 +313,14 @@ describe('直连健康接口', () => {
     const otherUrl = await listen(other)
     try { expect(await checkServiceHealth(otherUrl, new AbortController().signal)).toBe('occupied') }
     finally { await new Promise<void>((resolve) => other.close(() => resolve())) }
-    const raw = tcpServer((socket) => { socket.on('error', () => {}); socket.end('not HTTP\r\n'); socket.resume() })
+    // 不说 HTTP 的端口：回一行乱码但不主动断开（主动断开后紧接着再连，Windows 上偶尔连不上，测试会时好时坏）
+    const sockets = new Set<import('node:net').Socket>()
+    const raw = tcpServer((socket) => { sockets.add(socket); socket.on('error', () => {}); socket.write('not HTTP\r\n'); socket.resume() })
     const rawUrl = await listen(raw)
     try { expect(await checkServiceHealth(rawUrl, new AbortController().signal)).toBe('occupied') }
-    finally { await new Promise<void>((resolve) => raw.close(() => resolve())) }
+    finally {
+      for (const s of sockets) s.destroy()
+      await new Promise<void>((resolve) => raw.close(() => resolve()))
+    }
   })
 })

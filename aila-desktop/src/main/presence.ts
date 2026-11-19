@@ -34,7 +34,15 @@ export function focusFromQuns(state: number): FocusState {
  * - 全屏 / 演示（打开了「全屏时躲开」）：藏起来、不说话；没打开就留着但不说话（别在别人演示时出声）
  * - 锁屏：留着（回来时还在），不说话
  */
-export function decidePresence(focus: FocusState, dnd: boolean, prefs: Pick<DesktopPrefs, 'hideOnFullscreen'>): Presence {
+export function decidePresence(
+  focus: FocusState,
+  dnd: boolean,
+  prefs: Pick<DesktopPrefs, 'hideOnFullscreen' | 'showCharacter'>,
+  summoned = false
+): Presence {
+  // 设置里关了「桌面上显示她」：一直藏着，提醒走系统通知。
+  // summoned：这时按了「和她说话」，临时叫出来，对话框关了再藏回去
+  if (!prefs.showCharacter && !summoned) return { visible: false, quiet: true, reason: 'off' }
   if (dnd) return { visible: false, quiet: true, reason: 'dnd' }
   if (focus === 'fullscreen' || focus === 'presentation') {
     return { visible: !prefs.hideOnFullscreen, quiet: true, reason: focus }

@@ -21,8 +21,8 @@ describe('她什么时候躲开', () => {
   })
 
   it('全屏、演示时藏起来；关了这个开关就留着但不说话', () => {
-    const on = { hideOnFullscreen: true }
-    const off = { hideOnFullscreen: false }
+    const on = { hideOnFullscreen: true, showCharacter: true }
+    const off = { hideOnFullscreen: false, showCharacter: true }
     expect(decidePresence('fullscreen', false, on)).toEqual({ visible: false, quiet: true, reason: 'fullscreen' })
     expect(decidePresence('presentation', false, off)).toEqual({ visible: true, quiet: true, reason: 'presentation' })
     expect(decidePresence('normal', false, on)).toEqual({ visible: true, quiet: false, reason: 'normal' })
@@ -30,7 +30,19 @@ describe('她什么时候躲开', () => {
   })
 
   it('免打扰优先', () => {
-    expect(decidePresence('normal', true, { hideOnFullscreen: false })).toEqual({ visible: false, quiet: true, reason: 'dnd' })
+    expect(decidePresence('normal', true, { hideOnFullscreen: false, showCharacter: true })).toEqual({ visible: false, quiet: true, reason: 'dnd' })
+  })
+
+  it('关了「桌面上显示她」：一直藏着、不主动说话（提醒走系统通知），比免打扰还优先', () => {
+    for (const focus of ['normal', 'fullscreen', 'away'] as const) {
+      for (const dnd of [false, true]) {
+        expect(decidePresence(focus, dnd, { hideOnFullscreen: false, showCharacter: false })).toEqual({ visible: false, quiet: true, reason: 'off' })
+      }
+    }
+    // 旧的设置文件里没有这一项：照常显示
+    expect(cleanPrefs({}).showCharacter).toBe(true)
+    expect(cleanPrefs({ showCharacter: false }).showCharacter).toBe(false)
+    expect(cleanPrefs({ showCharacter: 'no' }).showCharacter).toBe(true)
   })
 
   it('设置页传来的偏好只认认识的字段和取值', () => {

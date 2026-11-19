@@ -40,7 +40,10 @@ async function savePersona(patch: { personaStyle?: PersonaStyle; personaCall?: s
 
 <template>
   <h2>形象</h2>
-  <p class="lead">她在桌面上的样子和性格。默认是她自己的原创形象；也可以换成别的 VRM 格式的 3D 模型（VRoid Studio 可以免费捏一个导出）。</p>
+  <p class="lead">
+    她在桌面上的样子和性格。默认是她自己的原创形象；也可以换成别的 VRM 格式的 3D 模型（VRoid Studio 可以免费捏一个导出），
+    或者 Live2D 模型（选模型文件夹里的 <code>.model3.json</code>）。不想让她一直在桌面上，去「桌面」关掉「桌面上显示她」。
+  </p>
 
   <div class="card">
     <div class="row">
@@ -52,10 +55,14 @@ async function savePersona(patch: { personaStyle?: PersonaStyle; personaCall?: s
       </div>
     </div>
     <div class="actions">
-      <button class="btn primary" @click="api.modelChoose()">选择 VRM 模型…</button>
+      <button class="btn primary" @click="api.modelChoose()">选择模型（VRM 或 Live2D）…</button>
       <button v-if="store.modelPath" class="btn" @click="api.modelBuiltin()">换回艾拉自己的形象</button>
       <span class="hint">下次启动会自动加载上次选的模型。</span>
     </div>
+    <p class="hint">
+      Live2D 要先装 Live2D 的运行库：在 <code>aila-desktop</code> 里运行 <code>npm run setup:live2d</code>（它是 Live2D 公司的专有软件，会先给你看许可协议）。
+      Live2D 模型只认 Cubism 3 以后的格式（.model3.json）；手没有统一的参数，挥手、伸懒腰在 Live2D 上只有头和表情的动作。
+    </p>
   </div>
 
   <div class="card">

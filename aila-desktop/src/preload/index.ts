@@ -34,6 +34,7 @@ import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 import type { ModelDownloadState } from '../shared/models'
 import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
+import type { LoadedModel } from '../shared/model'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -62,13 +63,15 @@ const api = {
   setIgnoreMouse: (ignore: boolean): void => ipcRenderer.send('win:set-ignore-mouse', ignore),
   focusWindow: (): void => ipcRenderer.send('win:focus'),
   blurWindow: (): void => ipcRenderer.send('win:blur'),
+  /** 对话框关了（设置里关了「桌面上显示她」时，临时叫出来的她会藏回去） */
+  chatClosed: (): void => ipcRenderer.send('chat:closed'),
   dragStart: (): void => ipcRenderer.send('win:drag-start'),
   dragMove: (): void => ipcRenderer.send('win:drag-move'),
   dragEnd: (): void => ipcRenderer.send('win:drag-end'),
   showMenu: (voice: VoiceMenuState): void => ipcRenderer.send('menu:show', voice),
-  getLastModel: (): Promise<ArrayBuffer | null> => ipcRenderer.invoke('model:get-last'),
+  getLastModel: (): Promise<LoadedModel | null> => ipcRenderer.invoke('model:get-last'),
   onCursor: (cb: (p: { x: number; y: number }) => void): Unsubscribe => listen('cursor', cb),
-  onModelLoaded: (cb: (data: ArrayBuffer) => void): Unsubscribe => listen('model:loaded', cb),
+  onModelLoaded: (cb: (model: LoadedModel) => void): Unsubscribe => listen('model:loaded', cb),
 
   // 对话
   chatStart: (id: number, messages: ChatMessage[]): void => ipcRenderer.send('chat:start', id, messages),

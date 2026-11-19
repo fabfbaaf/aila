@@ -53,6 +53,8 @@ import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
 import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionName, validPageName, validStageToken } from '../shared/extensions'
 import { openExtensionPage } from './extensions'
+import { loadModelFile } from './modelFiles'
+import { modelKind, type LoadedModel } from '../shared/model'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
@@ -167,10 +169,8 @@ function saveSettings(s: Settings): void {
   writeFileSync(settingsFile(), JSON.stringify(s, null, 2), 'utf-8')
 }
 
-function readModel(path: string | undefined): ArrayBuffer | null {
-  if (!path || !existsSync(path)) return null
-  const buf = readFileSync(path)
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+function readModel(path: string | undefined): LoadedModel | null {
+  return loadModelFile(path)
 }
 
 // ---------- 窗口 ----------
@@ -327,16 +327,27 @@ function snapToEdges(): void {
 async function chooseModel(parent: BrowserWindow | null = win): Promise<void> {
   if (!win || !parent) return
   const result = await dialog.showOpenDialog(parent, {
-    title: '选择 VRM 模型',
-    filters: [{ name: 'VRM 模型', extensions: ['vrm'] }],
+    title: '选择形象：VRM 模型，或者 Live2D 模型的 .model3.json',
+    filters: [
+      { name: 'VRM 或 Live2D 模型', extensions: ['vrm', 'json'] },
+      { name: 'VRM 模型', extensions: ['vrm'] },
+      { name: 'Live2D 模型（.model3.json）', extensions: ['json'] }
+    ],
     properties: ['openFile']
   })
   if (result.canceled || result.filePaths.length === 0) return
   const path = result.filePaths[0]
-  const data = readModel(path)
-  if (!data) return
+  if (!modelKind(path)) {
+    await dialog.showMessageBox(parent, { type: 'info', message: '要选 .vrm 文件，或者 Live2D 模型文件夹里的 .model3.json。' })
+    return
+  }
+  const model = loadModelFile(path)
+  if (!model) {
+    await dialog.showMessageBox(parent, { type: 'info', message: '这个模型读不了（文件太多、太大，或者打不开）。' })
+    return
+  }
   saveSettings({ ...loadSettings(), modelPath: path })
-  win.webContents.send('model:loaded', data)
+  win.webContents.send('model:loaded', model)
   broadcast('model:path', path)
 }
 
@@ -349,6 +360,8 @@ function resetPosition(): void {
 function openChat(): void {
   if (!win) return
   desktop?.setDnd(false)
+  // 设置里关了「桌面上显示她」：临时叫出来，对话框关了（chat:closed）再藏回去
+  if (desktop && !desktop.prefs.showCharacter) desktop.summon(true)
   win.focus() // 窗口平时不抢焦点，要打字时才拿过来
   win.webContents.send('chat:open')
 }
@@ -362,6 +375,13 @@ function voiceMenu(action: VoiceMenuAction): void {
 function toggleDnd(on = !desktop?.dnd): void {
   desktop?.setDnd(on)
   updateTray()
+}
+
+/** 桌面上显示 / 不显示她（托盘、设置页都走偏好；关掉时打开主窗口，免得整个应用像是消失了） */
+function setShowCharacter(on: boolean): void {
+  desktop?.setPrefs({ ...desktop.prefs, showCharacter: on })
+  updateTray()
+  if (!on) openMain({ page: 'tasks' })
 }
 
 // ---------- 麦克风权限：只给自己的页面 ----------
@@ -520,6 +540,10 @@ function registerIpc(): void {
 
   ipcMain.on('win:focus', () => win?.focus())
   ipcMain.on('win:blur', () => win?.blur())
+  // 对话框关了：临时叫出来的她藏回去（只认角色窗口）
+  ipcMain.on('chat:closed', (e) => {
+    if (win && e.sender === win.webContents) desktop?.summon(false)
+  })
 
   ipcMain.on('chat:start', (_e, id: number, messages: ChatMessage[]) => void relayChat(id, messages))
   ipcMain.on('chat:cancel', (_e, id: number) => chats.get(id)?.abort())
@@ -993,13 +1017,16 @@ function createTray(): void {
 function updateTray(): void {
   if (!tray) return
   const dnd = desktop?.dnd ?? false
-  tray.setToolTip(dnd ? '艾拉（免打扰中）' : '艾拉')
+  const shown = desktop?.prefs.showCharacter ?? true
+  tray.setToolTip(!shown ? '艾拉（不在桌面上）' : dnd ? '艾拉（免打扰中）' : '艾拉')
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
+      // 不显示她的时候也能说话：临时叫出来，对话框关了再藏回去
       { label: '和她说话', accelerator: CHAT_SHORTCUT, click: openChat },
-      { label: '免打扰（藏起来）', type: 'checkbox', checked: dnd, accelerator: HIDE_SHORTCUT, click: () => toggleDnd() },
-      { label: '让她回到右下角', click: resetPosition },
+      { label: '桌面上显示她', type: 'checkbox', checked: shown, click: () => setShowCharacter(!shown) },
+      { label: '免打扰（藏起来）', type: 'checkbox', checked: dnd, enabled: shown, accelerator: HIDE_SHORTCUT, click: () => toggleDnd() },
+      { label: '让她回到右下角', enabled: shown, click: resetPosition },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() }
     ])
@@ -1059,6 +1086,8 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   desktop.start()
+  // 设置里关了「桌面上显示她」：打开艾拉就是打开主窗口（不然只剩托盘图标，像是没打开）
+  if (!desktop.prefs.showCharacter) openMain({ page: 'tasks' })
   if (!globalShortcut.register(CHAT_SHORTCUT, openChat)) {
     console.warn(`快捷键 ${CHAT_SHORTCUT} 被其他程序占用了，可以双击艾拉或者右键菜单打开对话`)
   }
