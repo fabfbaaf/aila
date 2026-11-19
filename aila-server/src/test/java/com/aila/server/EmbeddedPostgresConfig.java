@@ -26,7 +26,9 @@ public class EmbeddedPostgresConfig {
     @Bean
     DataSource dataSource(EmbeddedPostgres postgres) {
         var ds = new HikariDataSource();
-        ds.setJdbcUrl(postgres.getJdbcUrl("postgres", "postgres"));
+        // 用 127.0.0.1 不用 localhost：localhost 会先试 IPv6 的 ::1，有的电脑上（开着代理的虚拟网卡）IPv6 回环被拦，
+        // 每次连接都要等它失败再退回 IPv4，测试变得又慢又时好时坏
+        ds.setJdbcUrl(postgres.getJdbcUrl("postgres", "postgres").replace("//localhost:", "//127.0.0.1:"));
         ds.setUsername("postgres");
         ds.setMaximumPoolSize(20);
         return ds;
