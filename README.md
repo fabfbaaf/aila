@@ -1,7 +1,9 @@
 # 艾拉 · 程序员的 AI 桌面伙伴
 
 有 3D 形象的开源编程 Agent：像 Claude Code 一样，给她一个任务，她在你的项目里读代码、改文件、跑命令和测试，直到做完；终端和桌面都能用。
-在这之上，她常驻桌面：看着你的鼠标、被戳会害羞；叫一声「你好艾拉」就能和她说话；看到报错主动帮忙；还有用手势操控代码的「魔法工作台」。
+在这之上，她可以待在你的桌面上（也可以不常驻）：看着你的鼠标、被戳会害羞；叫一声「你好艾拉」就能和她说话；看到报错主动帮忙；还有用手势操控代码的「魔法工作台」。
+
+> **English summary.** Aila is an open-source coding agent with a 3D (VRM) or Live2D desktop companion. Give her a task and she reads code, edits files, runs commands and tests in your project until it's done — from a terminal (`aila`) or the desktop app. Built on DeepSeek-style prefix caching, with permission modes, branch isolation, MCP tools, extension packs, offline voice, screen-error watching and a 3D code star map. Local AI service in Python/FastAPI, desktop in Electron + Vue 3 + three.js, optional sync server in Spring Boot. Windows first. Licensed under GPL-3.0. Docs are in Chinese.
 
 ## 当前进度
 
@@ -113,3 +115,19 @@ cd aila-server
 ```
 
 各部分的设计说明见子目录的 README。
+
+## 参与开发
+
+- 先看 [AGENTS.md](AGENTS.md)：怎么跑测试、代码约定、不能破的安全规则（人和编程助手都照这个来）
+- 各子项目的设计说明在 `aila-ai/`、`aila-desktop/`、`aila-server/` 的 README 里；真机测试计划在 [docs/real-test-plan.md](docs/real-test-plan.md)
+- 写扩展包见 [docs/extensions.md](docs/extensions.md)
+- 每次推送 GitHub Actions 会跑三套测试（`.github/workflows/test.yml`）
+
+## 许可证
+
+[GPL-3.0](LICENSE)。你可以自由使用、修改、分发；改过的版本拿去分发，也要按 GPL-3.0 开放源码。
+
+不在仓库里、各自有许可的东西：
+- VRM 示例模型（`aila-desktop/models/`，开发期占位）：见 `aila-desktop/README.md` 里的来源和许可；她自带的原创形象 `aila.vrm` 由仓库里的脚本生成，随本项目的许可证
+- Live2D 运行库（Cubism Core）：Live2D 公司的专有软件，用 `npm run setup:live2d` 在同意它的许可后自己下载
+- 语音模型、向量模型、手势识别模型：各自的发布页下载（sherpa-onnx、BAAI、MediaPipe），见各子项目的 README

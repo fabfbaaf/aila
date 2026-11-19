@@ -1,6 +1,7 @@
 [project]
 name = "aila-ai"
 version = "0.1.0"
+license = "GPL-3.0-only"
 description = "艾拉的本地 AI 服务：对话、表情动作标签解析"
 requires-python = ">=3.11"
 
