@@ -12,7 +12,8 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "setup:gestures": "node scripts/setup-gestures.mjs",
-    "pack:local": "node scripts/pack-local.mjs"
+    "pack:local": "node scripts/pack-local.mjs",
+    "dist": "node scripts/make-icon.mjs && npm run build && electron-builder --config electron-builder.yml --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.2.0",

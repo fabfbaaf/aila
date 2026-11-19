@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from .. import deps
 from ..deps import get_model, mcp_status, status
 from ..llm import ChatModel, classify_error
+from ..models_download import missing as missing_models
 from ..persona import STYLES
 
 router = APIRouter(prefix="/settings")
@@ -49,6 +50,8 @@ def read() -> dict[str, Any]:
             "wakeThreshold": s.wake_threshold,
             "endSilence": s.end_silence,
             "asrLanguage": s.asr_language,
+            # 默认要的语音模型里还没下载的（安装包不带模型，设置页据此显示「下载语音模型」）
+            "modelsMissing": missing_models(s.models_dir),
         },
         "status": dict(status),
         "mcp": mcp_status(),

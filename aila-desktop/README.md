@@ -28,7 +28,33 @@ npm run build      # 打包到 out/
 
 想直接看服务终端输出时，仍可先在 `aila-ai` 里运行 `.venv\Scripts\python -m app`。桌面端检测到后显示「别人开的」，不重启它，退出时也不关它。`npm run dev:web` 只是浏览器页面，没有主进程托管，需要自己启动服务。
 
-服务目录或 Python 在别处时，设置 `AILA_AI_DIR`、`AILA_AI_PYTHON`。`AILA_AI_URL` 可改地址和端口，托管进程会使用这个地址的 host 和 port；健康检查不会经过系统代理。当前安装包的服务入口还没实现（由任务 06 补充），找不到服务时卡片会显示建虚拟环境的说明。日志不枚举环境变量，常见密钥写法会隐藏；不要让服务主动输出敏感信息。
+服务目录或 Python 在别处时，设置 `AILA_AI_DIR`、`AILA_AI_PYTHON`。`AILA_AI_URL` 可改地址和端口，托管进程会使用这个地址的 host 和 port；健康检查不会经过系统代理。安装包里用自带的 `resources\aila-ai\aila-ai.exe`（见下面「打包」）；开发时找不到服务，卡片会显示建虚拟环境的说明。日志不枚举环境变量，常见密钥写法会隐藏；不要让服务主动输出敏感信息。
+
+## 打包
+
+**正式安装包**（别的电脑双击就能装，不用装 Python、Node）：
+
+```powershell
+# 1. 先把 AI 服务打成一个目录（带 Python）：aila-ai\dist\aila-ai\aila-ai.exe，打完自己冒烟测试
+cd ..\aila-ai
+.venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\python scripts\build_service.py
+
+# 2. 再打安装包：生成图标、构建、用 electron-builder 打 NSIS
+cd ..\aila-desktop
+npm.cmd run dist
+```
+
+产物在 `dist\installer\艾拉 Setup 0.1.0.exe`，约 260MB（装好后约 800MB；AI 服务目录约 500MB，大头是文字识别用的 OpenCV 和浏览器驱动）。第一次打包时 electron-builder 会从它的 GitHub 发布页下载 NSIS 和改图标的工具，之后用缓存。
+
+- 装给当前用户，不用管理员权限；开始菜单和桌面有「艾拉」快捷方式。图标是 `scripts/make-icon.mjs` 用代码画的（和托盘一样的紫色圆环）
+- 用户的东西都不写安装目录：大模型密钥（`.env`）、会话、记忆、代码索引、下载的语音模型都在 `%APPDATA%\aila-desktop\ai\` 下面（`AILA_ENV_FILE`、`AILA_DATA_DIR`、`AILA_MODELS_DIR`、`AILA_MCP_CONFIG` 由桌面端指过去，见 `main/serviceNode.ts` 的 `packagedCommand`）。桌面端自己的设置、登录、聊天记录在 `%APPDATA%\aila-desktop` 本身，和开发时、本机测试版是同一个文件夹；AI 服务那边的不一样（开发时用仓库 `aila-ai` 里的 `.env` 和 `data\`），所以在开发的电脑上装了安装包，要在设置里重新填一次密钥
+- 语音模型不放进安装包（约 460MB）：「设置 → 语音」里点「下载语音模型」，下完 AI 服务自动重启一次
+- 开发用的 VRM 示例模型不打进去，她用自带的原创形象
+- 没有代码签名证书：Windows 会弹「已保护你的电脑」，点「更多信息 → 仍要运行」
+- 卸载会删掉安装目录，`%APPDATA%\aila-desktop` 留着（下次装还在）。要彻底删：卸载后再删掉这个文件夹
+
+**本机测试版**（`npm.cmd run pack:local`）：只打桌面端，AI 服务用这台电脑上仓库里的虚拟环境，所以只能在这台电脑上用；打得快，适合自己试。
 
 ## 怎么玩
 

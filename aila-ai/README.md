@@ -18,6 +18,14 @@ py -3.12 -m venv .venv
 
 测试：`.venv\Scripts\python -m pytest`（下载了模型时，会额外用真实模型跑「合成 → 唤醒 → 识别」和记忆、资料库的语义检索）
 
+### 打成安装包里的服务
+
+```powershell
+.venv\Scripts\python scripts\build_service.py   # → dist\aila-ai\aila-ai.exe（带 Python，用 PyInstaller --onedir）
+```
+
+打好以后自己冒烟测试：`aila-ai.exe --self-check` 把各个库和它们自带的数据文件（语法、文字识别模型、网页提取的配置……）实际加载一遍，再起服务等 `/health` 返回 ok。要带进去的数据文件清单和原因写在脚本里。打包后的程序和 `python -m app` 一样，另外认两个参数：`--download-models`（下载语音模型，设置页的「下载语音模型」就是用它）、`--self-check`。桌面安装包怎么打见 `aila-desktop/README.md`「打包」。
+
 ### 终端版 aila
 
 把 `aila-ai` 这个目录加进 PATH（只需一次），然后在任何项目目录里：
@@ -542,7 +550,10 @@ app/
     tts.py         「嗓子」：三种合成引擎、念之前清理文字
     audio.py       PCM、WAV 格式转换
 scripts/
-  download_models.py  下载语音模型和向量模型
+  download_models.py  下载语音模型和向量模型（逻辑在 app/models_download.py，安装包里用 --download-models 调同一个）
+  build_service.py    打成安装包里的 aila-ai.exe，打完冒烟测试
+packaging/
+  entry.py         PyInstaller 的入口（就是 python -m app）
   eval_code_rag.py    代码检索评测（code_eval.json 是问题和标注的答案）
   eval_agent.py       编程 Agent 评测（任务集在 eval/tasks，报告在 eval/results）
 tests/             每个模块都有；*_models.py 用真实模型（没下载时跳过）

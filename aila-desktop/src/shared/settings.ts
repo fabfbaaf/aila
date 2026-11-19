@@ -126,6 +126,8 @@ export interface AiSettings {
     wakeThreshold: number
     endSilence: number
     asrLanguage: 'zh' | 'auto'
+    /** 默认要的语音模型里还没下载的类别（kws、vad、asr、tts）；旧版服务没有这一项 */
+    modelsMissing?: string[]
   }
   status: Record<string, string>
   mcp: { id: string; name: string; connected: boolean; error: string | null }[]

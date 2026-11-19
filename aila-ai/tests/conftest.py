@@ -4,8 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from app import deps, security
+from app import deps, security, winsock
 from app.main import app, get_embedder
+
+# Windows 上建事件循环偶尔卡死在 socketpair 的 accept 上（见 app/winsock.py），测试一卡就是整个卡住
+winsock.install()
 
 
 @pytest.fixture

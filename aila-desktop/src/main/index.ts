@@ -57,7 +57,8 @@ import { registerAgentCreateIpc } from './agentCreateIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
 import type { SocketLike } from './cloud/sync'
-import { createServiceKeeper } from './serviceNode'
+import { createServiceKeeper, serviceLocator } from './serviceNode'
+import { ModelDownloader } from './models'
 import { registerServiceIpc } from './serviceIpc'
 import { openWorkPreview, revealWork, studio, WORK_ID } from './studio'
 import type { LifeState } from '../shared/studio'
@@ -73,11 +74,17 @@ const LISTEN_SHORTCUT = 'Alt+Shift+V'
 /** 免打扰：把她藏起来 / 叫回来（H = Hide） */
 const HIDE_SHORTCUT = 'Alt+Shift+H'
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
+const locateAi = serviceLocator({ packaged: app.isPackaged, appPath: app.getAppPath(), userData: app.getPath('userData') })
 const serviceKeeper = createServiceKeeper({
-  packaged: app.isPackaged,
-  appPath: app.getAppPath(),
+  locate: locateAi,
   url: AI_URL,
   changed: (state) => broadcast('service:state', state)
+})
+// 设置页「语音」里的「下载语音模型」：进度只发给主窗口
+const modelDownloader = new ModelDownloader({
+  command: locateAi,
+  changed: (state) => mainWin?.webContents.send('models:state', state),
+  restart: () => serviceKeeper.restart()
 })
 
 // 开发调试：设置 AILA_REMOTE_DEBUG=端口 时打开远程调试，用脚本驱动真实窗口做端到端测试（打包后无效）
@@ -619,6 +626,8 @@ function registerIpc(): void {
   // 编程 Agent：只认主窗口发来的（角色窗口不能替你开会话、点「可以」）
   const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
   registerServiceIpc(ipcMain, serviceKeeper, fromAgent)
+  ipcMain.handle('models:status', (e) => fromAgent(e) ? modelDownloader.status() : null)
+  ipcMain.handle('models:download', (e) => fromAgent(e) ? modelDownloader.start() : { ok: false, error: '只有主窗口能用' })
   const sidOk = (sid: unknown): sid is string => typeof sid === 'string' && /^[\w-]{1,64}$/.test(sid)
   const notAllowed = { ok: false, error: '只有主窗口能用' }
   ipcMain.handle('agent:list', (e, q: unknown) =>
@@ -1012,6 +1021,7 @@ app.on('will-quit', (event) => {
     return
   }
   globalShortcut.unregisterAll()
+  modelDownloader.stop()
   agentRelay.stopAll()
   account?.shutdown() // 还没写盘的聊天记录写下去
   desktop?.stop()

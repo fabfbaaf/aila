@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onActivated, ref } from 'vue'
+import { computed, onActivated, onUnmounted, ref } from 'vue'
+import { describeDownload, IDLE_DOWNLOAD, type ModelDownloadState } from '../../../../shared/models'
 import type { AiSettings, AiSettingsUpdate } from '../../../../shared/settings'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
@@ -82,7 +83,29 @@ async function listen(): Promise<void> {
   }
 }
 
-onActivated(load)
+/** 下载语音模型（安装包不带模型）：进度从主进程推过来 */
+const download = ref<ModelDownloadState>(IDLE_DOWNLOAD)
+const missing = computed(() => settings.value?.voice.modelsMissing ?? [])
+const showDownload = computed(() => missing.value.length > 0 || download.value.running || download.value.finished || !!download.value.error)
+const percent = computed(() => (download.value.totalMb ? Math.min(100, Math.round((download.value.doneMb / download.value.totalMb) * 100)) : 0))
+// 浏览器里调试（npm run dev:web）没有桌面能力：不订阅
+const stopModels = bridge?.onModelsState((s) => {
+  const wasRunning = download.value.running
+  download.value = s
+  if (wasRunning && !s.running && s.finished) void load() // 下完、服务重启好了：重新读一遍「还缺哪些」
+})
+onUnmounted(() => stopModels?.())
+
+async function startDownload(): Promise<void> {
+  const res = await api.modelsDownload()
+  if (!res.ok) download.value = { ...IDLE_DOWNLOAD, error: res.error ?? '没开始下载' }
+}
+
+onActivated(async () => {
+  await load()
+  const s = await bridge?.modelsStatus()
+  if (s) download.value = s
+})
 </script>
 
 <template>
@@ -113,6 +136,24 @@ onActivated(load)
   </div>
 
   <template v-else-if="settings">
+    <div v-if="showDownload" class="card">
+      <h3>语音模型</h3>
+      <div class="row">
+        <span class="label">{{ missing.length ? '还没下载' : '下载' }}</span>
+        <div>
+          <span class="hint">
+            唤醒、听写、说话都要语音模型，约 460MB，从 sherpa-onnx 的 GitHub 发布页下载，放在这台电脑上。
+            下载好以后 AI 服务会自动重启一次。
+          </span>
+          <div v-if="download.running && !download.finished" class="bar"><div :style="{ width: `${percent}%` }"></div></div>
+          <div v-if="describeDownload(download)" class="hint" :class="{ error: !!download.error }">{{ describeDownload(download) }}</div>
+          <button v-if="missing.length && !download.running" class="btn" @click="startDownload">
+            {{ download.error ? '再试一次' : '下载语音模型' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>她的声音</h3>
       <div class="row">
@@ -180,5 +221,23 @@ onActivated(load)
 .value {
   margin-left: 10px;
   color: var(--label);
+}
+
+.bar {
+  height: 6px;
+  margin: 8px 0 4px;
+  border-radius: 3px;
+  background: var(--line, rgba(127, 127, 127, 0.25));
+  overflow: hidden;
+}
+
+.bar > div {
+  height: 100%;
+  background: var(--accent, #a78bfa);
+  transition: width 0.3s;
+}
+
+.hint.error {
+  color: var(--danger, #e5484d);
 }
 </style>

@@ -32,6 +32,7 @@ import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
 import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
+import type { ModelDownloadState } from '../shared/models'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -53,6 +54,10 @@ const api = {
   serviceLogs: (): Promise<AiResult<ServiceLog[]>> => ipcRenderer.invoke('service:logs'),
   serviceRestart: (): Promise<ServiceResult> => ipcRenderer.invoke('service:restart'),
   onServiceState: (cb: (state: ServiceState) => void): Unsubscribe => listen('service:state', cb),
+  // 下载语音模型（只有主窗口能用）
+  modelsStatus: (): Promise<ModelDownloadState | null> => ipcRenderer.invoke('models:status'),
+  modelsDownload: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('models:download'),
+  onModelsState: (cb: (state: ModelDownloadState) => void): Unsubscribe => listen('models:state', cb),
   setIgnoreMouse: (ignore: boolean): void => ipcRenderer.send('win:set-ignore-mouse', ignore),
   focusWindow: (): void => ipcRenderer.send('win:focus'),
   blurWindow: (): void => ipcRenderer.send('win:blur'),

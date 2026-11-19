@@ -250,7 +250,24 @@ describe('服务定位与 IPC 边界', () => {
     expect(locateService({ ...location, file: () => false })).toBeNull()
     expect(locateService({ ...location, directory: () => false })).toBeNull()
     expect(locateService({ ...location, packaged: true })).toBeNull()
-    expect(packagedCommand()).toBeNull()
+  })
+
+  it('安装包用自带的 aila-ai.exe，用户的文件都放 userData/ai，不写安装目录', () => {
+    const res = resolve('C:/Program Files/aila/resources')
+    const user = resolve('C:/Users/me/AppData/Roaming/aila')
+    const location = { packaged: true, appPath: join(res, 'app.asar'), env: {}, platform: 'win32' as const, file: () => true, directory: () => true, resourcesPath: res, userData: user }
+    const home = join(user, 'ai')
+    expect(locateService(location)).toEqual({
+      executable: join(res, 'aila-ai', 'aila-ai.exe'),
+      args: [],
+      cwd: home,
+      env: { AILA_ENV_FILE: join(home, '.env'), AILA_DATA_DIR: join(home, 'data'), AILA_MODELS_DIR: join(home, 'models'), AILA_MCP_CONFIG: join(home, 'mcp.json') }
+    })
+    // exe 不在（安装包坏了）：找不到，不去猜系统 Python
+    expect(locateService({ ...location, file: () => false })).toBeNull()
+    expect(packagedCommand({ file: () => true })).toBeNull()
+    // 开发时设了 AILA_AI_DIR 还是用它
+    expect(locateService({ ...location, env: { AILA_AI_DIR: 'custom' } })?.cwd).toBe(resolve('custom'))
   })
 
   it('本机测试版用打包时记下的仓库目录，开发时不看这个记录', () => {

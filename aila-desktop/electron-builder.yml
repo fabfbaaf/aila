@@ -1,0 +1,45 @@
+# 正式安装包（npm run dist → dist/installer/艾拉 Setup 版本号.exe）。
+# AI 服务打在里面（resources/aila-ai/aila-ai.exe，带 Python），别的电脑双击就能装，不用装 Python、Node。
+# 前提：先在 aila-ai 里跑 scripts/build_service.py（见 README「打包」）。
+appId: com.aila.desktop
+productName: 艾拉
+directories:
+  output: dist/installer
+  buildResources: build
+asar: true
+files:
+  - out/**/*
+  # 开发用的临时 VRM 模型不打进去（正式版要换原创形象）；渲染层的 avatar/、mediapipe/ 在 out/ 里
+  - "!**/*.vrm"
+  # 渲染层的依赖 Vite 已经打进 out/ 了；主进程运行时只 require 了 ws。这些不重复带（省约 80MB）
+  - "!node_modules/@mediapipe/**"
+  - "!node_modules/three/**"
+  - "!node_modules/@pixiv/**"
+  - "!node_modules/vue/**"
+  - "!node_modules/@vue/**"
+  - "!node_modules/d3-*/**"
+extraResources:
+  # PyInstaller 打的 AI 服务目录（serviceNode.ts 的 packagedCommand 用它）
+  - from: ../aila-ai/dist/aila-ai
+    to: aila-ai
+# 复用 npm 已经装好的 Electron，打包时不用再下载
+electronDist: node_modules/electron/dist
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.ico
+  # 没有代码签名证书：没配 CSC_LINK 就不签名（Windows 会提示「已保护你的电脑」，README 里写了怎么办）
+nsis:
+  # 装给当前用户，不用管理员权限；也可以在安装界面里改位置
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 艾拉
+  # 卸载时不删 userData（密钥、会话、记忆、下载的语音模型都在里面），下次装还在；README 写了怎么彻底删
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+publish: null

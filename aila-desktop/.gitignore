@@ -7,3 +7,5 @@ build-local/
 models/*.vrm
 # 手势识别的 WebAssembly 和模型：npm run setup:gestures 生成
 src/renderer/public/mediapipe/
+# 图标由 scripts/make-icon.mjs 生成（npm run dist 会先跑）
+build/
