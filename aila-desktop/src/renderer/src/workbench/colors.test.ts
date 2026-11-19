@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CodeGraph, GraphNode } from '../../../shared/workbench'
-import { COLD_COLOR, TESTED_COLOR, TEST_FILE_COLOR, UNTESTED_COLOR, churnColor, hottest, modeColors, testedFiles, testedStem } from './layout'
+import { COLD_COLOR, TESTED_COLOR, TEST_FILE_COLOR, UNTESTED_COLOR, churnColor, crossLinks, hottest, importsOf, modeColors, testedFiles, testedStem, withoutTests } from './layout'
 
 const node = (id: string, extra: Partial<GraphNode> = {}): GraphNode => ({
   id,
@@ -54,5 +54,31 @@ describe('换颜色看项目', () => {
     expect(c.modules.get('app')).toMatch(/^#[0-9a-f]{6}$/)
     expect(modeColors(GRAPH, 'group')).toBeNull()
     expect(modeColors(GRAPH, 'churn')!.files.get('app/util.py')).toBe(COLD_COLOR)
+  })
+})
+
+describe('import 和第三方库', () => {
+  const g: CodeGraph = {
+    nodes: [node('app/a.py'), node('app/b.py'), node('tests/test_a.py', { test: true })],
+    links: [
+      { source: 'app/a.py', target: 'app/b.py', weight: 1, kind: 'import' },
+      { source: 'tests/test_a.py', target: 'app/a.py', weight: 1, kind: 'import' },
+      { source: 'app/a.py', target: 'app/b.py', weight: 2, kind: 'http', via: ['/x'] }
+    ],
+    libs: [
+      { id: 'python:fastapi', name: 'fastapi', ecosystem: 'python', users: ['app/a.py'], count: 1 },
+      { id: 'python:pytest', name: 'pytest', ecosystem: 'python', users: ['tests/test_a.py'], count: 1 }
+    ]
+  }
+
+  it('选中文件：引用了谁、谁引用了它、用到的库；跨进程的光线不算 import', () => {
+    expect(importsOf(g, 'app/a.py')).toEqual({ out: ['app/b.py'], in: ['tests/test_a.py'], libs: ['fastapi'] })
+    expect(crossLinks(g, 'app/a.py').out.map((l) => l.kind)).toEqual(['http'])
+  })
+
+  it('隐藏测试文件：只有测试在用的库也一起藏起来', () => {
+    const shown = withoutTests(g)
+    expect(shown.libs?.map((l) => l.name)).toEqual(['fastapi'])
+    expect(shown.links.some((l) => l.source.startsWith('tests/'))).toBe(false)
   })
 })

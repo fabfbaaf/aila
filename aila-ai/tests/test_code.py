@@ -295,7 +295,7 @@ def test_graph_links_files_by_calls(index: CodeIndex) -> None:
                           "server/src/main/java/com/shop/cart/CheckoutService.java"}
     assert nodes["shop/cart.py"]["modified"] and not nodes["shop/checkout.py"]["modified"]
     assert nodes["shop/cart.py"]["functions"] == 5 and nodes["shop/cart.py"]["group"] == "shop"
-    links = {(lk["source"], lk["target"]): lk["weight"] for lk in g["links"]}
+    links = {(lk["source"], lk["target"]): lk["weight"] for lk in g["links"] if lk["kind"] == "call"}
     # checkout 调了 Cart()、price_of()、cart.total()：TS 里也有个 total，但只在同一类语言里连，Python 里只有一个，连得上；
     # Python 的 Cart() 也不会连到 Vue 的 Cart 组件
     assert links == {("shop/checkout.py", "shop/cart.py"): 3}

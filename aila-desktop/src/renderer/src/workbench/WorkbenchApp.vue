@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { CodeProject } from '../../../shared/settings'
-import type { ChunkSource, CodeGraph, GraphNode, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../../../shared/workbench'
+import type { ChunkSource, CodeGraph, GraphNode, LibInfo, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../../../shared/workbench'
 import { diffLines } from '../components/bubble'
 import { lines } from '../persona/lines'
 import GestureLayer from '../gestures/GestureLayer.vue'
@@ -11,6 +11,7 @@ import {
   TEST_FILE_COLOR,
   UNTESTED_COLOR,
   hottest,
+  importsOf,
   modeColors,
   testedFiles,
   type ColorMode,
@@ -82,16 +83,34 @@ const shown = computed(() => (graph.value && hideTests.value ? withoutTests(grap
 const counts = computed(() => {
   const g = shown.value
   if (!g) return null
-  const cross = g.links.filter((l) => kindOf(l) !== 'call')
+  const cross = g.links.filter((l) => kindOf(l) === 'http' || kindOf(l) === 'ipc')
   return {
     files: g.nodes.length,
     modules: buildModules(g).modules.length,
-    calls: g.links.length - cross.length,
+    calls: g.links.filter((l) => kindOf(l) === 'call').length,
     cross: cross.length,
+    libs: g.libs?.length ?? 0,
     tests: graph.value?.nodes.filter((n) => n.test).length ?? 0
   }
 })
 const moduleTip = ref<{ m: ModuleInfo; x: number; y: number } | null>(null)
+const libTip = ref<{ lib: LibInfo; x: number; y: number } | null>(null)
+/** 点了外圈的第三方库：面板里列出谁在用 */
+const lib = ref<LibInfo | null>(null)
+/** 外圈的第三方库显示不显示 */
+const showLibs = ref(true)
+/** 选中文件的 import：引用了谁、谁引用了它、用到哪些第三方库 */
+const imports = computed(() => (node.value && graph.value ? importsOf(graph.value, node.value.id) : null))
+const ECOSYSTEM: Record<string, string> = { npm: 'npm 包', python: 'Python 包', java: 'Java 库' }
+
+function shortPath(id: string): string {
+  return id.split('/').slice(-2).join('/')
+}
+
+watch(showLibs, (on) => {
+  map?.setShowLibs(on)
+  if (!on) lib.value = null
+})
 /** 选中文件的跨进程光线：它请求了谁、谁请求了它 */
 const cross = computed(() => (node.value && graph.value ? crossLinks(graph.value, node.value.id) : null))
 const results = computed(() => (shown.value ? searchNodes(shown.value.nodes, query.value) : []))
@@ -332,6 +351,11 @@ onMounted(async () => {
   map.onSelect = (n) => void selectNode(n)
   map.onHover = (n, x, y) => (tip.value = n ? { name: n.id, lines: n.lines, x, y } : null)
   map.onHoverModule = (m, x, y) => (moduleTip.value = m ? { m, x, y } : null)
+  map.onHoverLib = (l, x, y) => (libTip.value = l ? { lib: l, x, y } : null)
+  map.onSelectLib = (l) => {
+    lib.value = l
+    if (l) node.value = null
+  }
   if (import.meta.env.DEV) {
     // 开发调试入口：控制台里可以直接定位报错、选星球
     ;(window as unknown as Record<string, unknown>).__wb = {
@@ -528,6 +552,9 @@ onBeforeUnmount(() => {
       <div class="gap"><b class="line"></b>函数调用</div>
       <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>请求接口（HTTP）</div>
       <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>进程间消息（IPC）</div>
+      <div v-if="graph.libs?.length" class="libs-toggle">
+        <label><input v-model="showLibs" type="checkbox" />外圈的恒星：用到的第三方库（{{ shown?.libs?.length ?? 0 }}）</label>
+      </div>
       <div class="gap"><i class="bright"></i>亮一点：还没提交的改动</div>
       <div><i :style="{ background: ERROR_COLOR }"></i>报错的文件</div>
       <div><i :style="{ background: CHAIN_COLOR }"></i>调用链上的文件</div>
@@ -536,6 +563,10 @@ onBeforeUnmount(() => {
 
     <div v-if="tip" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 10}px` }">
       {{ tip.name }} · {{ tip.lines }} 行
+    </div>
+    <div v-else-if="libTip" class="tip" :style="{ left: `${libTip.x + 14}px`, top: `${libTip.y + 10}px` }">
+      <b>{{ libTip.lib.name }}</b> · {{ ECOSYSTEM[libTip.lib.ecosystem] }} · {{ libTip.lib.count }} 个文件在用
+      <div class="muted">点一下看是谁在用</div>
     </div>
     <div v-else-if="moduleTip" class="tip" :style="{ left: `${moduleTip.x + 14}px`, top: `${moduleTip.y + 10}px` }">
       <b>{{ moduleTip.m.label }}</b> · {{ moduleTip.m.files.length }} 个文件 · {{ moduleTip.m.lines }} 行
@@ -578,6 +609,17 @@ onBeforeUnmount(() => {
       @failed="gestureFailed"
     />
 
+    <aside v-if="lib && !node" class="panel">
+      <div class="head">
+        <div class="path">{{ lib.name }}</div>
+        <button class="x" title="关掉" @click="lib = null">×</button>
+      </div>
+      <div class="meta">{{ ECOSYSTEM[lib.ecosystem] }} · {{ lib.count }} 个文件 import 了它</div>
+      <ul class="outline users">
+        <li v-for="u in lib.users" :key="u" :title="u" @click="jump(u)">{{ u }}</li>
+      </ul>
+    </aside>
+
     <aside v-if="node" class="panel">
       <div class="head">
         <div class="path">{{ node.id }}</div>
@@ -589,6 +631,22 @@ onBeforeUnmount(() => {
       <div class="actions">
         <button @click="askFile">问她这个文件</button>
         <button v-if="code" @click="askCode">问她这段代码</button>
+      </div>
+      <div v-if="imports && (imports.out.length || imports.in.length || imports.libs.length)" class="cross">
+        <div v-if="imports.out.length" class="cross-row wrap">
+          <span class="dir">引用了</span>
+          <a v-for="t in imports.out.slice(0, 12)" :key="'o' + t" class="who" :title="t" @click="jump(t)">{{ shortPath(t) }}</a>
+          <span v-if="imports.out.length > 12" class="via">等 {{ imports.out.length }} 个</span>
+        </div>
+        <div v-if="imports.in.length" class="cross-row wrap">
+          <span class="dir">被引用</span>
+          <a v-for="t in imports.in.slice(0, 12)" :key="'i' + t" class="who" :title="t" @click="jump(t)">{{ shortPath(t) }}</a>
+          <span v-if="imports.in.length > 12" class="via">等 {{ imports.in.length }} 个</span>
+        </div>
+        <div v-if="imports.libs.length" class="cross-row wrap">
+          <span class="dir">用到的库</span>
+          <span v-for="n in imports.libs" :key="n" class="via">{{ n }}</span>
+        </div>
       </div>
       <div v-if="cross && (cross.out.length || cross.in.length)" class="cross">
         <div v-for="l in cross.out" :key="'o' + l.target + l.kind" class="cross-row" @click="jump(l.target)">
@@ -656,7 +714,7 @@ onBeforeUnmount(() => {
       <template v-if="status">{{ status }}</template>
       <template v-else-if="counts">
         {{ counts.modules }} 个模块 · {{ counts.files }} 个文件 · {{ counts.calls }} 条调用光线 ·
-        {{ counts.cross }} 条跨进程弧线 ·
+        {{ counts.cross }} 条跨进程弧线 · {{ counts.libs }} 个第三方库 ·
         {{ gestures ? '张开手掌旋转、捏住星球往面前拉看代码' : '拉远看模块、拉近看文件，点模块飞过去，点星球看代码' }}
         <span v-if="activity" class="activity"> · {{ activity }}</span>
       </template>
@@ -884,6 +942,36 @@ button.on {
 .cross-row .who {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cross-row.wrap {
+  flex-wrap: wrap;
+  white-space: normal;
+  cursor: default;
+}
+
+.cross-row.wrap .who {
+  cursor: pointer;
+  color: #9fe6ff;
+}
+
+.cross-row.wrap .who:hover {
+  text-decoration: underline;
+}
+
+.libs-toggle {
+  margin-top: 4px;
+  pointer-events: auto;
+}
+
+.libs-toggle input {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+
+.users {
+  max-height: none;
+  flex: 1 1 auto;
 }
 
 .cross-row .via {

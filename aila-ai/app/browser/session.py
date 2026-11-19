@@ -38,6 +38,8 @@ NAV_TIMEOUT_MS = 20_000
 ACTION_TIMEOUT_MS = 8_000
 SETTLE_MS = 1_500  # 操作后最多等这么久让页面加载完
 POPUP_WAIT_MS = 800  # 点按钮后等多久看有没有新标签页
+PW_START_TIMEOUT = 30  # 秒：Playwright 驱动起来、停下最多等多久
+LAUNCH_TIMEOUT_MS = 30_000  # 浏览器窗口起来最多等多久
 HOST_CACHE_SECONDS = 300.0
 VIEWPORT = {"width": 1200, "height": 820}
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -61,6 +63,17 @@ GET_FORM_URL_JS = r"""
   return url.href
 }
 """
+
+
+async def start_playwright(factory: Any) -> Any:
+    """起 Playwright 的驱动进程。Windows 上它偶尔起来了却不回话，start() 就一直等下去（测试里卡过）：
+    限时，超时就再起一个新的，还不行就报错"""
+    for attempt in range(2):
+        try:
+            return await asyncio.wait_for(factory().start(), PW_START_TIMEOUT)
+        except TimeoutError:
+            log.warning("浏览器组件启动超时（第 %d 次）", attempt + 1)
+    raise BrowserError("浏览器组件启动超时，过一会儿再试。")
 
 
 class BrowserError(Exception):
@@ -235,7 +248,7 @@ class BrowserSession:
         await self.close()
         if self._pw is not None:
             with contextlib.suppress(Exception):
-                await self._pw.stop()
+                await asyncio.wait_for(self._pw.stop(), PW_START_TIMEOUT)  # 关不掉也别一直等
             self._pw = None
 
     # ---------- 启动和关闭 ----------
@@ -269,7 +282,7 @@ class BrowserSession:
         from playwright.async_api import async_playwright  # 用到浏览器才加载
 
         if self._pw is None:
-            self._pw = await async_playwright().start()
+            self._pw = await start_playwright(async_playwright)
         assert self._profile is not None
         self._profile.mkdir(parents=True, exist_ok=True)
         last: Exception | None = None
@@ -278,6 +291,7 @@ class BrowserSession:
                 ctx = await self._pw.chromium.launch_persistent_context(
                     str(self._profile), channel=channel, headless=self._headless, accept_downloads=False,
                     viewport=VIEWPORT, args=["--no-first-run", "--no-default-browser-check"],
+                    timeout=LAUNCH_TIMEOUT_MS,
                 )
                 log.info("浏览器已打开（%s）", channel)
                 return ctx
@@ -484,7 +498,7 @@ class CodingBrowserPool:
         from playwright.async_api import async_playwright
 
         if self._pw is None:
-            self._pw = await async_playwright().start()
+            self._pw = await start_playwright(async_playwright)
         last: Exception | None = None
         for channel in self.channels:
             try:
@@ -492,6 +506,7 @@ class CodingBrowserPool:
                     channel=channel, headless=self.headless,
                     args=["--no-first-run", "--no-default-browser-check", "--disable-quic",
                           "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+                    timeout=LAUNCH_TIMEOUT_MS,
                 )
                 log.info("编程浏览器已打开（%s）", channel)
                 return browser
@@ -515,7 +530,7 @@ class CodingBrowserPool:
                 await browser.close()
         if self._pw is not None:
             with contextlib.suppress(Exception):
-                await self._pw.stop()
+                await asyncio.wait_for(self._pw.stop(), PW_START_TIMEOUT)  # 关不掉也别一直等
             self._pw = None
 
     async def shutdown(self) -> None:
