@@ -27,6 +27,7 @@ from .runtime.mock import MockCoderModel
 from .runtime.runner import Runtime
 from .code import CodeProjects
 from .diary import Diary
+from .extensions import ExtensionStore
 from .persona import persona_addendum
 from .studio import Studio
 from .tools import Skill, SkillRegistry
@@ -57,6 +58,11 @@ confirmations = Confirmations()
 
 def get_confirmations() -> Confirmations:
     return confirmations
+
+
+def get_extensions() -> ExtensionStore:
+    """装好的扩展包（<数据目录>/extensions）。每次现取：测试会换数据目录"""
+    return ExtensionStore(settings.data_dir / "extensions")
 
 
 @lru_cache
@@ -92,7 +98,7 @@ def get_runtime() -> Runtime:
     # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
     runtime = Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
-                      computer_inventory=settings.computer_inventory)
+                      computer_inventory=settings.computer_inventory, extensions=get_extensions())
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     return runtime
 
@@ -294,7 +300,8 @@ mcp_runner: McpRunner | None = None
 def start_mcp(on_skill: Any = None) -> McpRunner | None:
     global mcp_runner
     try:
-        configs = load_config(settings.mcp_config)
+        # 启用的扩展包带的服务也接进来（停着的 load_config 会跳过）
+        configs = load_config(settings.mcp_config, get_extensions().mcp_servers())
     except Exception as err:
         log.warning("mcp.json 读不了：%s", err)
         return None

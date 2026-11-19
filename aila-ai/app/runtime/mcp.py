@@ -398,9 +398,13 @@ class ServerState:
 
 
 class McpManager:
-    def __init__(self, path: Path, client_factory: Callable[..., StdioClient] = StdioClient) -> None:
+    def __init__(self, path: Path, client_factory: Callable[..., StdioClient] = StdioClient,
+                 extensions: Any = None) -> None:
         self.path = path
         self.client_factory = client_factory
+        # 扩展包带的服务（app/extensions.py 的 ExtensionStore）：和 mcp.json 里的合在一起用，
+        # 但开关、「以后都不用问」记在扩展自己的状态里，增删只能在「扩展」里做
+        self.extensions = extensions
         # 配置改了以后叫一声（对话那边用它重连，不用重启 AI 服务）
         self.on_change: Callable[[], Awaitable[None]] | None = None
         self.servers: dict[str, ServerState] = {}
@@ -432,12 +436,26 @@ class McpManager:
                 out[name] = ServerConfig.parse(name, raw)
             except McpError as err:
                 log.warning("MCP 配置 %s 不对：%s", name, err)
+        for name, raw in (self.extensions.mcp_servers() if self.extensions else {}).items():
+            if name in out:  # mcp.json 里你自己配的同名服务优先
+                continue
+            try:
+                out[name] = ServerConfig.parse(name, raw)
+            except McpError as err:
+                log.warning("扩展的 MCP 服务 %s 不对：%s", name, err)
         return out
+
+    def _owner(self, name: str) -> tuple[str, str] | None:
+        """扩展带的服务：（扩展 id，服务名）；mcp.json 里的返回 None"""
+        if self.extensions is None or name in self._read_raw():
+            return None
+        return self.extensions.owner(name)
 
     def _write(self, configs: dict[str, ServerConfig]) -> None:
         data = self._read_file()
         key = self._key(data)
-        data[key] = {n: c.to_raw() for n, c in configs.items()}
+        # 扩展带的服务不写进 mcp.json
+        data[key] = {n: c.to_raw() for n, c in configs.items() if not c.extra.get("extension")}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -523,10 +541,36 @@ class McpManager:
         for name in list(self.servers):
             await self._stop(name)
 
+    async def stop_extension(self, ext_id: str) -> None:
+        """升级、卸载扩展前先停掉它的服务（Windows 上进程开着的文件删不掉）"""
+        async with self._lock:
+            for name, state in list(self.servers.items()):
+                if state.config.extra.get("extension") == ext_id:
+                    await self._stop(name)
+
+    async def reload(self) -> None:
+        """扩展装了、卸了、开关、改了设置以后：按现在的配置补开、停掉、重启有变化的服务"""
+        async with self._lock:
+            if self._started:
+                configs = self.configs()
+                for name in list(self.servers):
+                    if name not in configs:
+                        await self._stop(name)
+                for name, config in configs.items():
+                    state = self.servers.get(name)
+                    if state is None:
+                        self._launch(name, config)
+                    elif state.config.to_raw() != config.to_raw():
+                        await self._stop(name)
+                        self._launch(name, config)
+        await self._changed()
+
     # ----- 改配置（设置页） -----
 
     async def save(self, config: ServerConfig, keep_env: bool = False) -> None:
         """加一个或改一个服务，然后重启它。keep_env：界面没给 env 的值时保留原来的（密钥不回传给界面）"""
+        if self._owner(config.name):
+            raise McpError(f"{config.name} 是扩展带的服务，到设置里的「扩展」去管。")
         configs = self.configs()
         old = configs.get(config.name)
         if old and keep_env:
@@ -539,6 +583,8 @@ class McpManager:
         await self._changed()
 
     async def remove(self, name: str) -> None:
+        if self._owner(name):
+            raise McpError(f"{name} 是扩展带的服务，要删就到设置里的「扩展」卸载这个扩展。")
         configs = self.configs()
         if name not in configs:
             raise McpError(f"没有叫 {name} 的服务。")
@@ -552,8 +598,16 @@ class McpManager:
         configs = self.configs()
         if name not in configs:
             raise McpError(f"没有叫 {name} 的服务。")
-        configs[name].disabled = disabled
-        self._write(configs)
+        if owner := self._owner(name):
+            from ..extensions import ExtensionError
+
+            try:
+                self.extensions.set_server_disabled(*owner, disabled)
+            except ExtensionError as err:
+                raise McpError(str(err)) from err
+        else:
+            configs[name].disabled = disabled
+            self._write(configs)
         await self.restart(name)
         await self._changed()
 
@@ -585,6 +639,9 @@ class McpManager:
         found = self._split(full_name)
         if not found:
             return
+        if owner := self._owner(found[0]):
+            self.extensions.allow(*owner, found[1])
+            return
         configs = self.configs()
         config = configs.get(found[0])
         if config and found[1] not in config.always_allow:
@@ -592,6 +649,8 @@ class McpManager:
             self._write(configs)
 
     def forget(self, server: str, tool: str) -> bool:
+        if owner := self._owner(server):
+            return self.extensions.forget(*owner, tool)
         configs = self.configs()
         config = configs.get(server)
         if not config or tool not in config.always_allow:
@@ -637,6 +696,7 @@ class McpManager:
                 "name": name,
                 "command": config.command_line(),
                 "label": str(config.extra.get("name") or name),
+                "extension": config.extra.get("extension") or None,  # 扩展带的服务：扩展 id
                 "readOnly": config.read_only,
                 "envKeys": sorted(config.env),  # 只给名字，不给值
                 "disabled": config.disabled,

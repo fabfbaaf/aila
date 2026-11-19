@@ -51,6 +51,7 @@ import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
 import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
+import { cleanUpdate, validExtensionId, validStageToken } from '../shared/extensions'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
@@ -709,6 +710,26 @@ function registerIpc(): void {
       ? agentRelay.mcpForget(name, tool)
       : notAllowed
   )
+  // 扩展包：装扩展等于让这台电脑多跑程序、给她新的做事说明，只认主窗口。
+  // 包由主进程弹窗选（渲染层不能指定任意路径），选好先检查，渲染层拿到清单给你看，你点「装」才装
+  ipcMain.handle('ext:list', (e) => (fromAgent(e) ? agentRelay.extList() : notAllowed))
+  ipcMain.handle('ext:pick', async (e, kind: unknown) => {
+    if (!fromAgent(e) || (kind !== 'zip' && kind !== 'folder')) return notAllowed
+    const parent = BrowserWindow.fromWebContents(e.sender)
+    if (!parent) return notAllowed
+    const picked = await dialog.showOpenDialog(parent, kind === 'zip'
+      ? { title: '选一个扩展包（.zip）', filters: [{ name: '扩展包', extensions: ['zip'] }], properties: ['openFile'] }
+      : { title: '选一个扩展文件夹（里面有 aila-extension.json）', properties: ['openDirectory'] })
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: true, data: null }
+    return agentRelay.extInspect(picked.filePaths[0])
+  })
+  ipcMain.handle('ext:install', (e, token: unknown) => (fromAgent(e) && validStageToken(token) ? agentRelay.extInstall(token) : notAllowed))
+  ipcMain.handle('ext:discard', (e, token: unknown) => (fromAgent(e) && validStageToken(token) ? agentRelay.extDiscard(token) : notAllowed))
+  ipcMain.handle('ext:update', (e, id: unknown, raw: unknown) => {
+    const update = cleanUpdate(raw)
+    return fromAgent(e) && validExtensionId(id) && update ? agentRelay.extUpdate(id, update) : notAllowed
+  })
+  ipcMain.handle('ext:remove', (e, id: unknown) => (fromAgent(e) && validExtensionId(id) ? agentRelay.extRemove(id) : notAllowed))
   ipcMain.handle('agent:rules:forget', (e, project: unknown, command: unknown) => {
     if (!fromAgent(e)) return notAllowed
     if (typeof project !== 'string' || !project.trim() || project.length > 1000 ||

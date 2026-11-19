@@ -42,13 +42,17 @@ class McpServerConfig:
     env: dict[str, str] | None = None
     url: str | None = None
     read_only: bool = False
+    cwd: str | None = None
 
 
-def load_config(path: Path) -> list[McpServerConfig]:
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    servers = data.get("servers") or data.get("mcpServers") or {}
+def load_config(path: Path, extra: dict[str, dict[str, Any]] | None = None) -> list[McpServerConfig]:
+    """mcp.json 里的服务，加上 extra（启用的扩展包带的服务，见 app/extensions.py；同名的以 mcp.json 为准）"""
+    servers: dict[str, Any] = {}
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        servers = dict(data.get("servers") or data.get("mcpServers") or {})
+    for sid, s in (extra or {}).items():
+        servers.setdefault(sid, s)
     configs = []
     for sid, s in servers.items():
         if not isinstance(s, dict) or s.get("disabled"):
@@ -58,7 +62,7 @@ def load_config(path: Path) -> list[McpServerConfig]:
             continue
         configs.append(McpServerConfig(
             id=_safe(sid), name=str(s.get("name") or sid), command=s.get("command"), args=[str(a) for a in s.get("args", [])],
-            env=s.get("env"), url=s.get("url"), read_only=bool(s.get("readOnly", False)),
+            env=s.get("env"), url=s.get("url"), read_only=bool(s.get("readOnly", False)), cwd=s.get("cwd") or None,
         ))
     return configs
 
@@ -90,7 +94,7 @@ class McpHub:
         import mcp
 
         if target is None:
-            target = cfg.url or mcp.StdioServerParameters(command=cfg.command or "", args=cfg.args, env=cfg.env)
+            target = cfg.url or mcp.StdioServerParameters(command=cfg.command or "", args=cfg.args, env=cfg.env, cwd=cfg.cwd)
         client = await stack.enter_async_context(mcp.Client(target, read_timeout_seconds=CALL_TIMEOUT))
         listed = await client.list_tools()
         tools = [_tool(cfg, client, t) for t in listed.tools]

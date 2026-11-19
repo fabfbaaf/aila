@@ -33,6 +33,7 @@ import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
 import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 import type { ModelDownloadState } from '../shared/models'
+import type { ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -182,6 +183,13 @@ const api = {
   agentMcpDisable: (name: string, disabled: boolean): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:disable', name, disabled),
   agentMcpRemove: (name: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:remove', name),
   agentMcpForget: (name: string, tool: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:forget', name, tool),
+  // 扩展包（只有主窗口能用）：pick 弹窗选包并检查，返回清单（取消了 data 是 null）
+  extList: (): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:list'),
+  extPick: (kind: 'zip' | 'folder'): Promise<AiResult<{ token: string; plan: ExtensionPlan } | null>> => ipcRenderer.invoke('ext:pick', kind),
+  extInstall: (token: string): Promise<AiResult<ExtensionList & { installed: string }>> => ipcRenderer.invoke('ext:install', token),
+  extDiscard: (token: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('ext:discard', token),
+  extUpdate: (id: string, update: ExtensionUpdate): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:update', id, update),
+  extRemove: (id: string): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:remove', id),
   agentForgetRule: (project: string, command: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:rules:forget', project, command),
   agentScreenshot: (sid: string, name: string): Promise<AiResult<string>> => ipcRenderer.invoke('agent:screenshot', sid, name),
   onAgentEvent: (cb: (sid: string, event: AgentEvent) => void): Unsubscribe => listen('agent:event', cb),

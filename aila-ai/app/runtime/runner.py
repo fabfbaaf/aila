@@ -23,7 +23,9 @@ from .branch import BranchError, BranchInfo, open_branch
 from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
+from ..extensions import ExtensionStore, skills_context
 from .commands import Command, load_commands, match
+from .skilltool import read_skill_tool
 from .delivery import DELIVERY, DeliveryError
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
@@ -77,6 +79,7 @@ class Runtime:
         fast_factory: Callable[[], CoderModel] | None = None,
         mcp_config: Path | None = None,
         computer_inventory: bool = True,
+        extensions: ExtensionStore | None = None,
     ) -> None:
         self.store = SessionStore(data_dir / "sessions")
         # 「在新分支上做」的临时目录（git worktree）
@@ -90,7 +93,9 @@ class Runtime:
         # 项目记忆：她学到的项目约定，下次在这个项目开会话时放进环境说明
         self.memory = ProjectMemory(data_dir / "project_memory.json")
         # MCP 外部工具服务（和对话共用 aila-ai/mcp.json，你在设置页加）：第一次用到时在后台开起来
-        self.mcp = McpManager(mcp_config or data_dir / "mcp.json")
+        # 扩展包（app/extensions.py）：命令、本事、外部工具服务
+        self.extensions = extensions or ExtensionStore(data_dir / "extensions")
+        self.mcp = McpManager(mcp_config or data_dir / "mcp.json", extensions=self.extensions)
         self.model_factory = model_factory
         # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
         self.fast_factory = fast_factory or model_factory
@@ -130,20 +135,25 @@ class Runtime:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         root = root.resolve()
         model = self.model_factory()
+        # 启用的扩展带的本事：开会话时定下来（只放名字和简介），之后装卸扩展不改这个会话的开头，前缀缓存不断
+        skills = self.extensions.skills()
+        skill_note = skills_context(skills)
+        skill_meta = {"skills": [s.name for s in skills]} if skills else {}
         if kind == "computer":
             session = self.store.create(root, mode, model.name,
-                                        build_computer_context(root, computer_shell().label, self.computer_inventory),
-                                        {"kind": "computer"})
+                                        build_computer_context(root, computer_shell().label, self.computer_inventory) + skill_note,
+                                        {"kind": "computer", **skill_meta})
         elif not isolate:
-            session = self.store.create(root, mode, model.name, build_context(root, self.shell.label) + self.memory.context(root))
+            session = self.store.create(root, mode, model.name,
+                                        build_context(root, self.shell.label) + self.memory.context(root) + skill_note, skill_meta)
         else:
             try:
                 info = open_branch(root, self.work_dir)
             except BranchError as err:
                 raise RuntimeError_(str(err)) from err
             context = (build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
-                       + self.memory.context(root))
-            session = self.store.create(root, mode, model.name, context, {"branch": asdict(info)})
+                       + self.memory.context(root) + skill_note)
+            session = self.store.create(root, mode, model.name, context, {"branch": asdict(info), **skill_meta})
         if budget is not None:
             session.append({"type": "budget", "amount": budget})
         return session
@@ -162,8 +172,10 @@ class Runtime:
         workspace = (ComputerWorkspace(root, data_dir=self.data_dir, env_file=ENV_FILE) if computer else Workspace(root))
         mode = session.mode if session.mode in MODES else "ask"
         browser = None
+        # 会话开头列了扩展的本事：给她一个读全文的工具（放在工具列表最后，顺序固定）
+        skill_tools = [read_skill_tool(self.extensions, session.events[0]["skills"])] if session.events[0].get("skills") else []
         if computer:
-            extra = plan_tools(session.events)
+            extra = [*plan_tools(session.events), *skill_tools]
             policy = ComputerPolicy(session.cwd, self.computer_rules, mode, data_dir=self.data_dir, env_file=ENV_FILE)
         else:
             extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
@@ -173,7 +185,7 @@ class Runtime:
 
             browser = BrowserAccess(workspace, session.path)
             extra = [*extra, explorer.tool(), *browser.tools(), *plan_tools(session.events),
-                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp)]
+                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
             policy = Policy(session.cwd, self.rules, mode, self.mcp)
         agent = Agent(
             session,
@@ -339,7 +351,7 @@ class Runtime:
     def commands(self, cwd: str | Path | None, kind: str = "project") -> dict[str, Command]:
         """这个项目能用的自定义命令（每次现读：改了命令文件马上生效）。电脑任务只用自己的"""
         project = Path(cwd) if cwd and kind != "computer" else None
-        return load_commands(project, self.data_dir / "commands")
+        return load_commands(project, self.data_dir / "commands", self.extensions.command_dirs())
 
     def undo(self, sid: str, turn_seq: int | None = None) -> Event:
         """只撤销最近完整一轮的文件工具，撤销本身记在同一份追加日志里。"""
