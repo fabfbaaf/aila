@@ -16,7 +16,9 @@ import tools.jackson.databind.JsonNode;
  * 集成测试基类：在随机端口启动整个服务（内嵌 PostgreSQL），用真实的 HTTP 请求测。
  * 所有测试共用一个数据库，每个测试注册自己的用户，互不干扰。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        // 所有测试都从 127.0.0.1 注册、登录，按 IP 的限流放宽；限流本身在 AuthRateLimitTest 里单测
+        properties = "aila.auth-limit.requests=100000")
 @Import(EmbeddedPostgresConfig.class)
 public abstract class IntegrationTest {
 

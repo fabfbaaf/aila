@@ -66,16 +66,18 @@ cd aila-server
 
 - 密码用 BCrypt 存。BCrypt 只看前 72 个字节，超过的直接拒绝（中文一个字 3 个字节）。
 - 邮箱不存在时也算一次 BCrypt，响应时间和「密码错误」差不多，错误信息也一样，别人没法试出哪些邮箱注册过。
-- 同一个邮箱 15 分钟内输错 5 次，锁定 15 分钟（存在内存里，多实例部署时换成 Redis）。
-- 访问令牌是 15 分钟的 JWT，服务端只验签不查库；刷新令牌是 30 天的随机串，数据库里只存 SHA-256。
+- 同一个 IP 对同一个邮箱 15 分钟内输错 5 次，锁定 15 分钟。按「邮箱 + IP」锁：只按邮箱锁的话，谁都能故意输错几次把别人锁在外面。
+- 同一个 IP 10 分钟内最多注册、登录 30 次（`aila.auth-limit`），防撞库和批量注册。放在 nginx 这类反向代理后面时设 `AILA_FORWARD_HEADERS=native`，不然所有人都算成代理一个 IP；直接对外时别开，不然谁都能伪造 `X-Forwarded-For`。限流都存在内存里，多实例部署时换成 Redis。
+- 访问令牌是 15 分钟的 JWT，服务端验签、过期时间和签发方（`aila`），不查库；刷新令牌是 30 天的随机串，数据库里只存 SHA-256。
 - 刷新令牌每用一次就换新的。旧的又被拿来用，说明被偷了：这次登录换出来的整串令牌全部作废，其他设备不受影响。刷新时对令牌加行锁，同一个令牌被并发刷新也只有一个能成功；客户端也保证同一时间只发一个刷新请求。
-- WebSocket 握手和普通接口一样由 Spring Security 校验令牌；不放开跨域，浏览器里的网页也带不上 Authorization 头。
+- WebSocket 握手和普通接口一样由 Spring Security 校验令牌；不放开跨域，浏览器里的网页也带不上 Authorization 头。握手用的访问令牌过期后，下一次心跳或推送时断开（关闭码 4401），客户端拿新令牌重连：退出登录、令牌被作废的设备不会一直收着推送。
+- `/actuator` 只放 `health`。`metrics` 里有接口路径、在线连接数，要接监控时用 `AILA_ACTUATOR_EXPOSE=health,metrics` 打开，并且只让内网访问。
 - 每个连接包一层 `ConcurrentWebSocketSessionDecorator`：多个推送同时到达时排队发送；一个客户端卡住（发送超过 5 秒或积压超过 64KB）就断开它，不拖累别人。
 
 ## 以后要做的
 
 - 多实例部署：WebSocket 连接分散在不同实例上，推送要经过 Redis 发布订阅；登录限流也放到 Redis。
-- 压测：`aila.sync.connections`（`/actuator/metrics`）是当前在线连接数，第 10 周用它测 WebSocket 并发和接口 QPS。
+- 压测：`aila.sync.connections`（`/actuator/metrics`，默认不对外，压测时用 `AILA_ACTUATOR_EXPOSE` 打开）是当前在线连接数，第 10 周用它测 WebSocket 并发和接口 QPS。
 - 记忆的向量检索和资料库现在放在本地 AI 服务里（本机没有 pgvector，资料也不用上传）；代码索引（第 7–8 周）再考虑 pgvector。
 
 ## 目录

@@ -3,6 +3,7 @@ package com.aila.server.auth;
 import java.time.Clock;
 import java.util.LinkedHashMap;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
@@ -31,9 +32,11 @@ public class AuthController {
     private final UserRepository users;
     private final RefreshTokenRepository refreshTokens;
     private final Clock clock;
+    private final AuthRateLimit rateLimit;
 
     public AuthController(AuthService auth, TokenService tokens, UserRepository users,
-            RefreshTokenRepository refreshTokens, Clock clock) {
+            RefreshTokenRepository refreshTokens, Clock clock, AuthRateLimit rateLimit) {
+        this.rateLimit = rateLimit;
         this.auth = auth;
         this.tokens = tokens;
         this.users = users;
@@ -43,13 +46,15 @@ public class AuthController {
 
     @PostMapping("/api/auth/register")
     @ResponseStatus(HttpStatus.CREATED)
-    TokenResponse register(@Valid @RequestBody RegisterRequest r) {
+    TokenResponse register(@Valid @RequestBody RegisterRequest r, HttpServletRequest req) {
+        rateLimit.check(req.getRemoteAddr());
         return TokenResponse.of(auth.register(r));
     }
 
     @PostMapping("/api/auth/login")
-    TokenResponse login(@Valid @RequestBody LoginRequest r) {
-        return TokenResponse.of(auth.login(r));
+    TokenResponse login(@Valid @RequestBody LoginRequest r, HttpServletRequest req) {
+        rateLimit.check(req.getRemoteAddr());
+        return TokenResponse.of(auth.login(r, req.getRemoteAddr()));
     }
 
     @PostMapping("/api/auth/refresh")

@@ -1,6 +1,7 @@
 package com.aila.server.sync;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,6 +26,8 @@ import io.micrometer.core.instrument.MeterRegistry;
  * 所以断线、重连、服务端重启都不会丢数据。推送只是让同步更及时。
  *
  * 握手请求要带 Authorization: Bearer 访问令牌，在 Spring Security 那一层就校验了。
+ * 握手之后连接会一直开着：令牌过期以后（退出登录、刷新令牌被作废都会让它续不上），
+ * 下一次心跳或推送时断开，客户端拿新令牌重连，拿不到就不再收推送。
  */
 @Component
 public class SyncSocketHandler extends TextWebSocketHandler {
@@ -36,10 +39,15 @@ public class SyncSocketHandler extends TextWebSocketHandler {
 
     /** 用户 → 这个用户的所有连接（每台设备一个） */
     private final Map<Long, Map<String, WebSocketSession>> sessions = new ConcurrentHashMap<>();
-    private final JdbcClient jdbc;
+    /** 令牌过期断开用的关闭码（4000 起是应用自己定义的） */
+    static final CloseStatus TOKEN_EXPIRED = new CloseStatus(4401, "访问令牌过期了");
 
-    public SyncSocketHandler(JdbcClient jdbc, MeterRegistry meters) {
+    private final JdbcClient jdbc;
+    private final Clock clock;
+
+    public SyncSocketHandler(JdbcClient jdbc, MeterRegistry meters, Clock clock) {
         this.jdbc = jdbc;
+        this.clock = clock;
         Gauge.builder("aila.sync.connections", this, SyncSocketHandler::connectionCount)
                 .description("当前在线的同步连接数")
                 .register(meters);
@@ -58,6 +66,10 @@ public class SyncSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession raw, TextMessage message) throws IOException {
         // 应用层心跳：客户端每隔一会儿发 ping，收不到 pong 就认为连接已经断了，主动重连
+        if (expired(raw)) {
+            closeQuietly(raw, TOKEN_EXPIRED);
+            return;
+        }
         if (message.getPayload().contains("\"ping\"")) {
             var session = find(raw);
             if (session != null) {
@@ -87,12 +99,16 @@ public class SyncSocketHandler extends TextWebSocketHandler {
         }
         var message = new TextMessage("{\"type\":\"changed\",\"seq\":" + seq + "}");
         for (var session : userSessions.values()) {
+            if (expired(session)) {
+                closeQuietly(session, TOKEN_EXPIRED);
+                continue;
+            }
             try {
                 session.sendMessage(message);
             } catch (IOException | RuntimeException e) {
                 // 发不出去的连接关掉，客户端会重连并补拉
                 log.debug("推送失败，关闭连接 {}", session.getId(), e);
-                closeQuietly(session);
+                closeQuietly(session, CloseStatus.SESSION_NOT_RELIABLE);
             }
         }
     }
@@ -106,6 +122,14 @@ public class SyncSocketHandler extends TextWebSocketHandler {
         return userSessions == null ? null : userSessions.get(raw.getId());
     }
 
+    private boolean expired(WebSocketSession session) {
+        if (session.getPrincipal() instanceof JwtAuthenticationToken token) {
+            var exp = token.getToken().getExpiresAt();
+            return exp != null && !clock.instant().isBefore(exp);
+        }
+        return true;
+    }
+
     private static long userId(WebSocketSession session) {
         if (session.getPrincipal() instanceof JwtAuthenticationToken token) {
             return Long.parseLong(token.getToken().getSubject());
@@ -113,9 +137,9 @@ public class SyncSocketHandler extends TextWebSocketHandler {
         throw new IllegalStateException("同步连接没有登录信息");
     }
 
-    private static void closeQuietly(WebSocketSession session) {
+    private static void closeQuietly(WebSocketSession session, CloseStatus status) {
         try {
-            session.close(CloseStatus.SESSION_NOT_RELIABLE);
+            session.close(status);
         } catch (IOException ignored) {
             // 已经断了
         }

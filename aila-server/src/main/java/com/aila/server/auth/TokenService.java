@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.aila.server.common.ApiException;
 import com.aila.server.config.AilaProperties;
+import com.aila.server.config.JwtConfig;
 
 /**
  * 两种令牌：
@@ -92,7 +93,7 @@ public class TokenService {
     private Session issue(User user, String deviceId, String deviceName, UUID family) {
         var now = clock.instant();
         var claims = JwtClaimsSet.builder()
-                .issuer("aila")
+                .issuer(JwtConfig.ISSUER)
                 .subject(user.getId().toString())
                 .issuedAt(now)
                 .expiresAt(now.plus(accessTtl))
