@@ -7,6 +7,8 @@ export interface ServiceCommand {
   executable: string
   args: string[]
   cwd: string
+  /** 额外的环境变量（安装包里用来把用户的文件指到 userData） */
+  env?: Record<string, string>
 }
 
 export type Health = 'ready' | 'offline' | 'occupied'

@@ -17,7 +17,7 @@ from ..confirm import Confirmations
 from ..deps import get_confirmations, get_embedder, get_model, get_registry, status
 from ..llm import ChatModel, Message, classify_error
 from ..memory import Memory, Turn, describe, extract, recall
-from ..persona import SYSTEM_PROMPT
+from ..persona import system_prompt
 from ..tags import Event
 from ..tools import SkillRegistry
 
@@ -55,7 +55,7 @@ def _aware(t: datetime | None) -> datetime | None:
     return t.astimezone() if t is not None else None
 
 
-def build_messages(history: list[ChatMessage], max_history: int, context: str = "") -> list[Message]:
+def build_messages(history: list[ChatMessage], max_history: int, context: str = "", system: str = "") -> list[Message]:
     """固定的系统提示词 + 最近的对话；日期和记忆放在最后一句话前面的 <背景> 里。
 
     按 DeepSeek 的前缀缓存来排（和编程 Agent 一样）：
@@ -80,7 +80,7 @@ def build_messages(history: list[ChatMessage], max_history: int, context: str = 
             merged.append({"role": m.role, "content": m.content})
     if context and merged and merged[-1]["role"] == "user":
         merged[-1] = {"role": "user", "content": f"<背景>\n{context}\n</背景>\n\n{merged[-1]['content']}"}
-    return [{"role": "system", "content": SYSTEM_PROMPT}, *merged]
+    return [{"role": "system", "content": system or system_prompt()}, *merged]
 
 
 async def memory_context(req: ChatRequest, embedder: Any) -> str:
@@ -124,7 +124,9 @@ async def chat(
 ) -> StreamingResponse:
     if req.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="最后一条必须是用户消息")
-    messages = build_messages(req.messages, deps.settings.max_history, await memory_context(req, embedder))
+    s = deps.settings
+    messages = build_messages(req.messages, s.max_history, await memory_context(req, embedder),
+                              system_prompt(s.persona_style, s.persona_call, s.persona_catchphrase))
     # 这次能用哪些工具：用户开着的技能包里的（资料库空着时不给）
     toolbox = await asyncio.to_thread(registry.toolbox, req.skills)
 

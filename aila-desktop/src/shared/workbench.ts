@@ -13,10 +13,22 @@ export interface GraphNode {
   lines: number
   functions: number
   modified: boolean // 还没提交的改动
+  /** 最近的提交里改过几次（「按改动」上色；旧服务没有） */
+  churn?: number
 }
 
-/** call：函数调用；http：请求了另一个文件提供的接口；ipc：发了另一个文件处理的 IPC 消息 */
-export type LinkKind = 'call' | 'http' | 'ipc'
+/** call：函数调用；import：import 了另一个文件；http：请求了另一个文件提供的接口；ipc：发了另一个文件处理的 IPC 消息 */
+export type LinkKind = 'call' | 'import' | 'http' | 'ipc'
+
+/** 项目用到的第三方库（星图外圈的「恒星」）：哪些文件 import 了它 */
+export interface LibInfo {
+  /** 生态:名字（npm:vue、python:fastapi、java:org.springframework） */
+  id: string
+  name: string
+  ecosystem: 'npm' | 'python' | 'java'
+  users: string[]
+  count: number
+}
 
 /** 一条光线 = 一个文件用到另一个文件（同一对文件之间汇总，weight 是次数或经过的接口数） */
 export interface GraphLink {
@@ -32,6 +44,8 @@ export interface GraphLink {
 export interface CodeGraph {
   nodes: GraphNode[]
   links: GraphLink[]
+  /** 旧服务没有 */
+  libs?: LibInfo[]
 }
 
 /** 文件里的函数和类（全息面板列出来） */

@@ -1,6 +1,6 @@
 /** 托管服务的 Node 适配器：定位可执行文件、直连本地健康接口、仅结束自己创建的进程树。 */
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
-import { readFileSync, statSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { request } from 'node:http'
 import { request as secureRequest } from 'node:https'
 import { createConnection } from 'node:net'
@@ -18,10 +18,36 @@ export interface ServiceLocation {
   directory: (path: string) => boolean
   /** 本机测试版（npm run pack:local）打包时记下的仓库 aila-ai 目录；正式安装包没有这个 */
   localDir?: string
+  /** 安装包的 resources 目录（里面有 aila-ai/aila-ai.exe） */
+  resourcesPath?: string
+  /** app.getPath('userData')：用户的密钥、会话、模型都放这里，不写安装目录 */
+  userData?: string
 }
 
-/** 安装包里的启动方式由任务 06 补充；现在找不到时给出 missing，而不是猜一个系统 Python。 */
-export function packagedCommand(): ServiceCommand | null { return null }
+/**
+ * 安装包：resources/aila-ai/aila-ai.exe（scripts/build_service.py 打的，里面带了 Python）。
+ * 用户的东西全部指到 userData/ai/ 下面：卸载、升级都不会动它们，安装目录里也不会多出文件。
+ * .env 第一次在设置页保存时由 AI 服务照着安装包里的 .env.example 建；没有时就是没填密钥（用假模型）。
+ * 找不到 exe 时返回 null（状态是「找不到 AI 服务」），不去猜一个系统 Python。
+ */
+export function packagedCommand(location: Pick<ServiceLocation, 'resourcesPath' | 'userData' | 'file'>): ServiceCommand | null {
+  const { resourcesPath, userData } = location
+  if (!resourcesPath || !userData) return null
+  const executable = join(resourcesPath, 'aila-ai', 'aila-ai.exe')
+  if (!location.file(executable)) return null
+  const home = join(userData, 'ai')
+  return {
+    executable,
+    args: [],
+    cwd: home,
+    env: {
+      AILA_ENV_FILE: join(home, '.env'),
+      AILA_DATA_DIR: join(home, 'data'),
+      AILA_MODELS_DIR: join(home, 'models'),
+      AILA_MCP_CONFIG: join(home, 'mcp.json')
+    }
+  }
+}
 
 /** 本机测试版的记录：resources/local-service.json 里的 {"aiDir": "..."}；没有、读不了、格式不对都当没有 */
 export function readLocalService(resourcesPath: string, read = (path: string) => readFileSync(path, 'utf8')): string | undefined {
@@ -36,7 +62,7 @@ export function readLocalService(resourcesPath: string, read = (path: string) =>
 export function locateService(location: ServiceLocation): ServiceCommand | null {
   const { env, platform } = location
   const explicit = env['AILA_AI_PYTHON'] || env['AILA_AI_DIR']
-  if (location.packaged && !explicit && !location.localDir) return packagedCommand()
+  if (location.packaged && !explicit && !location.localDir) return packagedCommand(location)
   // 本机测试版：用打包时记下的仓库目录（还是这台电脑上的虚拟环境）
   const cwd = resolve(env['AILA_AI_DIR'] || (location.packaged && location.localDir) || join(location.appPath, '..', 'aila-ai'))
   const executable = resolve(env['AILA_AI_PYTHON'] || join(cwd, '.venv', platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'))
@@ -92,20 +118,28 @@ export async function checkServiceHealth(baseUrl: string, signal: AbortSignal): 
 
 interface OwnedProcess extends ServiceProcess { child: ChildProcess }
 
-export function createServiceKeeper(options: { packaged: boolean; appPath: string; url: string; changed: (state: ServiceState) => void }): ServiceKeeper {
-  const endpoint = new URL(options.url)
+/** 找 AI 服务的启动方式（每次调用都重新找：开发时可能刚建好虚拟环境）。下载语音模型也用它 */
+export function serviceLocator(options: { packaged: boolean; appPath: string; userData: string }): () => ServiceCommand | null {
   const localDir = options.packaged ? readLocalService(process.resourcesPath) : undefined
+  const resourcesPath = options.packaged ? process.resourcesPath : undefined
+  return () => locateService({ ...options, localDir, resourcesPath, env: process.env, platform: process.platform, file: (path) => hasType(path, false), directory: (path) => hasType(path, true) })
+}
+
+export function createServiceKeeper(options: { locate: () => ServiceCommand | null; url: string; changed: (state: ServiceState) => void }): ServiceKeeper {
+  const endpoint = new URL(options.url)
   return new ServiceKeeper({
     port: endpoint.port || (endpoint.protocol === 'https:' ? '443' : '80'),
-    command: () => locateService({ ...options, localDir, env: process.env, platform: process.platform, file: (path) => hasType(path, false), directory: (path) => hasType(path, true) }),
+    command: options.locate,
     now: Date.now,
     later: (callback, delay) => { const timer = setTimeout(callback, delay); return () => clearTimeout(timer) },
     health: (signal) => checkServiceHealth(options.url, signal),
     changed: options.changed,
     spawn: (command, output, exit) => {
+      // 安装包第一次运行时 userData/ai 还不存在：工作目录不存在 spawn 会直接失败
+      mkdirSync(command.cwd, { recursive: true })
       const child = spawn(command.executable, command.args, {
         cwd: command.cwd,
-        env: { ...process.env, AILA_HOST: endpoint.hostname, AILA_PORT: endpoint.port || '8765', PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env, ...command.env, AILA_HOST: endpoint.hostname, AILA_PORT: endpoint.port || '8765', PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         windowsHide: true,
         detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe']

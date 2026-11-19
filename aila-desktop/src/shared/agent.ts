@@ -55,6 +55,14 @@ export interface AgentSessionSummary {
   shell?: string
   /** 在新分支上做时的分支名（放弃了或者不在分支上是 null） */
   branch?: string | null
+  /** 看板用：她最近一次要用的工具和对象 */
+  activity?: { tool: string; target: string } | null
+  /** 上一轮怎么结束的（done、error、max_steps、interrupted、budget……）；还没做过是 null */
+  outcome?: string | null
+  /** 这个会话里改过几个文件 */
+  edits?: number
+  /** 还没回答的确认（action 是代码按参数生成的说明） */
+  pending?: { id: string; tool: string; action: string; can_remember: boolean } | null
 }
 
 /** 一个事件。带 seq 的写在会话日志里；text_delta、reasoning_delta、tool_start 只是实时推送 */
@@ -83,6 +91,22 @@ export interface AgentBudgetEvent extends AgentEvent {
 
 export interface AgentSession extends Omit<AgentSessionSummary, 'events'> {
   events: AgentEvent[]
+}
+
+/** 自定义命令（GET /agent/commands）：项目 .aila/commands/ 或自己的 commands/ 里的「/名字」 */
+export interface AgentCommand {
+  name: string
+  description: string
+  /** project：项目里的；user：自己的（每个项目都能用） */
+  source: 'project' | 'user'
+  path: string
+}
+
+export interface AgentCommandList {
+  commands: AgentCommand[]
+  /** 项目命令放哪（电脑任务没有） */
+  project_dir: string | null
+  user_dir: string
 }
 
 /** 项目记忆的一条（GET /agent/memory?cwd=）：下次在这个项目开会话时放进开头 */
@@ -133,6 +157,15 @@ export type AgentProgress =
   | { kind: 'plan_end' }
   | { kind: 'plan_pause'; text: string }
   | { kind: 'error'; message: string }
+  /** 她跑了一次测试：ok 过没过；streak 连着没过几次（过了是 0）；recovered 之前没过、这次过了 */
+  | { kind: 'tests'; ok: boolean; streak: number; recovered: boolean }
+
+/** 是不是在跑测试（她用 run_command 跑的那条命令）：常见的测试命令 */
+export function isTestCommand(command: string): boolean {
+  return /(^|[\s;&|/\\])(pytest|vitest|jest|mocha)(\s|$)|-m\s+pytest|\b(npm|pnpm|yarn)(\.cmd)?\s+(run\s+)?test\b|\bnpx(\.cmd)?\s+(vitest|jest)\b|mvnw?(\.cmd)?\s+(-\S+\s+)*test\b|\bgradlew?\s+test\b|\b(go|cargo|dotnet)\s+test\b|\bnode\s+--test\b/i.test(
+    command
+  )
+}
 /** 浏览器生成的截屏只用文件名在事件里引用，不携带本机路径。 */
 export function isAgentScreenshotName(value: unknown): value is string {
   return typeof value === 'string' && value.length === 36 && /^[0-9a-f]{32}\.png$/.test(value)

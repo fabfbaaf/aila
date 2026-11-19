@@ -12,7 +12,9 @@ import com.aila.server.common.ApiException;
 import com.aila.server.config.AilaProperties;
 
 /**
- * 防暴力破解：同一个邮箱在一段时间内连续输错太多次，就锁定一会儿。
+ * 防暴力破解：同一个 IP 对同一个邮箱在一段时间内连续输错太多次，就锁定一会儿。
+ * 键是「邮箱|IP」：只按邮箱锁的话，谁都能故意输错几次把别人的账号锁住。
+ * 换着 IP 来试的，由 {@link AuthRateLimit} 按 IP 限总次数，加上 BCrypt 本身慢。
  * 存在内存里，只适合单实例；以后部署多个实例时换成 Redis。
  */
 @Component

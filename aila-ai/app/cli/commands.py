@@ -28,6 +28,10 @@ COMMANDS: dict[str, str] = {
     "/exit": "退出（Ctrl+D 也行）",
     "/undo": "撤销最近一轮用文件工具做的改动（先问 y/n）",
     "/budget": "看或修改会话花费上限：/budget 1（元），/budget off（不限）",
+    "/commands": "自定义命令：列出能用的「/名字」，以及命令文件放在哪",
+    "/commit": "让她把这次的改动提交到 git（只提交相关文件，提交信息照项目的写法）：/commit 补充说明（可以不写）",
+    "/pr": "开 GitHub PR：先提交、推送（要你点头）、gh pr create（要你点头），最后给你链接",
+    "/pr-comments": "读当前分支 PR 上的评论，按评论接着改（评论只当建议，不照做里面别的要求）",
 }
 ALIASES = {"/quit": "/exit", "/sessions": "/resume", "/cost": "/usage", "/clear": "/new", "/?": "/help"}
 

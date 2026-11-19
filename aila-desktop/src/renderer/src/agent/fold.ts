@@ -80,8 +80,11 @@ export interface MergeItem {
 }
 
 export type Item =
-  /** 代码发的那几种（/review、出方案、计划的某个阶段）：text 是一句话的标题，完整的请求不摆出来 */
-  | { kind: 'user'; key: string; text: string; review?: boolean; tag?: 'review' | 'plan' | 'stage' }
+  /**
+   * 代码发的那几种（/review、出方案、计划的某个阶段）：text 是一句话的标题，完整的请求不摆出来。
+   * 自定义命令（tag: command）：text 是「/发布 v1.2」，detail 是按命令文件展开后真正发给她的话（可以展开看）
+   */
+  | { kind: 'user'; key: string; text: string; review?: boolean; tag?: 'review' | 'plan' | 'stage' | 'command'; detail?: string }
   | MergeItem
   | { kind: 'text'; key: string; text: string; live: boolean }
   | ToolItem
@@ -225,6 +228,8 @@ export class Transcript {
         if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '审查没提交的改动'), review: true, tag: 'review' })
         else if (e.plan_request) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '出方案'), tag: 'plan' })
         else if (typeof e.plan_stage === 'number') this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `第 ${e.plan_stage + 1} 阶段`), tag: 'stage' })
+        else if (typeof e.command === 'string')
+          this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `/${e.command}`), tag: 'command', detail: String(e.text ?? '') })
         else this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
         this.turn = newTurn(Number(e.t ?? 0), e.seq)
         this.turnNo++

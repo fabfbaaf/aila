@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field, field_validator
 from .. import deps
 from ..deps import get_model, mcp_status, status
 from ..llm import ChatModel, classify_error
+from ..models_download import missing as missing_models
+from ..persona import STYLES
 
 router = APIRouter(prefix="/settings")
 
@@ -37,6 +39,8 @@ def read() -> dict[str, Any]:
         "search": {"provider": s.search_provider if s.search_provider in ("bocha", "tavily", "none") else "bocha",
                    "apiKeySet": bool(s.search_api_key)},
         "computer": {"inventory": s.computer_inventory},
+        "persona": {"style": s.persona_style if s.persona_style in STYLES else "gentle", "call": s.persona_call,
+                    "catchphrase": s.persona_catchphrase},
         "voice": {
             "enabled": s.voice,
             "ttsEngine": s.tts_engine,
@@ -46,6 +50,8 @@ def read() -> dict[str, Any]:
             "wakeThreshold": s.wake_threshold,
             "endSilence": s.end_silence,
             "asrLanguage": s.asr_language,
+            # 默认要的语音模型里还没下载的（安装包不带模型，设置页据此显示「下载语音模型」）
+            "modelsMissing": missing_models(s.models_dir),
         },
         "status": dict(status),
         "mcp": mcp_status(),
@@ -64,6 +70,10 @@ class SettingsUpdate(BaseModel):
     # 查资料的子 Agent 用的模型；空字符串 = 和编程用的一样
     coderFastModel: str | None = Field(default=None, max_length=100)
     computerInventory: bool | None = Field(default=None, strict=True)
+    # 性格：风格、怎么称呼你、口头禅（空字符串 = 不用）
+    personaStyle: Literal["gentle", "lively", "calm", "teasing"] | None = None
+    personaCall: str | None = Field(default=None, max_length=12)
+    personaCatchphrase: str | None = Field(default=None, max_length=12)
     searchProvider: Literal["bocha", "tavily", "none"] | None = None
     searchApiKey: str | None = Field(default=None, max_length=300)
     ttsEngine: Literal["melo", "kokoro", "matcha"] | None = None
@@ -80,6 +90,13 @@ class SettingsUpdate(BaseModel):
             raise ValueError("地址要以 http:// 或 https:// 开头")
         return v.rstrip("/") if v else v
 
+    @field_validator("personaCall", "personaCatchphrase")
+    @classmethod
+    def _short(cls, v: str | None) -> str | None:
+        if v is not None and any(not ch.isprintable() for ch in v):
+            raise ValueError("不能有换行或控制字符")
+        return v.strip() if v is not None else v
+
     @field_validator("llmApiKey", "searchApiKey")
     @classmethod
     def _key(cls, v: str | None) -> str | None:
@@ -92,6 +109,7 @@ ENV_NAMES = {
     "llmBaseUrl": "LLM_BASE_URL", "llmModel": "LLM_MODEL", "llmApiKey": "LLM_API_KEY",
     "coderModel": "AILA_CODER_MODEL", "coderFastModel": "AILA_CODER_FAST_MODEL",
     "computerInventory": "AILA_COMPUTER_INVENTORY",
+    "personaStyle": "AILA_PERSONA_STYLE", "personaCall": "AILA_PERSONA_CALL", "personaCatchphrase": "AILA_PERSONA_CATCHPHRASE",
     "searchProvider": "SEARCH_PROVIDER", "searchApiKey": "SEARCH_API_KEY",
     "ttsEngine": "AILA_TTS_ENGINE", "ttsSpeaker": "AILA_TTS_SPEAKER", "ttsSpeed": "AILA_TTS_SPEED",
     "wakeThreshold": "AILA_WAKE_THRESHOLD", "endSilence": "AILA_END_SILENCE", "asrLanguage": "AILA_ASR_LANGUAGE",

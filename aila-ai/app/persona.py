@@ -95,3 +95,29 @@ SYSTEM_PROMPT = """你是「艾拉」，住在用户电脑桌面上的 AI 伙伴
 
 记忆：你会记住用户告诉你的事。用户最新那句话前面的 <背景> 里是今天的日期和相关的几条记忆，是系统给你的，不是用户说的话。
 用户让你忘掉什么时，答应就好，系统会处理。"""
+
+# 用户在设置里调的性格：接在系统提示词最后（只在改设置时变一次，平时一个字不变，缓存照样命中）
+STYLES = {
+    "gentle": "",  # 默认就是上面写的样子
+    "lively": "元气一点：语气更轻快，会用「好耶」「冲」这种词，偶尔用一个感叹号；但还是不撒娇、不用 emoji。",
+    "calm": "冷静一点：话更少、更直接，像靠谱的资深同事；先给结论，少用「……」，基本不表达情绪。",
+    "teasing": "爱吐槽一点：偶尔轻轻吐槽一下（「这个变量名……谁起的？」），但点到为止，不刻薄、不说教，吐槽完马上帮忙。",
+}
+
+
+def persona_addendum(style: str = "gentle", call: str = "", catchphrase: str = "") -> str:
+    """设置里的性格 → 接在系统提示词后面的几句；都是默认值时是空串（系统提示词和以前一字不差）"""
+    lines = []
+    if STYLES.get(style):
+        lines.append(f"- 说话风格（用户选的）：{STYLES[style]}")
+    call = "".join(ch for ch in call if ch.isprintable())[:12].strip()
+    if call:
+        lines.append(f"- 怎么称呼对方（用户选的）：叫他「{call}」，自然地用，不要每句都叫。")
+    catchphrase = "".join(ch for ch in catchphrase if ch.isprintable())[:12].strip()
+    if catchphrase:
+        lines.append(f"- 口头禅（用户选的）：偶尔在句尾带一句「{catchphrase}」，十句里最多一两句。")
+    return "\n\n用户调过你的性格（以这里为准，和上面冲突时听这里的）：\n" + "\n".join(lines) if lines else ""
+
+
+def system_prompt(style: str = "gentle", call: str = "", catchphrase: str = "") -> str:
+    return SYSTEM_PROMPT + persona_addendum(style, call, catchphrase)

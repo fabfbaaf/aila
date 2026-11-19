@@ -25,12 +25,14 @@ import type {
 } from '../shared/settings'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
-import type { AgentActivity, AgentBudgetEvent, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
+import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
+import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
 import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
+import type { ModelDownloadState } from '../shared/models'
 
 /** 取消订阅 */
 export type Unsubscribe = () => void
@@ -52,6 +54,10 @@ const api = {
   serviceLogs: (): Promise<AiResult<ServiceLog[]>> => ipcRenderer.invoke('service:logs'),
   serviceRestart: (): Promise<ServiceResult> => ipcRenderer.invoke('service:restart'),
   onServiceState: (cb: (state: ServiceState) => void): Unsubscribe => listen('service:state', cb),
+  // 下载语音模型（只有主窗口能用）
+  modelsStatus: (): Promise<ModelDownloadState | null> => ipcRenderer.invoke('models:status'),
+  modelsDownload: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('models:download'),
+  onModelsState: (cb: (state: ModelDownloadState) => void): Unsubscribe => listen('models:state', cb),
   setIgnoreMouse: (ignore: boolean): void => ipcRenderer.send('win:set-ignore-mouse', ignore),
   focusWindow: (): void => ipcRenderer.send('win:focus'),
   blurWindow: (): void => ipcRenderer.send('win:blur'),
@@ -147,6 +153,8 @@ const api = {
   /** 仅主窗口：改会话标题、删除会话 */
   agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
   agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),
+  agentCommands: (cwd: string | null, kind: AgentKind): Promise<AiResult<AgentCommandList>> =>
+    ipcRenderer.invoke('agent:commands', cwd, kind),
   agentMemory: (cwd: string): Promise<AiResult<AgentMemoryNote[]>> => ipcRenderer.invoke('agent:memory', cwd),
   agentRemember: (cwd: string, text: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> =>
     ipcRenderer.invoke('agent:memory-add', cwd, text),
@@ -186,6 +194,17 @@ const api = {
     ipcRenderer.invoke('agent:task', task),
   /** 从任何窗口打开工作窗口（可以指定会话） */
   openAgent: (sid?: string): void => ipcRenderer.send('agent:open', sid),
+  // 她的作品、日记（主窗口的作品页用；studioShow 是气泡里点「看看」）
+  studioList: (): Promise<AiResult<Work[]>> => ipcRenderer.invoke('studio:list'),
+  studioGet: (id: string): Promise<AiResult<WorkDetail>> => ipcRenderer.invoke('studio:get', id),
+  studioDelete: (id: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('studio:delete', id),
+  studioOpen: (id: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('studio:open', id),
+  studioReveal: (id: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('studio:reveal', id),
+  studioNow: (idea?: { title: string; idea: string; kind: 'web' | 'script' }): Promise<AiResult<Work>> =>
+    ipcRenderer.invoke('studio:now', idea ?? null),
+  studioDiary: (): Promise<AiResult<DiaryEntry[]>> => ipcRenderer.invoke('studio:diary'),
+  studioKnown: (): Promise<{ firstSeen?: string; days: number } | null> => ipcRenderer.invoke('studio:known'),
+  studioShow: (id?: string): void => ipcRenderer.send('studio:show', id),
 
   // 代码库
   codeList: (): Promise<AiResult<CodeProject[]>> => ipcRenderer.invoke('code:list'),
@@ -193,6 +212,7 @@ const api = {
   /** 弹出选文件夹的对话框；取消了返回 null */
   codeAdd: (): Promise<AiResult<CodeProject> | null> => ipcRenderer.invoke('code:add'),
   codeRefresh: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:refresh', id),
+  codeIgnore: (id: string, patterns: string[]): Promise<AiResult<CodeProject>> => ipcRenderer.invoke('code:ignore', id, patterns),
   codeRemove: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:remove', id),
   onKnowledgeBusy: (cb: (count: number) => void): Unsubscribe => listen('knowledge:busy', cb),
 

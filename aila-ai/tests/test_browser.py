@@ -268,3 +268,29 @@ async def test_agent_asks_before_clicking_and_keeps_history_append_only(browser:
     assert "网页标题：" in tool_results[0]  # 第一次看的页面原样留着：只追加，前缀缓存才能命中
     assert third[: len(model.calls[1][0])] == model.calls[1][0]
     assert "点了按钮「点赞」" in tool_results[1]
+
+
+@pytest.mark.anyio
+async def test_playwright_start_that_never_answers_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Playwright 的驱动偶尔起来了却不回话（测试里卡住过）：限时，第一次没回就再起一个，两次都不回就报错"""
+    import asyncio
+
+    from app.browser import session as browser_session
+
+    monkeypatch.setattr(browser_session, "PW_START_TIMEOUT", 0.05)
+    calls: list[int] = []
+
+    class Starter:
+        def __init__(self, hang: bool) -> None:
+            self.hang = hang
+
+        async def start(self) -> str:
+            calls.append(1)
+            if self.hang:
+                await asyncio.sleep(10)
+            return "pw"
+
+    plan = iter([True, False])
+    assert await browser_session.start_playwright(lambda: Starter(next(plan))) == "pw" and len(calls) == 2
+    with pytest.raises(BrowserError, match="启动超时"):
+        await browser_session.start_playwright(lambda: Starter(True))

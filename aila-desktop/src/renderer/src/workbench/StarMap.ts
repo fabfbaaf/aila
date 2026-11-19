@@ -23,7 +23,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, forceZ, type Simulation } from 'd3-force-3d'
-import type { CodeGraph, GraphNode, LinkKind } from '../../../shared/workbench'
+import type { CodeGraph, GraphNode, LibInfo, LinkKind } from '../../../shared/workbench'
 import {
   CHAIN_COLOR,
   HTTP_COLOR,
@@ -57,6 +57,8 @@ interface Star extends GraphNode {
   z?: number
   radius: number
   color: THREE.Color
+  /** 按子项目的颜色（换上色方式时 color 会变，换回来用它） */
+  base: THREE.Color
   mod: string
   anchor: Vec3
   /** 画在哪：拉远时往模块中心收拢（力导向算的是 x、y、z，这里是画出来的位置） */
@@ -86,6 +88,7 @@ interface Planet {
 interface Cluster {
   info: ModuleInfo
   color: THREE.Color
+  base: THREE.Color
   stars: Star[]
   center: THREE.Vector3
   extent: number
@@ -101,6 +104,22 @@ interface Galaxy {
   stars: Star[]
   label: CSS2DObject
 }
+
+/** 一个第三方库：外圈的恒星，朝着用它的星系，连到用它的模块 */
+interface LibStar {
+  lib: LibInfo
+  color: THREE.Color
+  radius: number
+  mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>
+  halo: THREE.Sprite
+  label: CSS2DObject
+  /** 用它的文件所在的模块 */
+  modules: string[]
+  at: THREE.Vector3
+}
+
+/** 恒星的颜色按生态分：npm 暖橙、Python 浅蓝、Java 浅粉（都很淡，和子项目的颜色分得开） */
+const LIB_COLORS: Record<string, string> = { npm: '#ffd6a5', python: '#bde0fe', java: '#ffc8dd' }
 
 const BACKGROUND = 0x04060d
 const DIM = 0.22 // 有报错高亮时，其余的星球暗到多少
@@ -119,6 +138,10 @@ export class StarMap {
   onHover: (node: GraphNode | null, x: number, y: number) => void = () => {}
   /** 鼠标移到模块的大星上（移开是 null） */
   onHoverModule: (m: ModuleInfo | null, x: number, y: number) => void = () => {}
+  /** 点了外圈的第三方库（点别处是 null） */
+  onSelectLib: (lib: LibInfo | null) => void = () => {}
+  /** 鼠标移到第三方库上（移开是 null） */
+  onHoverLib: (lib: LibInfo | null, x: number, y: number) => void = () => {}
 
   private renderer: THREE.WebGLRenderer
   /** 名字用 HTML 叠在上面：字清楚，也不会被泛光糊掉 */
@@ -146,6 +169,14 @@ export class StarMap {
   private arcSparks: THREE.Points | null = null
   private arcPhase: Float32Array = new Float32Array(0)
   private moduleLines: THREE.LineSegments | null = null
+  /** import（项目里文件之间）：参与布局，拉远时并进模块之间的光线 */
+  private imports: Ray[] = []
+  private libs: LibStar[] = []
+  /** 第三方库连到用它的模块的线 */
+  private libLines: THREE.LineSegments | null = null
+  private hoveredLib: string | null = null
+  private selectedLib: string | null = null
+  private showLibs = true
   private center = new THREE.Vector3()
   private sim: Simulation<Star> | null = null
   private highlight: Highlight | null = null
@@ -241,6 +272,7 @@ export class StarMap {
         anchor,
         radius: nodeRadius(n.lines) * (n.test ? 0.8 : 1),
         color,
+        base: color.clone(),
         at: new THREE.Vector3(),
         x: anchor[0] + (Math.random() - 0.5) * 20,
         y: anchor[1] + (Math.random() - 0.5) * 20,
@@ -257,23 +289,34 @@ export class StarMap {
       kind: kindOf(l)
     })
     this.rays = kept.filter((l) => kindOf(l) === 'call').map(toRay)
-    this.bridges = kept.filter((l) => kindOf(l) !== 'call').map(toRay)
-    this.moduleRays = moduleLinks.filter((l) => l.kind === 'call')
+    this.bridges = kept.filter((l) => kindOf(l) === 'http' || kindOf(l) === 'ipc').map(toRay)
+    this.imports = kept.filter((l) => kindOf(l) === 'import').map(toRay)
+    // 模块之间：调用和 import 合成一条（同一对模块只画一条）
+    const merged = new Map<string, ModuleLink>()
+    for (const l of moduleLinks) {
+      if (l.kind !== 'call' && l.kind !== 'import') continue
+      const key = `${l.source}→${l.target}`
+      const cur = merged.get(key) ?? { source: l.source, target: l.target, kind: 'call' as const, weight: 0 }
+      cur.weight += l.weight
+      merged.set(key, cur)
+    }
+    this.moduleRays = [...merged.values()]
 
     for (const star of this.stars) this.addPlanet(star)
     for (const m of modules) this.addCluster(m, new THREE.Color(colors.get(m.group) ?? '#8fa8ff'))
     for (const g of groups) this.addGalaxy(g, colors.get(g) ?? '#8fa8ff')
+    for (const lib of graph.libs ?? []) this.addLib(lib)
     this.buildRays()
 
-    // 弧线也参与布局：拉得比函数调用松一些（前后端本来就在两个星系里）
-    const pulls = [...this.rays, ...this.bridges]
+    // 弧线也参与布局：拉得比函数调用松一些（前后端本来就在两个星系里）；import 和调用一样拉近
+    const pulls = [...this.rays, ...this.imports, ...this.bridges]
     this.sim = forceSimulation<Star>(this.stars, 3)
       .force(
         'link',
         forceLink<Star, Ray>(pulls)
           .id((s) => s.id)
-          .distance((r) => (r.kind === 'call' ? 16 + 26 / Math.sqrt(r.weight) : 120))
-          .strength((r) => (r.kind === 'call' ? 0.22 : 0.01))
+          .distance((r) => (r.kind === 'call' ? 16 + 26 / Math.sqrt(r.weight) : r.kind === 'import' ? 30 : 120))
+          .strength((r) => (r.kind === 'call' ? 0.22 : r.kind === 'import' ? 0.08 : 0.01))
       )
       .force('charge', forceManyBody<Star>().strength(-34).distanceMax(160))
       .force('collide', forceCollide<Star>((s) => s.radius + 1.5).strength(0.8))
@@ -295,6 +338,7 @@ export class StarMap {
   /** 选中一颗星球（null 取消），并把镜头飞过去 */
   select(id: string | null, fly = true): void {
     this.selected = id
+    if (id) this.selectedLib = null
     this.applyStyles()
     if (id && fly) this.flyTo(id)
   }
@@ -331,6 +375,45 @@ export class StarMap {
   clearTouched(): void {
     this.touched.clear()
     this.applyStyles()
+  }
+
+  /**
+   * 换上色方式：files、modules 是 id → 颜色；null 换回按子项目。光线跟着出发的星球变色
+   */
+  setColors(files: Map<string, string> | null, modules: Map<string, string> | null): void {
+    for (const s of this.stars) s.color = files?.has(s.id) ? new THREE.Color(files.get(s.id)!) : s.base.clone()
+    for (const c of this.clusters.values()) {
+      const hex = modules?.get(c.info.id)
+      c.color = hex ? new THREE.Color(hex) : c.base.clone()
+      for (const m of [c.sun.material, c.halo.material, c.nebula.material]) m.color.copy(c.color)
+      const css = `#${c.color.getHexString()}`
+      c.label.element.style.color = css
+      c.label.element.style.textShadow = `0 0 8px ${css}, 0 0 2px #000`
+    }
+    this.applyStyles()
+  }
+
+  /** 外圈的第三方库：显示还是藏起来 */
+  setShowLibs(on: boolean): void {
+    this.showLibs = on
+    for (const l of this.libs) l.mesh.visible = l.halo.visible = on
+    if (this.libLines) this.libLines.visible = on
+    if (!on) this.selectedLib = null
+    this.applyStyles()
+  }
+
+  /** 回放时拖动时间轴：直接设定到这一步为止改过的文件（不闪） */
+  setTouched(ids: Iterable<string>): void {
+    this.touched = new Set([...ids].filter((id) => this.planets.has(id)))
+    this.applyStyles()
+  }
+
+  /** 回放时镜头跟着走：平移到这颗星球，不拉近拉远（一步一缩放会晕） */
+  follow(id: string): void {
+    const p = this.planets.get(id)
+    if (!p) return
+    const s = p.star
+    this.flyToPoint(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0), this.camera.position.distanceTo(this.controls.target))
   }
 
   private runFlashes(): void {
@@ -436,6 +519,7 @@ export class StarMap {
   frameAll(): void {
     const box = new THREE.Box3()
     for (const s of this.stars) box.expandByPoint(new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0))
+    if (this.showLibs) for (const l of this.libs) box.expandByPoint(l.at) // 外圈的第三方库也要在画面里
     if (box.isEmpty()) return
     const center = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3()).length()
@@ -490,13 +574,21 @@ export class StarMap {
     this.clusters.clear()
     for (const g of this.galaxies) dropLabel(g.label)
     this.galaxies = []
-    for (const obj of [this.lines, this.sparks, this.arcs, this.arcSparks, this.moduleLines]) {
+    for (const l of this.libs) {
+      this.scene.remove(l.mesh, l.halo)
+      l.mesh.material.dispose()
+      l.halo.material.dispose()
+      dropLabel(l.label)
+    }
+    this.libs = []
+    this.selectedLib = this.hoveredLib = null
+    for (const obj of [this.lines, this.sparks, this.arcs, this.arcSparks, this.moduleLines, this.libLines]) {
       if (!obj) continue
       this.scene.remove(obj)
       obj.geometry.dispose()
       ;(obj.material as THREE.Material).dispose()
     }
-    this.lines = this.sparks = this.arcs = this.arcSparks = this.moduleLines = null
+    this.lines = this.sparks = this.arcs = this.arcSparks = this.moduleLines = this.libLines = null
     this.selected = this.hovered = this.hoveredModule = null
     this.touched.clear()
     for (const f of this.flashes) {
@@ -531,13 +623,30 @@ export class StarMap {
     const label = makeModuleLabel(info.label, `#${color.getHexString()}`)
     this.scene.add(nebula, sun, halo, label)
     const stars = this.stars.filter((s) => s.mod === info.id)
-    this.clusters.set(info.id, { info, color, stars, center: new THREE.Vector3(), extent: 10, radius, sun, halo, nebula, label })
+    this.clusters.set(info.id, { info, color, base: color.clone(), stars, center: new THREE.Vector3(), extent: 10, radius, sun, halo, nebula, label })
   }
 
   private addGalaxy(group: string, color: string): void {
     const label = makeGalaxyLabel(group, color)
     this.scene.add(label)
     this.galaxies.push({ group, stars: this.stars.filter((s) => s.group === group), label })
+  }
+
+  private addLib(lib: LibInfo): void {
+    const color = new THREE.Color(LIB_COLORS[lib.ecosystem] ?? '#fff1c4')
+    const radius = 2.5 + Math.log2(lib.count + 1) * 1.4
+    const mesh = new THREE.Mesh(this.sphere, new THREE.MeshBasicMaterial({ color, transparent: true }))
+    mesh.scale.setScalar(radius)
+    mesh.userData.lib = lib.id
+    const halo = this.glowSprite(color, 0.7)
+    halo.scale.setScalar(radius * 6)
+    const label = makeModuleLabel(lib.name, `#${color.getHexString()}`)
+    label.element.classList.add('lib-label')
+    const owners = new Map(this.stars.map((s) => [s.id, s.mod]))
+    const modules = [...new Set(lib.users.map((u) => owners.get(u)).filter((m): m is string => !!m))]
+    this.scene.add(mesh, halo, label)
+    mesh.visible = halo.visible = this.showLibs
+    this.libs.push({ lib, color, radius, mesh, halo, label, modules, at: new THREE.Vector3() })
   }
 
   private glowSprite(color: THREE.Color, opacity: number): THREE.Sprite {
@@ -583,7 +692,13 @@ export class StarMap {
       lineGeometry(this.moduleRays.length * 2),
       new THREE.LineBasicMaterial({ vertexColors: true, opacity: 0, ...additive })
     )
-    this.scene.add(this.lines, this.sparks, this.arcs, this.arcSparks, this.moduleLines)
+    // 第三方库连到用它的模块
+    this.libLines = new THREE.LineSegments(
+      lineGeometry(this.libs.reduce((n, l) => n + l.modules.length, 0) * 2),
+      new THREE.LineBasicMaterial({ vertexColors: true, opacity: 0.5, ...additive })
+    )
+    this.libLines.visible = this.showLibs
+    this.scene.add(this.lines, this.sparks, this.arcs, this.arcSparks, this.moduleLines, this.libLines)
     this.applyStyles()
   }
 
@@ -674,6 +789,22 @@ export class StarMap {
         colors.setXYZ(i * 2, c.r, c.g, c.b)
         colors.setXYZ(i * 2 + 1, c.r, c.g, c.b)
       })
+      colors.needsUpdate = true
+    }
+    const selectedLibs = new Set(this.libs.filter((l) => this.selected && l.lib.users.includes(this.selected)).map((l) => l.lib.id))
+    for (const l of this.libs) {
+      const hot = l.lib.id === this.selectedLib || l.lib.id === this.hoveredLib || selectedLibs.has(l.lib.id)
+      l.mesh.material.opacity = h ? 0.3 : 1
+      l.halo.material.opacity = h ? 0.15 : hot ? 1 : 0.6
+    }
+    if (this.libLines) {
+      const colors = this.libLines.geometry.getAttribute('color') as THREE.BufferAttribute
+      let k = 0
+      for (const l of this.libs) {
+        const hot = l.lib.id === this.selectedLib || l.lib.id === this.hoveredLib || selectedLibs.has(l.lib.id)
+        const c = l.color.clone().multiplyScalar(h ? 0.05 : hot ? 0.9 : 0.12)
+        for (let i = 0; i < l.modules.length * 2; i++) colors.setXYZ(k++, c.r, c.g, c.b)
+      }
       colors.needsUpdate = true
     }
     this.applyZoom()
@@ -801,6 +932,7 @@ export class StarMap {
       pos.needsUpdate = true
       this.arcs.geometry.computeBoundingSphere()
     }
+    this.placeLibs()
     if (this.moduleLines) {
       const pos = this.moduleLines.geometry.getAttribute('position') as THREE.BufferAttribute
       this.moduleRays.forEach((r, i) => {
@@ -811,6 +943,51 @@ export class StarMap {
       })
       pos.needsUpdate = true
       this.moduleLines.geometry.computeBoundingSphere()
+    }
+  }
+
+  /**
+   * 第三方库排在外圈：朝着用它的那些模块的方向（同一个方向的错开一点），连线到那些模块。
+   * 圈的大小跟着整个星图走，排在正对镜头的平面上（只带一点纵深），和星系一样
+   */
+  private placeLibs(): void {
+    if (!this.libs.length) return
+    let far = 0
+    for (const s of this.stars) far = Math.max(far, Math.hypot((s.x ?? 0) - this.center.x, (s.y ?? 0) - this.center.y))
+    const ring = far + 70
+    const wanted = this.libs.map((l) => {
+      const dir = new THREE.Vector3()
+      for (const m of l.modules) {
+        const c = this.clusters.get(m)
+        if (c) dir.add(c.center.clone().sub(this.center))
+      }
+      return Math.atan2(dir.y, dir.x)
+    })
+    // 同一个方向的错开：按角度排，挨得太近的往后推
+    const order = wanted.map((a, i) => ({ a, i })).sort((x, y) => x.a - y.a)
+    const gap = Math.min(0.35, (Math.PI * 2) / (this.libs.length * 1.4))
+    for (let k = 1; k < order.length; k++) {
+      if (order[k].a - order[k - 1].a < gap) order[k].a = order[k - 1].a + gap
+    }
+    for (const { a, i } of order) {
+      const l = this.libs[i]
+      l.at.set(this.center.x + Math.cos(a) * ring, this.center.y + Math.sin(a) * ring * 0.8, this.center.z + Math.sin(a) * ring * 0.1)
+      l.mesh.position.copy(l.at)
+      l.halo.position.copy(l.at)
+      l.label.position.set(l.at.x, l.at.y + l.radius + 3, l.at.z)
+    }
+    if (this.libLines) {
+      const pos = this.libLines.geometry.getAttribute('position') as THREE.BufferAttribute
+      let k = 0
+      for (const l of this.libs) {
+        for (const m of l.modules) {
+          const c = this.clusters.get(m)?.center ?? this.center
+          pos.setXYZ(k++, l.at.x, l.at.y, l.at.z)
+          pos.setXYZ(k++, c.x, c.y, c.z)
+        }
+      }
+      pos.needsUpdate = true
+      this.libLines.geometry.computeBoundingSphere()
     }
   }
 
@@ -893,6 +1070,7 @@ export class StarMap {
       objects.set(id, obj)
     }
     for (const g of this.galaxies) add(`g:${g.group}`, g.label, g.group, 18, 0, 10_000)
+    if (this.showLibs) for (const l of this.libs) add(`l:${l.lib.id}`, l.label, l.lib.name, 13, 0, 7_000 + l.lib.count)
     for (const c of this.clusters.values()) {
       if (h && !c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))) continue
       const size = Math.log10(c.info.lines + 10)
@@ -907,6 +1085,7 @@ export class StarMap {
     }
     const shown = placeLabels(boxes)
     for (const g of this.galaxies) g.label.visible = false
+    for (const l of this.libs) l.label.visible = false
     for (const c of this.clusters.values()) c.label.visible = false
     for (const p of this.planets.values()) if (p.label) p.label.visible = false
     for (const [id, obj] of objects) obj.visible = shown.has(id)
@@ -955,9 +1134,10 @@ export class StarMap {
   // ---------- 鼠标 ----------
 
   /** 鼠标下面是什么：拉远时先看模块的大星，拉近时先看文件 */
-  private pick(clientX: number, clientY: number): Planet | Cluster | null {
+  private pick(clientX: number, clientY: number): Planet | Cluster | LibStar | null {
     const rect = this.renderer.domElement.getBoundingClientRect()
     this.pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
+    this.scene.updateMatrixWorld() // 还没画过一帧（窗口在后台）时，位置也要是新的
     this.raycaster.setFromCamera(this.pointer, this.camera)
     const planet = (): Planet | null => {
       const meshes = [...this.planets.values()].filter((p) => p.lit || this.zoom < 0.6).map((p) => p.mesh)
@@ -968,6 +1148,11 @@ export class StarMap {
       if (this.zoom < 0.4) return null
       const hit = this.raycaster.intersectObjects([...this.clusters.values()].map((c) => c.sun), false)[0]
       return hit ? (this.clusters.get(hit.object.userData.module as string) ?? null) : null
+    }
+    if (this.showLibs) {
+      const hit = this.raycaster.intersectObjects(this.libs.map((l) => l.mesh), false)[0]
+      const lib = hit && this.libs.find((l) => l.lib.id === hit.object.userData.lib)
+      if (lib) return lib
     }
     return this.zoom >= 0.5 ? (cluster() ?? planet()) : (planet() ?? cluster())
   }
@@ -981,6 +1166,15 @@ export class StarMap {
     this.pressed = null
     if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5) return // 是拖动，不是点击
     const hit = this.pick(e.clientX, e.clientY)
+    if (hit && 'lib' in hit) {
+      this.selected = null
+      this.selectedLib = hit.lib.id // 点库：亮出它连到的模块，面板里列出谁在用
+      this.applyStyles()
+      this.onSelectLib(hit.lib)
+      return
+    }
+    this.selectedLib = null
+    this.onSelectLib(null)
     if (hit && 'info' in hit) {
       this.flyToModule(hit.info.id) // 点模块：飞过去，散开成文件
       this.setHovered(null, 0, 0)
@@ -997,19 +1191,23 @@ export class StarMap {
     this.setHovered(hit, e.clientX - rect.left, e.clientY - rect.top)
   }
 
-  private setHovered(hit: Planet | Cluster | null, x: number, y: number): void {
+  private setHovered(hit: Planet | Cluster | LibStar | null, x: number, y: number): void {
     const planet = hit && 'star' in hit ? hit : null
     const cluster = hit && 'info' in hit ? hit : null
+    const lib = hit && 'lib' in hit ? hit : null
     const id = planet?.star.id ?? null
     const mod = cluster?.info.id ?? null
+    const libId = lib?.lib.id ?? null
     this.renderer.domElement.style.cursor = hit ? 'pointer' : 'grab'
-    if (id !== this.hovered || mod !== this.hoveredModule) {
+    if (id !== this.hovered || mod !== this.hoveredModule || libId !== this.hoveredLib) {
       this.hovered = id
       this.hoveredModule = mod
+      this.hoveredLib = libId
       this.applyStyles()
     }
     this.onHover(planet?.star ?? null, x, y)
     this.onHoverModule(cluster?.info ?? null, x, y)
+    this.onHoverLib(lib?.lib ?? null, x, y)
   }
 
   private fit(): void {

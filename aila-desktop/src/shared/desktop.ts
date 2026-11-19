@@ -6,6 +6,8 @@
  * - 提醒：对话里说「25 分钟后叫我」，AI 服务算好时间推一个 reminder 事件，主进程记下来、到点叫你
  */
 
+import { WORKS_BUDGET_CHOICES, WORKS_EVERY_CHOICES } from './studio'
+
 export interface DesktopPrefs {
   /** 全屏应用、演示时自动藏起来 */
   hideOnFullscreen: boolean
@@ -17,6 +19,12 @@ export interface DesktopPrefs {
   sitBreakMinutes: number
   /** 晚上几点说今天的日报（HH:MM）；'' = 不说 */
   reportAt: string
+  /** 她自己做作品：平均几天一件（0 = 不让她做）。会花钱，默认不开 */
+  worksEvery: number
+  /** 每件作品最多花多少元 */
+  worksBudget: number
+  /** 每天晚上写日记 */
+  diary: boolean
 }
 
 export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
@@ -24,7 +32,10 @@ export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
   powerSaver: true,
   openAtLogin: false,
   sitBreakMinutes: 0,
-  reportAt: ''
+  reportAt: '',
+  worksEvery: 0,
+  worksBudget: 0.5,
+  diary: true
 }
 
 export const SIT_BREAK_CHOICES = [0, 30, 45, 60, 90] as const
@@ -68,11 +79,16 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
     ? (r.sitBreakMinutes as number)
     : base.sitBreakMinutes
   const reportAt = REPORT_TIMES.includes(r.reportAt as (typeof REPORT_TIMES)[number]) ? (r.reportAt as string) : base.reportAt
+  const pick = <T extends number>(k: keyof DesktopPrefs, choices: readonly T[]): T =>
+    choices.includes(r[k] as T) ? (r[k] as T) : (base[k] as T)
   return {
     hideOnFullscreen: bool('hideOnFullscreen'),
     powerSaver: bool('powerSaver'),
     openAtLogin: bool('openAtLogin'),
     sitBreakMinutes: minutes,
-    reportAt
+    reportAt,
+    worksEvery: pick('worksEvery', WORKS_EVERY_CHOICES),
+    worksBudget: pick('worksBudget', WORKS_BUDGET_CHOICES),
+    diary: bool('diary')
   }
 }

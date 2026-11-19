@@ -159,3 +159,31 @@ def test_graph_has_modules_tests_and_cross_links(tmp_path: Path) -> None:
     idx.refresh(embed=False)
     assert not [lk for lk in idx.graph()["links"] if lk["source"] == "desktop/src/main/client.ts"]
     idx.close()
+
+
+def test_churn_counts_recent_commits(tmp_path: Path) -> None:
+    """星图「按改动」：最近的提交里每个文件改过几次（项目在仓库子目录里时按子目录算）"""
+    import subprocess
+
+    from app.code.projects import CodeProjects
+
+    repo = tmp_path / "repo"
+    root = repo / "app"
+    root.mkdir(parents=True)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    for i in range(3):
+        (root / "hot.py").write_text(f"x = {i}\n", encoding="utf-8")
+        if i == 0:
+            (root / "cold.py").write_text("y = 1\n", encoding="utf-8")
+            (repo / "README.md").write_text("说明\n", encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", f"第 {i} 次"], check=True)
+    projects = CodeProjects(tmp_path / "data", lambda: None)
+    p = projects.add(str(root))
+    assert projects.churn(p.id) == {"hot.py": 3, "cold.py": 1}
+    assert projects.churn(p.id, commits=1) == {"hot.py": 1}
+    idx = projects.index(p.id)
+    idx.refresh(embed=False)
+    nodes = {n["id"]: n for n in idx.graph(set(), projects.churn(p.id))["nodes"]}
+    assert nodes["hot.py"]["churn"] == 3 and nodes["cold.py"]["churn"] == 1

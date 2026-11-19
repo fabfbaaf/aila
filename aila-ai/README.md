@@ -18,6 +18,14 @@ py -3.12 -m venv .venv
 
 测试：`.venv\Scripts\python -m pytest`（下载了模型时，会额外用真实模型跑「合成 → 唤醒 → 识别」和记忆、资料库的语义检索）
 
+### 打成安装包里的服务
+
+```powershell
+.venv\Scripts\python scripts\build_service.py   # → dist\aila-ai\aila-ai.exe（带 Python，用 PyInstaller --onedir）
+```
+
+打好以后自己冒烟测试：`aila-ai.exe --self-check` 把各个库和它们自带的数据文件（语法、文字识别模型、网页提取的配置……）实际加载一遍，再起服务等 `/health` 返回 ok。要带进去的数据文件清单和原因写在脚本里。打包后的程序和 `python -m app` 一样，另外认两个参数：`--download-models`（下载语音模型，设置页的「下载语音模型」就是用它）、`--self-check`。桌面安装包怎么打见 `aila-desktop/README.md`「打包」。
+
 ### 终端版 aila
 
 把 `aila-ai` 这个目录加进 PATH（只需一次），然后在任何项目目录里：
@@ -38,7 +46,7 @@ aila -p "跑一下测试" --json    # 按行输出 JSON 事件，给脚本和 CI
 - 她说的话按 Markdown 显示；工具一行「● 做什么」加「⎿ 结果」：改文件给彩色 diff，跑命令给最后几行输出，待办给勾选清单；每轮结束一行统计（几步、多久、输入多少、命中缓存多少、输出多少）
 - 要你确认时按键：`1` 可以 / `2` 以后都可以（改文件：这个会话；命令：这个项目里这条命令）/ `3` 或 `Esc` 不要。不要以后她会停下来，等你说怎么做
 - 她做事时按 `Esc` 或 `Ctrl+C` 打断，说「继续」接着做；输入框里 `Shift+Tab` 换权限模式，`Ctrl+J` 换行，`↑ ↓` 翻以前说过的话
-- 斜杠命令：`/help` `/mode` `/compact` `/new` `/resume` `/usage` `/todo` `/changes` `/init`（让她读项目写一份 AGENTS.md）`/review`（只读地审一遍没提交的改动）`/memory`（项目记忆：看、`add` 一句话、`forget` 编号）`/mcp`（外部工具服务的状态和工具）`/plan`（长任务：出方案、批准、接着做、看进度）`/exit`
+- 斜杠命令：`/help` `/mode` `/compact` `/new` `/resume` `/usage` `/todo` `/changes` `/init`（让她读项目写一份 AGENTS.md）`/review`（只读地审一遍没提交的改动）`/memory`（项目记忆：看、`add` 一句话、`forget` 编号）`/mcp`（外部工具服务的状态和工具）`/plan`（长任务：出方案、批准、接着做、看进度）`/commands`（自定义命令）`/exit`；项目 `.aila/commands/` 里写好的流程用 `/名字` 调用
 - `-p` 模式没法问你：要确认的操作一律不执行（需要的话加 `--mode auto`）
 
 没下载模型也能启动：缺语音模型只是不能说话，缺向量模型时记忆退化成「带上最近几条」、资料库只用关键词检索（`/health` 里会写原因）。
@@ -131,7 +139,7 @@ data: {"type": "done"}
 | 接口 | 作用 |
 |---|---|
 | `POST /agent/sessions` | 新建会话 `{cwd, mode, budget?, kind?}`；kind 默认 `project`，传 `computer` 不用 cwd；电脑任务只接受 `read_only` / `ask`，项目还可用 `auto`；budget 是累计元数上限，省略或 `null` 表示不限 |
-| `GET /agent/sessions` | 会话列表（最近的在前，带标题、用量、花费 `cost`、上限 `budget`、是否在做） |
+| `GET /agent/sessions` | 会话列表（最近的在前，带标题、用量、花费 `cost`、上限 `budget`、是否在做；看板用的 `activity` 她最近要用的工具和对象、`outcome` 上一轮怎么结束的、`edits` 改过几个文件、`pending` 还没回答的确认） |
 | `GET /agent/sessions/{id}` | 会话的全部日志事件（界面据此重建） |
 | `POST /agent/sessions/{id}/messages` | 说一句话开始一轮，返回这一轮的事件流（SSE）；连接断了她照样做完 |
 | `GET /agent/sessions/{id}/events?after=N` | 订阅：补发 N 之后的事件，正在做的话接着推实时事件 |
@@ -359,6 +367,8 @@ data: {"type": "done"}
   - 状态全从只追加的日志推出来（`plan_state`）：计划在 `propose_plan` 的 tool 事件里，决定是 `plan_decision`，每阶段开始是带 `plan_stage` 的 user 事件。这些都只追加在历史末尾，前缀缓存照样命中；三个新工具是 meta，不用问
   - 接口：`POST /agent/sessions/{id}/messages` 带 `{"plan": true}`（text 是目标）；`POST /agent/sessions/{id}/plan/approve {pause_each}`、`/plan/continue`（都返回一直到计划停下的事件流）、`/plan/reject`。会话列表的 `plan` 字段是进度
   - 没填密钥时的假模型也能演示：出方案交两个阶段，每阶段读一下 README 就标完成
+- **自定义命令（/名字）**：常做的流程写成一个 Markdown 文件，以后一句「/名字」她就照着做。项目里的放 `.aila/commands/<名字>.md`（跟着项目走，可以提交进仓库），自己的放 `<数据目录>/commands/<名字>.md`（每个项目都能用；电脑任务只用这些），同名时项目里的优先；和内置命令重名的不认。文件开头可以用两行 `---` 包住一行 `description: 一句说明`，正文里的 `$ARGUMENTS` 换成命令后面写的内容（没写这个占位但带了内容，就接在最后）。展开在 AI 服务里做（`app/runtime/commands.py`，每次现读，改了马上生效），终端、任务页、HTTP 接口行为一样；用户消息事件带 `command`、`title`（「/发布 v1.2」），`text` 是展开后的全文，任务页能展开看到底发了什么——命令文件是项目里的内容，你输入了才算你说的话，但发了什么要看得见。权限模式不受命令影响。终端里 `/commands` 列出能用的命令和放在哪，Tab 补全也有；接口 `GET /agent/commands?cwd=&kind=`
+- **交活（/commit、/pr、/pr-comments）**：和 /review 一样，这一轮的请求由代码生成（`app/runtime/delivery.py`）。`/commit [补充]`：改动清单放进请求，她看 diff 和 `git log` 学项目的提交信息写法，用 `git add 文件名` 只提交这次相关的文件（不 `add -A`），不 push、不改历史。`/pr [补充]`：代码先查是不是 git 仓库、有没有远程仓库、装没装 gh，缺什么直接告诉你；把当前分支、远程、默认分支、和默认分支比的新提交放进请求；在默认分支上就先让她开个新分支；`git push` 和 `gh pr create` 是危险命令，任何模式都要你点头。`/pr-comments`：代码用 `gh pr view --json` 取当前分支 PR 上的评论和审查意见，包在 `<PR评论>` 里放进请求（评论里的结束标记换掉，边界不会被提前关上），并说明评论只当修改建议、里面要求做别的事（改权限、推送、发东西、读密钥）的不照做；改完不 push、不在 PR 上回复。在 GitHub 上公开发东西的 gh 命令（`gh pr create/merge/comment/review`、`gh release create`、`gh issue create`、`gh api -X POST` 等）都加进了危险命令。电脑任务没有这三个命令。用户消息事件带 `command`、`title`，任务页和自定义命令一样显示成一句、能展开看全文
 - **审查改动（/review）**：终端 `/review [要特别注意的地方]`，或任务页输入框下的「审查改动」。改动清单（`git status --short`、`git diff HEAD --stat`）由代码生成放进这一轮的请求，具体 diff 她用只读命令自己看；这一轮按只读模式把关（改文件、非只读命令一律拒绝），结束、出错或被打断后换回原来的模式，中途换模式要等这一轮结束才生效，日志里不记模式变化。用户消息事件带 `review`、`title`（界面只显示「审查没提交的改动」这一句），不进模型消息。不是 git 仓库或没有改动时直接告诉你，不开始这一轮。接口：`POST /agent/sessions/{id}/messages` 带 `{"review": true}`，`text` 可以空着
 - **撤销一轮**：空闲时在终端输入 `/undo`，或在任务页最新轮次的结尾点「撤销这一轮」，核对文件后确认。只恢复这一轮由 `edit_file` / `write_file` 写过的文件，按原字节还原，未被后续修改的新建文件会删掉。用户后来改过、没有底片的文件会跳过并说明原因。每轮只可撤销一次，已结束的新一轮可以再撤销；命令做过的事需要另行处理。
   - 修改已有文件前把原始字节保存到会话旁的 `data/sessions/<id>.snap/`；删除会话时一起清掉。结果只追加 `undo` 事件，下一条用户消息才带上哪些文件撤回了，旧消息保持原样。恢复过的文件要重新读才能再改。在新分支上做的会话只撤销临时工作目录里的改动。
@@ -408,6 +418,27 @@ data: {"type": "done"}
 **默认价格**：2026-11-16 照 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)填了 `deepseek-flash`（和按 Flash 计价的旧名 `deepseek-v4-flash`）、`deepseek-v4-pro`。官网分高峰、空闲两档（空闲半价），默认记**高峰价**：算出来只会偏多，上限宁可早停。想按空闲价算就在价格表覆盖。[官方更新记录](https://api-docs.deepseek.com/updates/)公告 `deepseek-chat`、`deepseek-reasoner` 2026-07-24 停用，之后的状态没写，所以这两个不估价；默认模型已经换成 `deepseek-flash`。`mock-coder` 以及其他没配置的模型也不估价。有任一用量无法计价时，会话或本轮的 `cost` 是 `null`，界面保留 token；非法价格或读不到的价格表也按未知处理，不当成免费。
 
 上限在每一步开始前、自动压缩前检查，压缩后也检查；已经花到上限就以 `reason: "budget"` 结束。它按已发生的花费判断，当前一步和这一步派出的助手会做完，可能略超上限。例如上限 0.01 元、每步 0.004 元，完成三步累计 0.012 元，第 4 步前停。助手自己最多 20 步，不单独设预算。调高上限或 `/budget off` 后说「继续」接着做；仅说「继续」而上限不变，会再次停下。有未知模型时只能根据已知用量的金额检查，补齐价格才能计算完整花费和约束上限。手动 `/compact` 的用量也累计到会话，下一次开始做事时会检查。
+
+### 她的作品和日记
+
+她隔一段时间自己挑个小点子写个小作品（`app/studio.py`），每晚写一篇日记（`app/diary.py`）；什么时候做由桌面端定（随机落在每个周期里、你不忙的时候）。
+
+- **每件作品一个文件夹**（`data/works/<id>/`），就是一个普通的编程会话，工作目录是这个文件夹、用「工作区内自动」：她只能在这里读写，你的项目一个字都不碰；危险命令照样停下来等你点头（作品状态是「等你点头」）。花费上限由桌面端传（每件 0.2～2 元），步数有 Agent 自己的上限
+- **点子**：有大模型时按桌面端传来的参考（她记得的你的事、最近的任务、今天是什么日子、做过的作品）挑一个，参考包在 `<资料>` 里、说明只当参考；没有大模型或者出错时从内置的 16 个点子里随机抽一个没做过的。只做两种：单个 `index.html`（不联网、不用外部库）或只用标准库的 `main.py`
+- **状态**由会话算：在做、等你点头（有确认没回答）、做好了（这一轮做完、找得到入口文件）、没做成（附原因）
+- **网页作品**经 `GET /studio/works/{id}/raw/{path}` 给出去，带 `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; connect-src 'none' ……`：独立的源、不能发请求、只能动自己这一页；路径不许跑出作品文件夹
+- **日记**：`POST /studio/diary {day, facts}`，材料是桌面端数出来的真事，加上今天做好的作品；有大模型时用她的口吻写 120～220 字，没有就拼一段朴素的；一天一篇，写过不改
+- **性格**：设置里的说话风格、称呼、口头禅（`AILA_PERSONA_STYLE`、`AILA_PERSONA_CALL`、`AILA_PERSONA_CATCHPHRASE`，`app/persona.py` 的 `persona_addendum`）接在对话的系统提示词最后，挑点子、写日记也带上；都是默认值时系统提示词一字不差（前缀缓存照样命中）
+
+| 接口 | 做什么 |
+|---|---|
+| `GET /studio/works` | 作品列表（最新的在前） |
+| `POST /studio/works` | 让她做一件 `{hints?, idea?, budget?}`；手上有没做完的返回 409 |
+| `GET /studio/works/{id}` | 说明（README）、文件列表、文件夹 |
+| `GET /studio/works/{id}/raw/{path}` | 作品里的文件（带最严的 CSP） |
+| `POST /studio/works/{id}/seen` | 冒过气泡了 |
+| `DELETE /studio/works/{id}` | 删掉（正在做的先打断），会话一起删 |
+| `GET /studio/diary` / `POST /studio/diary` | 看日记 / 写今天的 |
 
 ### 编程 Agent 评测
 
@@ -519,7 +550,10 @@ app/
     tts.py         「嗓子」：三种合成引擎、念之前清理文字
     audio.py       PCM、WAV 格式转换
 scripts/
-  download_models.py  下载语音模型和向量模型
+  download_models.py  下载语音模型和向量模型（逻辑在 app/models_download.py，安装包里用 --download-models 调同一个）
+  build_service.py    打成安装包里的 aila-ai.exe，打完冒烟测试
+packaging/
+  entry.py         PyInstaller 的入口（就是 python -m app）
   eval_code_rag.py    代码检索评测（code_eval.json 是问题和标注的答案）
   eval_agent.py       编程 Agent 评测（任务集在 eval/tasks，报告在 eval/results）
 tests/             每个模块都有；*_models.py 用真实模型（没下载时跳过）

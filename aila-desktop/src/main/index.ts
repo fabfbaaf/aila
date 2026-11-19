@@ -22,6 +22,7 @@ import {
   codeLocateAll,
   codeOutline,
   codeProjectAction,
+  setCodeIgnore,
   deleteKnowledge,
   forgetAgentRule,
   getAgentRules,
@@ -56,8 +57,11 @@ import { registerAgentCreateIpc } from './agentCreateIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
 import type { SocketLike } from './cloud/sync'
-import { createServiceKeeper } from './serviceNode'
+import { createServiceKeeper, serviceLocator } from './serviceNode'
+import { ModelDownloader } from './models'
 import { registerServiceIpc } from './serviceIpc'
+import { openWorkPreview, revealWork, studio, WORK_ID } from './studio'
+import type { LifeState } from '../shared/studio'
 
 // 桌面窗口：透明、无边框、置顶，只在角色身上响应鼠标
 const WIN_WIDTH = 300
@@ -70,11 +74,17 @@ const LISTEN_SHORTCUT = 'Alt+Shift+V'
 /** 免打扰：把她藏起来 / 叫回来（H = Hide） */
 const HIDE_SHORTCUT = 'Alt+Shift+H'
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
+const locateAi = serviceLocator({ packaged: app.isPackaged, appPath: app.getAppPath(), userData: app.getPath('userData') })
 const serviceKeeper = createServiceKeeper({
-  packaged: app.isPackaged,
-  appPath: app.getAppPath(),
+  locate: locateAi,
   url: AI_URL,
   changed: (state) => broadcast('service:state', state)
+})
+// 设置页「语音」里的「下载语音模型」：进度只发给主窗口
+const modelDownloader = new ModelDownloader({
+  command: locateAi,
+  changed: (state) => mainWin?.webContents.send('models:state', state),
+  restart: () => serviceKeeper.restart()
 })
 
 // 开发调试：设置 AILA_REMOTE_DEBUG=端口 时打开远程调试，用脚本驱动真实窗口做端到端测试（打包后无效）
@@ -137,6 +147,8 @@ interface Settings {
   desktop?: unknown
   /** 今天见过面、说过日报没有 */
   briefing?: BriefingState
+  /** 她的一天：第一次见面的日子、下一件作品什么时候做、哪天写过日记…… */
+  life?: LifeState
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -587,6 +599,11 @@ function registerIpc(): void {
     return addCodeProject(AI_URL, picked.filePaths[0])
   })
   ipcMain.handle('code:refresh', (e, id: string) => (fromMainWindow(e) ? codeProjectAction(AI_URL, String(id), 'refresh') : MAIN_ONLY))
+  ipcMain.handle('code:ignore', (e, id: unknown, patterns: unknown) =>
+    fromMainWindow(e) && typeof id === 'string' && Array.isArray(patterns) && patterns.length <= 100 && patterns.every((p) => typeof p === 'string' && p.length <= 200)
+      ? setCodeIgnore(AI_URL, id, patterns as string[])
+      : MAIN_ONLY
+  )
 
   // 代码星图
   ipcMain.handle('code:graph', (_e, id: string) => codeGraph(AI_URL, String(id)))
@@ -609,6 +626,8 @@ function registerIpc(): void {
   // 编程 Agent：只认主窗口发来的（角色窗口不能替你开会话、点「可以」）
   const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
   registerServiceIpc(ipcMain, serviceKeeper, fromAgent)
+  ipcMain.handle('models:status', (e) => fromAgent(e) ? modelDownloader.status() : null)
+  ipcMain.handle('models:download', (e) => fromAgent(e) ? modelDownloader.start() : { ok: false, error: '只有主窗口能用' })
   const sidOk = (sid: unknown): sid is string => typeof sid === 'string' && /^[\w-]{1,64}$/.test(sid)
   const notAllowed = { ok: false, error: '只有主窗口能用' }
   ipcMain.handle('agent:list', (e, q: unknown) =>
@@ -636,6 +655,11 @@ function registerIpc(): void {
   ipcMain.handle('agent:delete', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.delete(sid) : notAllowed))
   // 项目记忆：写进去的话以后每个会话都会带上，所以也只认主窗口
   const cwdOk = (cwd: unknown): cwd is string => typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 1000
+  ipcMain.handle('agent:commands', (e, cwd: unknown, kind: unknown) =>
+    fromAgent(e) && (cwd === null || cwdOk(cwd)) && (kind === 'project' || kind === 'computer')
+      ? agentRelay.commands(cwd, kind)
+      : notAllowed
+  )
   ipcMain.handle('agent:memory', (e, cwd: unknown) => (fromAgent(e) && cwdOk(cwd) ? agentRelay.memory(cwd) : notAllowed))
   ipcMain.handle('agent:memory-add', (e, cwd: unknown, text: unknown) => {
     if (!fromAgent(e) || !cwdOk(cwd)) return notAllowed
@@ -802,6 +826,28 @@ function registerIpc(): void {
   })
   // 拖给她的文件、剪贴板：只认角色窗口（她身上才能拖、对她说才会去看）
   const fromCharacter = (e: { sender: Electron.WebContents }): boolean => !!win && e.sender === win.webContents
+  // 她的作品、日记：看、删、打开、现在就做一件只认主窗口；气泡里点「看看」从角色窗口来，只是打开作品页
+  const workOk = (id: unknown): id is string => typeof id === 'string' && WORK_ID.test(id)
+  const nope = { ok: false, error: '只有主窗口能用' }
+  ipcMain.handle('studio:list', (e) => (fromMain(e) ? studio.works(AI_URL) : nope))
+  ipcMain.handle('studio:get', (e, id: unknown) => (fromMain(e) && workOk(id) ? studio.work(AI_URL, id) : nope))
+  ipcMain.handle('studio:delete', (e, id: unknown) => (fromMain(e) && workOk(id) ? studio.remove(AI_URL, id) : nope))
+  ipcMain.handle('studio:open', (e, id: unknown) => (fromMain(e) && workOk(id) ? openWorkPreview(AI_URL, id, mainWin) : nope))
+  ipcMain.handle('studio:reveal', (e, id: unknown) => (fromMain(e) && workOk(id) ? revealWork(AI_URL, id) : nope))
+  ipcMain.handle('studio:now', (e, idea: unknown) => {
+    if (!fromMain(e) || !desktop) return nope
+    const i = idea as Record<string, unknown> | null
+    const valid =
+      i && typeof i.title === 'string' && typeof i.idea === 'string' && i.title.trim() && i.idea.trim() && i.title.length <= 40 && i.idea.length <= 300
+    return desktop.workNow(
+      valid ? { title: String(i.title).trim(), idea: String(i.idea).trim(), kind: i.kind === 'script' ? 'script' : 'web', why: '' } : undefined
+    )
+  })
+  ipcMain.handle('studio:diary', (e) => (fromMain(e) ? studio.diary(AI_URL) : nope))
+  ipcMain.handle('studio:known', (e) => (fromMain(e) && desktop ? desktop.knownSince() : null))
+  ipcMain.on('studio:show', (e, id: unknown) => {
+    if (fromCharacter(e)) openMain({ page: 'studio', ...(workOk(id) ? { work: id } : {}) })
+  })
   ipcMain.handle('drop:inspect', (e, paths: unknown) => {
     if (!fromCharacter(e) || !Array.isArray(paths)) return []
     return drops.inspect(paths.filter((p): p is string => typeof p === 'string' && p.length > 0 && p.length <= 1000))
@@ -928,7 +974,19 @@ app.whenReady().then(() => {
       return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [] }
     },
     loadBriefing: () => loadSettings().briefing ?? {},
-    saveBriefing: (state) => saveSettings({ ...loadSettings(), briefing: state })
+    saveBriefing: (state) => saveSettings({ ...loadSettings(), briefing: state }),
+    // 她的一天：作品、日记在 AI 服务里，记着的状态在 settings.json
+    life: {
+      load: () => loadSettings().life ?? {},
+      save: (state) => saveSettings({ ...loadSettings(), life: state }),
+      works: async () => {
+        const r = await studio.works(AI_URL)
+        return r.ok && r.data ? r.data : null
+      },
+      start: (body) => studio.start(AI_URL, body),
+      seen: async (id) => void (await studio.seen(AI_URL, id)),
+      writeDiary: async (day, facts) => (await studio.writeDiary(AI_URL, day, facts)).ok
+    }
   })
   void serviceKeeper.start()
   createWindow()
@@ -963,6 +1021,7 @@ app.on('will-quit', (event) => {
     return
   }
   globalShortcut.unregisterAll()
+  modelDownloader.stop()
   agentRelay.stopAll()
   account?.shutdown() // 还没写盘的聊天记录写下去
   desktop?.stop()

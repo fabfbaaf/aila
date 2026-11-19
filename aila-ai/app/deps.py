@@ -26,6 +26,9 @@ from .runtime.loop import AgentConfig
 from .runtime.mock import MockCoderModel
 from .runtime.runner import Runtime
 from .code import CodeProjects
+from .diary import Diary
+from .persona import persona_addendum
+from .studio import Studio
 from .tools import Skill, SkillRegistry
 from .tools.browser import browse_skill, browser_skill
 from .tools.code import code_skill
@@ -190,6 +193,23 @@ _mcp_skills: list[Skill] = []
 def get_code_projects() -> CodeProjects:
     """用户登记的代码项目，索引在 data/code（代码只在本机建索引）"""
     return CodeProjects(settings.data_dir, lambda: get_embedder())  # 用到时再查（测试里可以换掉）
+
+
+def _persona() -> str:
+    """设置里调的性格（每次现读：改了设置马上生效）"""
+    return persona_addendum(settings.persona_style, settings.persona_call, settings.persona_catchphrase)
+
+
+@lru_cache
+def get_studio() -> Studio:
+    """她的作品：每件一个文件夹（data/works），是一个只在那个文件夹里做事的编程会话"""
+    return Studio(settings.data_dir, lambda: get_runtime(), lambda: get_model(), _persona)
+
+
+@lru_cache
+def get_diary() -> Diary:
+    """她的日记（data/diary），一天一篇"""
+    return Diary(settings.data_dir, lambda: get_model(), _persona)
 
 
 @lru_cache

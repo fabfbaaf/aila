@@ -8,7 +8,7 @@
 
 import type { SettingsSection } from './settings'
 
-export type Page = 'tasks' | 'chat' | 'projects' | 'knowledge' | 'memory' | 'settings'
+export type Page = 'tasks' | 'chat' | 'projects' | 'knowledge' | 'memory' | 'studio' | 'settings'
 /** 项目页里的两块：项目列表（索引状态）、地图（原来的代码星图） */
 export type ProjectsTab = 'list' | 'map'
 
@@ -18,6 +18,8 @@ export interface ShellRoute {
   section?: SettingsSection
   /** 项目页：列表还是地图 */
   tab?: ProjectsTab
+  /** 作品页：打开哪件作品（她做好了、你在气泡里点「看看」） */
+  work?: string
 }
 
 export const PAGES: { id: Page; name: string; icon: string; key: string }[] = [
@@ -26,7 +28,8 @@ export const PAGES: { id: Page; name: string; icon: string; key: string }[] = [
   { id: 'projects', name: '项目', icon: '◇', key: '3' },
   { id: 'knowledge', name: '资料', icon: '▦', key: '4' },
   { id: 'memory', name: '记忆', icon: '✎', key: '5' },
-  { id: 'settings', name: '设置', icon: '⚙', key: '6' }
+  { id: 'studio', name: '作品', icon: '✦', key: '6' },
+  { id: 'settings', name: '设置', icon: '⚙', key: '7' }
 ]
 
 /** 设置页里剩下的分区（资料库、记忆、代码库各自成了一页） */
@@ -42,6 +45,8 @@ export const SETTINGS_TABS: { id: SettingsSection; name: string }[] = [
 ]
 
 const PAGE_IDS = new Set<string>(PAGES.map((p) => p.id))
+/** 作品的 id（AI 服务起的：日期-时间-四位十六进制） */
+const WORK_ID = /^[\w-]{4,64}$/
 const TAB_IDS = new Set<string>(SETTINGS_TABS.map((t) => t.id))
 
 /** 旧的设置分区 → 现在在哪一页 */
@@ -60,6 +65,7 @@ export function parseHash(hash: string): ShellRoute {
   if (head === 'workbench') return { page: 'projects', tab: 'map' }
   if (head === 'settings') return routeForSection(sub as SettingsSection | undefined)
   if (head === 'projects') return { page: 'projects', tab: sub === 'map' ? 'map' : 'list' }
+  if (head === 'studio') return sub && WORK_ID.test(sub) ? { page: 'studio', work: sub } : { page: 'studio' }
   if (head && PAGE_IDS.has(head)) return { page: head as Page }
   return { page: 'tasks' }
 }
@@ -68,6 +74,7 @@ export function parseHash(hash: string): ShellRoute {
 export function toHash(r: ShellRoute): string {
   if (r.page === 'settings') return `/settings/${r.section ?? 'model'}`
   if (r.page === 'projects') return `/projects/${r.tab ?? 'list'}`
+  if (r.page === 'studio') return r.work && WORK_ID.test(r.work) ? `/studio/${r.work}` : '/studio'
   return `/${r.page}`
 }
 
@@ -78,6 +85,7 @@ export function cleanRoute(raw: unknown): ShellRoute {
   return parseHash(toHash({
     page: typeof r.page === 'string' && PAGE_IDS.has(r.page) ? (r.page as Page) : 'tasks',
     section: typeof r.section === 'string' ? (r.section as SettingsSection) : undefined,
-    tab: r.tab === 'map' ? 'map' : 'list'
+    tab: r.tab === 'map' ? 'map' : 'list',
+    work: typeof r.work === 'string' ? r.work : undefined
   }))
 }

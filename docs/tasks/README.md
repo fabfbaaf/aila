@@ -9,7 +9,7 @@
 | [03 管理记住的命令](03-permission-rules.md) | 「以后都允许」的命令：能看、能删（接口、设置页、终端） | `permissions.py`、`routes/agent.py`、新的设置分区 | 已合并（b965c6d） |
 | [04 会话管理](04-session-management.md) | 会话改名、删除、搜索（接口、终端；任务页的按钮之后另做） | `session.py`、`runner.py`、`routes/agent.py`、终端版 | 已合并（b77dc8d） |
 | [05 看管 AI 服务](05-service-keeper.md) | 桌面端自己启动 AI 服务、崩了重启、关程序时一起关 | 新的 `aila-desktop/src/main/service.ts`、设置页「运行状态」 | 已合并（6304d61） |
-| [06 安装包](06-installer.md) | Windows 安装包，AI 服务打包在里面，不用装 Python、Node | `aila-ai/scripts/build_service.py`、`aila-desktop/electron-builder.yml` | 暂停：等一个干净的 Windows 测试用户或虚拟机（草稿在 `codex/06-installer`） |
+| [06 安装包](06-installer.md) | Windows 安装包，AI 服务打包在里面，不用装 Python、Node | `aila-ai/scripts/build_service.py`、`aila-desktop/electron-builder.yml` | Claude 做完（`claude/her-works`）：打包、自检、本机隔离启动都过了；还差在干净的 Windows 用户或虚拟机上装一遍 |
 | [07 撤销一轮](07-undo-turn.md) | 把她最近一轮改的文件退回去（用户之后改过的不碰） | 新的 `runtime/snapshots.py`、`tools.py`、`runner.py`、任务页、终端 | 已合并（cd108de） |
 | [08 花费和上限](08-budget.md) | 按价格表算钱；给任务设上限，花到了就停 | 新的 `runtime/pricing.py`、`loop.py`、`session.py`、任务页、终端 | 已合并（0c2254d）；DeepSeek 价格要在 `aila-ai/data/prices.json` 填 |
 | [09 嘴上只说总结](09-spoken-summary.md) | 回答照样写全，语音只念开头一两句总结，气泡也只显示总结 | `aila-ai/app/tags.py`、桌面端 `chat/Conversation.ts`、气泡 | 已合并（0af94e6） |
@@ -23,7 +23,7 @@
 ```
 已合并：         01   02   03   04   05   07   08   09   10   A   B
 现在可以开：     11
-暂停：           06（等测试环境）
+待验收：         06（在干净的 Windows 上装一遍）
 ```
 
 Claude 自己做的两件（不交给 Codex，做完同样在自己的分支上、写结果说明）：

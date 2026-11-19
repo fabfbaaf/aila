@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
@@ -27,6 +28,7 @@ public class JwtConfig {
 
     private static final Logger log = LoggerFactory.getLogger(JwtConfig.class);
     private static final int MIN_KEY_BYTES = 32;
+    public static final String ISSUER = "aila";
 
     @Bean
     SecretKey jwtKey(AilaProperties props) {
@@ -52,6 +54,9 @@ public class JwtConfig {
 
     @Bean
     JwtDecoder jwtDecoder(SecretKey jwtKey) {
-        return NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+        var decoder = NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+        // 除了过期时间，签发方也要是自己：同一把密钥以后要是也签别的令牌，不会被当成访问令牌
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(ISSUER));
+        return decoder;
     }
 }

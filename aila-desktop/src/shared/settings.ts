@@ -44,6 +44,10 @@ export interface CodeProject {
   state: 'new' | 'indexing' | 'ready' | 'error'
   error?: string
   last?: { parsed: number; removed: number; embedded: number; seconds: number }
+  /** 「项目」页里加的忽略（文件夹、文件、通配符） */
+  ignore?: string[]
+  /** 项目里 .ailaignore 写的（只读，改要改那个文件） */
+  ignoreFile?: string[]
 }
 
 /** 角色窗口里的开关：语音唤醒、出声说话、留意屏幕上的报错（存在角色窗口那边，设置窗口通过主进程读写） */
@@ -88,6 +92,22 @@ export type CharacterEvent =
   | { kind: 'sit-break'; minutes: number }
   /** 每天第一次见面说说昨天和今天（morning）、晚上的日报（evening）。detail：有具体的事可说（会给「看看任务」） */
   | { kind: 'briefing'; when: 'morning' | 'evening'; text: string; detail: boolean }
+  /** 她自己做好了一件作品：冒个气泡问你要不要看 */
+  | { kind: 'work'; work: { id: string; title: string; why: string } }
+  /** 她在做自己的作品（on）/ 做完了（off）：在桌面上「敲键盘」 */
+  | { kind: 'work-making'; on: boolean; title: string }
+  /** 深夜你还在用电脑：提醒一次早点睡 */
+  | { kind: 'late-night' }
+
+/** 她的说话风格：温柔（默认）、元气、冷静、爱吐槽 */
+export type PersonaStyle = 'gentle' | 'lively' | 'calm' | 'teasing'
+
+export const PERSONA_STYLES: { id: PersonaStyle; name: string; hint: string }[] = [
+  { id: 'gentle', name: '温柔', hint: '安静、认真，偶尔用「……」停顿（原来的她）' },
+  { id: 'lively', name: '元气', hint: '更轻快，会说「好耶」「冲」' },
+  { id: 'calm', name: '冷静', hint: '话少、直接，像靠谱的资深同事' },
+  { id: 'teasing', name: '爱吐槽', hint: '偶尔轻轻吐槽一句，点到为止' }
+]
 
 /** AI 服务的设置（GET /settings）。密钥只告诉设没设 */
 export interface AiSettings {
@@ -95,6 +115,8 @@ export interface AiSettings {
   llm: { baseUrl: string; model: string; apiKeySet: boolean; coderModel?: string; coderFastModel?: string }
   search: { provider: 'bocha' | 'tavily' | 'none'; apiKeySet: boolean }
   computer: { inventory: boolean }
+  /** 性格：说话风格、怎么称呼你、口头禅（旧服务没有） */
+  persona?: { style: PersonaStyle; call: string; catchphrase: string }
   voice: {
     enabled: boolean
     ttsEngine: string
@@ -104,6 +126,8 @@ export interface AiSettings {
     wakeThreshold: number
     endSilence: number
     asrLanguage: 'zh' | 'auto'
+    /** 默认要的语音模型里还没下载的类别（kws、vad、asr、tts）；旧版服务没有这一项 */
+    modelsMissing?: string[]
   }
   status: Record<string, string>
   mcp: { id: string; name: string; connected: boolean; error: string | null }[]
@@ -113,6 +137,9 @@ export interface AiSettings {
 /** 只传要改的项；密钥传空字符串表示清掉 */
 export interface AiSettingsUpdate {
   computerInventory?: boolean
+  personaStyle?: PersonaStyle
+  personaCall?: string
+  personaCatchphrase?: string
   llmBaseUrl?: string
   llmModel?: string
   llmApiKey?: string

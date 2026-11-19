@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AgentActivity, AgentEvent, AgentProgress } from '../shared/agent'
+import { isTestCommand, type AgentActivity, type AgentEvent, type AgentProgress } from '../shared/agent'
 import { AgentRelay } from './agent'
 
 /** 假的 AI 服务：会话详情返回项目目录，说话返回一段事件流 */
@@ -257,5 +257,41 @@ describe('工作窗口的转发（主进程）', () => {
     expect(await r.approvePending('c1')).toBe(true)
     const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/agent/confirm'))
     expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ id: 'c1', approved: true, remember: false })
+  })
+})
+
+describe('跑测试时的小情绪', () => {
+  it('认得常见的测试命令', () => {
+    for (const c of ['python -m pytest -q', 'pytest tests/', 'npm test', 'npm.cmd run test', 'npx vitest run', '.\mvnw.cmd test', 'go test ./...', 'node --test', 'cargo test']) {
+      expect(isTestCommand(c), c).toBe(true)
+    }
+    for (const c of ['git status', 'npm install', 'python main.py', 'cat test_cart.py', 'npm run build']) {
+      expect(isTestCommand(c), c).toBe(false)
+    }
+  })
+
+  it('连着没过记次数，之后过了算「终于过了」', async () => {
+    const run = (id: string, seq: number, ok: boolean): AgentEvent[] => [
+      { type: 'assistant', seq, text: '', tool_calls: [{ id, name: 'run_command', arguments: '{"command":"python -m pytest -q"}' }] },
+      { type: 'tool', seq: seq + 1, id, name: 'run_command', status: ok ? 'ok' : 'error', exit_code: ok ? 0 : 1 }
+    ]
+    fakeService([
+      { type: 'user', seq: 1, text: '修好测试' },
+      ...run('a', 2, false),
+      ...run('b', 4, false),
+      { type: 'assistant', seq: 6, text: '', tool_calls: [{ id: 'g', name: 'run_command', arguments: '{"command":"git diff"}' }] },
+      { type: 'tool', seq: 7, id: 'g', name: 'run_command', status: 'ok' },
+      ...run('c', 8, true),
+      { type: 'turn_end', seq: 10, reason: 'done' }
+    ])
+    const { r, seen } = relay()
+    await r.get('s1')
+    r.send('s1', '修好测试')
+    await until(() => seen.ended > 0)
+    expect(seen.progress.filter((p) => p.kind === 'tests')).toEqual([
+      { kind: 'tests', ok: false, streak: 1, recovered: false },
+      { kind: 'tests', ok: false, streak: 2, recovered: false },
+      { kind: 'tests', ok: true, streak: 0, recovered: true }
+    ])
   })
 })

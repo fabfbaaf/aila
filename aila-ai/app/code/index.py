@@ -23,6 +23,10 @@ import numpy as np
 from ..knowledge.store import _fts_query
 from ..memory.embedder import Embedder
 from .endpoints import Endpoint, is_test, link, scan
+from .ignore import clean, ignored
+from .imports import resolve as resolve_imports
+from .imports import scan_imports
+from .ignore import read_file as read_ignore_file
 from .parse import MAX_FILE_BYTES, Chunk, language_of, parse_file
 from .stack import Frame, parse_frames
 
@@ -31,6 +35,7 @@ IGNORE_DIRS = {
     ".vscode", ".next", ".nuxt", "coverage", ".pytest_cache", ".mypy_cache", ".gradle", "site-packages", "vendor",
 }
 MAX_FILES = 8000
+MAX_LIBS = 30  # 星图外圈最多画几个第三方库（按用到的文件数排）
 CANDIDATES = 30
 RRF_K = 60
 EMBED_TEXT_CHARS = 500
@@ -145,8 +150,10 @@ def code_fts_query(query: str) -> str:
 
 
 class CodeIndex:
-    def __init__(self, root: Path, db_path: Path | str, embedder: Callable[[], Embedder | None]) -> None:
+    def __init__(self, root: Path, db_path: Path | str, embedder: Callable[[], Embedder | None],
+                 ignore: Callable[[], list[str]] = list) -> None:
         self.root = root.resolve()
+        self._ignore = ignore  # 「项目」页里给这个项目加的忽略（和项目里的 .ailaignore 合起来用）
         if isinstance(db_path, Path):
             db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(db_path, check_same_thread=False)
@@ -160,7 +167,7 @@ class CodeIndex:
         self._refresh_lock = threading.Lock()
         self._vectors: tuple[np.ndarray, list[int]] | None = None
         self._paths: list[str] | None = None
-        self._endpoints: dict[str, tuple[float, int, list[Endpoint]]] = {}
+        self._endpoints: dict[str, tuple[float, int, list[Endpoint], list[str]]] = {}
 
     # ---------- 建索引 ----------
 
@@ -174,7 +181,9 @@ class CodeIndex:
                 for name in filenames:
                     rel = os.path.relpath(os.path.join(dirpath, name), self.root).replace(os.sep, "/")
                     files.append(rel)
-        picked = [f for f in files if language_of(f) and not any(part in IGNORE_DIRS for part in f.split("/")[:-1])]
+        patterns = clean([*self._ignore(), *read_ignore_file(self.root)])
+        picked = [f for f in files if language_of(f) and not any(part in IGNORE_DIRS for part in f.split("/")[:-1])
+                  and not ignored(f, patterns)]
         return sorted(picked)[:MAX_FILES]
 
     def _git_files(self) -> list[str] | None:
@@ -475,10 +484,12 @@ class CodeIndex:
 
     # ---------- 星图 ----------
 
-    def graph(self, modified: set[str] | None = None) -> dict[str, list[dict[str, object]]]:
+    def graph(self, modified: set[str] | None = None,
+              churn: dict[str, int] | None = None) -> dict[str, list[dict[str, object]]]:
         """文件是星球，文件之间的调用汇总成光线（按名字解析，和 callees 同样保守：同名的有好几个就不连）
 
-        每个文件带上所在的目录（module，星图拉远时按它聚成一个模块）和是不是测试文件（test，星图里调暗）。
+        每个文件带上所在的目录（module，星图拉远时按它聚成一个模块）、是不是测试文件（test，星图里调暗）、
+        最近的提交里改过几次（churn，「按改动」上色）。
         光线分三种（kind）：call 函数调用；http 请求了另一个文件提供的接口；ipc 发了另一个文件处理的 IPC 消息。
         http、ipc 的 via 是经过的接口路径或频道名（最多 6 个）
         """
@@ -525,30 +536,40 @@ class CodeIndex:
 
         nodes = [
             {"id": f, "name": f.rsplit("/", 1)[-1], "group": group(f), "module": f.rsplit("/", 1)[0] if "/" in f else ".",
-             "test": is_test(f), "lang": lang, "lines": lines, "functions": counts.get(f, 0), "modified": f in modified}
+             "test": is_test(f), "lang": lang, "lines": lines, "functions": counts.get(f, 0), "modified": f in modified,
+             "churn": (churn or {}).get(f, 0)}
             for f, lang, lines, _, _ in files
         ]
         links: list[dict[str, object]] = [
             {"source": s, "target": t, "weight": w, "kind": "call"} for (s, t), w in weights.items()
         ]
         # 跨进程的光线：HTTP 接口、IPC 消息（按函数名连不上的那些）
-        found = {f: self._endpoints_of(f, lang, mtime, size) for f, lang, _, mtime, size in files}
+        scanned = {f: self._scan_of(f, lang, mtime, size) for f, lang, _, mtime, size in files}
+        found = {f: eps for f, (eps, _) in scanned.items()}
         for (s, t, kind), via in sorted(link(found).items()):
             links.append({"source": s, "target": t, "weight": len(via), "kind": kind, "via": sorted(via)[:6]})
-        return {"nodes": nodes, "links": links}
+        # import：项目里文件之间的连成光线；项目外的包算第三方库（星图外圈的恒星）
+        imports, libs = resolve_imports({f: imp for f, (_, imp) in scanned.items()}, {f: lang for f, lang, *_ in files})
+        for (s, t), w in sorted(imports.items()):
+            links.append({"source": s, "target": t, "weight": w, "kind": "import"})
+        lib_list = sorted(
+            ({"id": key, "name": v["name"], "ecosystem": v["ecosystem"], "users": sorted(v["users"])[:200], "count": len(v["users"])}
+             for key, v in libs.items()),
+            key=lambda x: (-x["count"], x["name"]))[:MAX_LIBS]
+        return {"nodes": nodes, "links": links, "libs": lib_list}
 
-    def _endpoints_of(self, rel: str, lang: str, mtime: float, size: int) -> list[Endpoint]:
-        """一个文件提供、请求的接口：按修改时间和大小缓存，文件没变就不再读"""
+    def _scan_of(self, rel: str, lang: str, mtime: float, size: int) -> tuple[list[Endpoint], list[str]]:
+        """一个文件提供、请求的接口，和它 import 了什么：按修改时间和大小缓存，文件没变就不再读"""
         cached = self._endpoints.get(rel)
         if cached and cached[0] == mtime and cached[1] == size:
-            return cached[2]
+            return cached[2], cached[3]
         try:
             text = (self.root / rel).read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return []
-        found = scan(rel, text, lang)
-        self._endpoints[rel] = (mtime, size, found)
-        return found
+            return [], []
+        found, imported = scan(rel, text, lang), scan_imports(text, lang)
+        self._endpoints[rel] = (mtime, size, found, imported)
+        return found, imported
 
     def outline(self, file: str) -> list[CodeChunk]:
         """一个文件里的函数和类（按出现的顺序），星图的全息面板用"""

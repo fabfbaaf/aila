@@ -50,6 +50,17 @@ const reminderAsk = ref<{ reminder: Reminder; late: boolean } | null>(null)
 const dropAsk = ref<DropInfo | null>(null)
 /** 每天见面、日报：说完气泡里给「好 / 看看任务」（有具体的事可说时） */
 const briefingAsk = ref<{ text: string; detail: boolean } | null>(null)
+/** 她自己做好了一件作品：气泡里给「看看 / 待会儿」 */
+const workAsk = ref<{ id: string; title: string } | null>(null)
+/** 她在做自己的作品（编程任务也会让她「敲键盘」：两边都结束才放下） */
+let makingWork = false
+/** 编程任务在做 */
+let agentWorking = false
+
+function stopAgentWork(): void {
+  agentWorking = false
+  behavior.setWorking(makingWork) // 她自己的作品还在做的话接着敲
+}
 /** 任务页里有个操作等你同意：气泡里给「去看看」，点了打开那个任务（同意还是在任务页里点，那里看得到完整的改动） */
 const agentAsk = ref<{ sid: string; action: string } | null>(null)
 /** 桌面状态：藏没藏、能不能说话、省不省电、拔没拔电（主进程推过来） */
@@ -65,6 +76,16 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
         ...(d.kind === 'text' ? [{ label: '讲讲它', value: 'chat', primary: true }] : []),
         ...(d.project ? [{ label: '交给任务页', value: 'task', primary: d.kind === 'dir' }] : []),
         { label: '算了', value: 'no' }
+      ]
+    }
+  }
+  if (workAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
+    return {
+      tag: '作品',
+      detail: workAsk.value.title,
+      buttons: [
+        { label: '看看', value: 'see', primary: true },
+        { label: '待会儿', value: 'later' }
       ]
     }
   }
@@ -288,6 +309,7 @@ async function startFix(project: string, snippet: string): Promise<void> {
 
 function onAnswer(value: string): void {
   if (dropAsk.value && !convAsk.value) void answerDrop(value)
+  else if (workAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerWork(value)
   else if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerBriefing(value)
   else if (agentAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerAgent(value)
   else if (reminderAsk.value && !convAsk.value) answerReminder(value)
@@ -424,6 +446,33 @@ function answerAgent(value: string): void {
   if (ask && value === 'open') bridge?.openAgent(ask.sid)
 }
 
+/** 她做好了作品：说一句，等你点「看看」（一分钟没理就收起，作品页里一直都在） */
+function showWork(w: { id: string; title: string; why: string }): void {
+  if (conversation.chatting || convAsk.value || screenAsk.value || reminderAsk.value) return
+  workAsk.value = { id: w.id, title: w.title }
+  behavior.react('happy')
+  behavior.gesture('wave')
+  conversation.announce(lines.workDone(w.title, w.why))
+  clearTimeout(briefingTimer)
+  briefingTimer = window.setTimeout(() => {
+    workAsk.value = null
+    bubbleVisible.value = false
+  }, BRIEFING_ASK_MS)
+}
+
+function answerWork(value: string): void {
+  clearTimeout(briefingTimer)
+  const ask = workAsk.value
+  workAsk.value = null
+  behavior.gesture('nod')
+  if (ask && value === 'see') {
+    bridge?.studioShow(ask.id)
+    behavior.say(lines.workOpen, 2000)
+  } else {
+    bubbleVisible.value = false
+  }
+}
+
 function answerBriefing(value: string): void {
   clearTimeout(briefingTimer)
   briefingAsk.value = null
@@ -535,6 +584,21 @@ function onCharacterEvent(ev: CharacterEvent): void {
     case 'briefing':
       showBriefing({ text: ev.text, detail: ev.detail })
       break
+    case 'work':
+      showWork(ev.work)
+      break
+    case 'work-making':
+      // 在做自己的作品：桌面上「敲键盘」，偶尔小声说一句；做完放下（编程任务还在做的话由它来放）
+      makingWork = ev.on
+      behavior.setWorking(ev.on || agentWorking)
+      if (ev.on && !conversation.chatting && !desk.value?.presence.quiet) behavior.say(pick(lines.workMaking), 2600)
+      break
+    case 'late-night':
+      if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
+        behavior.gesture('stretch')
+        conversation.announce(pick(lines.lateNight))
+      }
+      break
     case 'sit-break':
       if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
         behavior.gesture('stretch') // 她先伸个懒腰
@@ -551,6 +615,7 @@ function onAgentProgress(p: AgentProgress): void {
   switch (p.kind) {
     case 'start':
       behavior.gesture('nod')
+      agentWorking = true
       behavior.setWorking(true) // 在桌面上「敲键盘」，做完放下
       if (!quiet) behavior.say(pick(lines.agentStart), 2200)
       break
@@ -561,21 +626,35 @@ function onAgentProgress(p: AgentProgress): void {
       break
     case 'done':
       agentAsk.value = null
-      behavior.setWorking(false)
+      stopAgentWork()
       behavior.react('happy')
       if (!quiet) conversation.announce(lines.agentDone(p.files))
       break
     case 'stopped':
-      behavior.setWorking(false)
+      stopAgentWork()
       if (!quiet && lines.agentStopped[p.reason]) behavior.say(lines.agentStopped[p.reason], 3500)
       break
     case 'error':
-      behavior.setWorking(false)
+      stopAgentWork()
       behavior.react('sad')
       if (!quiet) behavior.say(lines.agentError, 3500)
       break
+    case 'tests':
+      // 小情绪：过了就高兴（之前一直没过的话说一句），连着没过三次叹口气、打打气（之后每多三次再说一次）
+      if (p.ok) {
+        behavior.react('happy')
+        if (p.recovered) {
+          behavior.gesture('nod')
+          if (!quiet) behavior.say(pick(lines.testsRecovered), 2600)
+        }
+      } else if (p.streak >= 3 && p.streak % 3 === 0) {
+        behavior.react('sad')
+        behavior.gesture('think')
+        if (!quiet) behavior.say(pick(lines.testsStruggling), 3500)
+      }
+      break
     case 'budget':
-      behavior.setWorking(false)
+      stopAgentWork()
       behavior.gesture('tilt')
       if (!quiet) behavior.say(lines.agentBudget, 5000)
       break
@@ -584,12 +663,12 @@ function onAgentProgress(p: AgentProgress): void {
       if (!quiet) behavior.say(lines.agentStage(p.title), 3000)
       break
     case 'plan_end':
-      behavior.setWorking(false)
+      stopAgentWork()
       behavior.react('happy')
       if (!quiet) conversation.announce(lines.agentPlanEnd)
       break
     case 'plan_pause':
-      behavior.setWorking(false)
+      stopAgentWork()
       behavior.gesture('tilt')
       if (!quiet) behavior.say(lines.agentPlanPause(p.text), 5000)
       break

@@ -39,6 +39,10 @@ class Settings:
     coder_context: int = 128_000
     coder_max_steps: int = 60
     computer_inventory: bool = True
+    # 性格：说话风格（gentle 温柔 / lively 元气 / calm 冷静 / teasing 爱吐槽）、怎么称呼你、口头禅
+    persona_style: str = "gentle"
+    persona_call: str = ""
+    persona_catchphrase: str = ""
 
     @property
     def mock(self) -> bool:
@@ -73,4 +77,7 @@ def load_settings() -> Settings:
         coder_context=int(os.getenv("AILA_CODER_CONTEXT", "128000")),
         coder_max_steps=int(os.getenv("AILA_CODER_MAX_STEPS", "60")),
         computer_inventory=os.getenv("AILA_COMPUTER_INVENTORY", "on").strip().lower() not in ("off", "0", "false"),
+        persona_style=os.getenv("AILA_PERSONA_STYLE", "gentle").strip().lower(),
+        persona_call=os.getenv("AILA_PERSONA_CALL", "").strip()[:12],
+        persona_catchphrase=os.getenv("AILA_PERSONA_CATCHPHRASE", "").strip()[:12],
     )

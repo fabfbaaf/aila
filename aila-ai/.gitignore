@@ -9,3 +9,6 @@ models/
 data/
 mcp.json
 eval/results/
+# PyInstaller 的产物（scripts/build_service.py）
+build/
+dist/

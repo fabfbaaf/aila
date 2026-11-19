@@ -48,6 +48,7 @@ class Backend(Protocol):
     async def forget_rule(self, project: str, command: str) -> None: ...
     async def undo(self, sid: str, turn_seq: int) -> Event: ...
     async def set_budget(self, sid: str, amount: float | None) -> Event: ...
+    async def commands(self, cwd: str | None, kind: str = "project") -> dict[str, Any]: ...
     async def memory(self, cwd: str) -> list[dict[str, Any]]: ...
     async def remember(self, cwd: str, text: str) -> dict[str, Any]: ...
     async def forget_memory(self, cwd: str, note_id: str) -> None: ...
@@ -176,6 +177,12 @@ class EmbeddedBackend:
         if command not in rules.commands(Path(project)):
             raise BackendError("没有这条记住的命令，可能已经删掉了。")
         rules.forget(Path(project), command)
+
+    async def commands(self, cwd: str | None, kind: str = "project") -> dict[str, Any]:
+        found = self.rt.commands(cwd, kind)
+        return {"commands": sorted((c.summary() for c in found.values()), key=lambda c: c["name"]),
+                "project_dir": str(Path(cwd) / ".aila" / "commands") if cwd and kind != "computer" else None,
+                "user_dir": str(self.rt.data_dir / "commands")}
 
     async def memory(self, cwd: str) -> list[dict[str, Any]]:
         return [asdict(n) for n in self.rt.memory.notes(cwd)]
@@ -320,6 +327,9 @@ class HttpBackend:
 
     async def forget_rule(self, project: str, command: str) -> None:
         await self._call("DELETE", "/agent/rules", json={"project": project, "command": command})
+
+    async def commands(self, cwd: str | None, kind: str = "project") -> dict[str, Any]:
+        return await self._call("GET", "/agent/commands", params={"kind": kind, **({"cwd": cwd} if cwd else {})})
 
     async def memory(self, cwd: str) -> list[dict[str, Any]]:
         return await self._call("GET", "/agent/memory", params={"cwd": cwd})

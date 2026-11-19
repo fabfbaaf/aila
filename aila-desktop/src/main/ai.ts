@@ -68,13 +68,27 @@ export function codeProjectAction(aiUrl: string, id: string, action: 'refresh' |
   )
 }
 
+/** 改项目要忽略的文件夹（AI 服务会马上在后台重新扫） */
+export function setCodeIgnore(aiUrl: string, id: string, patterns: string[]): Promise<AiResult<CodeProject>> {
+  return attempt(async () =>
+    json<CodeProject>(
+      await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/ignore`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ patterns }),
+        signal: AbortSignal.timeout(5000)
+      })
+    )
+  )
+}
+
 /** 看屏幕的状态和上次的统计（设置窗口显示） */
 export function getScreenStatus(aiUrl: string): Promise<AiResult<ScreenStatus>> {
   return attempt(async () => json<ScreenStatus>(await fetch(`${aiUrl}/screen/status`, { signal: AbortSignal.timeout(3000) })))
 }
 
 /** 设置窗口用：成功、失败都返回一个结果对象，失败原因能直接显示 */
-async function attempt<T>(fn: () => Promise<T>): Promise<AiResult<T>> {
+export async function attempt<T>(fn: () => Promise<T>): Promise<AiResult<T>> {
   try {
     return { ok: true, data: await fn() }
   } catch (err) {
@@ -107,7 +121,7 @@ export function testLlm(aiUrl: string): Promise<AiResult<{ ok: boolean; message:
 
 const MAX_UPLOAD = 20 * 1024 * 1024
 
-async function json<T>(res: Response): Promise<T> {
+export async function json<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { detail?: unknown }
   if (!res.ok) throw new Error(describeDetail(data.detail) ?? `AI 服务返回 ${res.status}`)
   return data

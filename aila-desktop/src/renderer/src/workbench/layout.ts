@@ -227,12 +227,26 @@ export function textWidth(text: string, size: number): number {
 export function withoutTests(graph: CodeGraph): CodeGraph {
   const nodes = graph.nodes.filter((n) => !n.test)
   const keep = new Set(nodes.map((n) => n.id))
-  return { nodes, links: graph.links.filter((l) => keep.has(l.source) && keep.has(l.target)) }
+  const libs = (graph.libs ?? [])
+    .map((lib) => ({ ...lib, users: lib.users.filter((u) => keep.has(u)) }))
+    .map((lib) => ({ ...lib, count: lib.users.length }))
+    .filter((lib) => lib.count > 0) // 只有测试在用的库（pytest、vitest）也一起藏起来
+  return { nodes, links: graph.links.filter((l) => keep.has(l.source) && keep.has(l.target)), libs }
+}
+
+/** 选中文件的 import：它 import 了谁（out）、谁 import 了它（in）、它用到的第三方库 */
+export function importsOf(graph: CodeGraph, id: string): { out: string[]; in: string[]; libs: string[] } {
+  const imports = graph.links.filter((l) => kindOf(l) === 'import')
+  return {
+    out: imports.filter((l) => l.source === id).map((l) => l.target),
+    in: imports.filter((l) => l.target === id).map((l) => l.source),
+    libs: (graph.libs ?? []).filter((lib) => lib.users.includes(id)).map((lib) => lib.name)
+  }
 }
 
 /** 选中文件的跨进程光线：它请求了谁（out）、谁请求了它（in），面板里列出来 */
 export function crossLinks(graph: CodeGraph, id: string): { out: GraphLink[]; in: GraphLink[] } {
-  const cross = graph.links.filter((l) => kindOf(l) !== 'call')
+  const cross = graph.links.filter((l) => kindOf(l) === 'http' || kindOf(l) === 'ipc')
   return { out: cross.filter((l) => l.source === id), in: cross.filter((l) => l.target === id) }
 }
 
@@ -271,4 +285,88 @@ export function searchNodes(nodes: GraphNode[], query: string, limit = 8): Graph
 /** 默认显示名字的星球：最大的几个（太多会挤成一团） */
 export function labelled(nodes: GraphNode[], count = 12): Set<string> {
   return new Set([...nodes].sort((a, b) => b.lines - a.lines).slice(0, count).map((n) => n.id))
+}
+
+// ---------- 换颜色看项目：按子项目 / 按改动 / 按有没有测试 ----------
+
+export type ColorMode = 'group' | 'churn' | 'tests'
+
+export const TESTED_COLOR = '#4ade80'
+export const UNTESTED_COLOR = '#ff7a59'
+export const TEST_FILE_COLOR = '#5d6782'
+export const COLD_COLOR = '#2f3b58'
+
+/** 改动次数 → 颜色：没改过是暗蓝灰；改得越多从青到黄到红（按对数算，少数热点不会把别的都压成一个色） */
+export function churnColor(count: number, max: number): string {
+  if (count <= 0 || max <= 0) return COLD_COLOR
+  const t = Math.min(1, Math.log(1 + count) / Math.log(1 + max))
+  const hue = 190 - 190 * t // 190 青 → 50 黄 → 0 红
+  const light = 55 + 5 * t
+  return hslHex(hue, 90, light)
+}
+
+function hslHex(h: number, s: number, l: number): string {
+  const a = (s / 100) * Math.min(l / 100, 1 - l / 100)
+  const f = (n: number): string => {
+    const k = (n + h / 30) % 12
+    const c = l / 100 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))
+    return Math.round(255 * c).toString(16).padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
+/** 测试文件对应的被测文件名：test_cart.py、cart_test.py、cart.test.ts、cart.spec.js、CartTest.java → cart / Cart */
+export function testedStem(name: string): string | null {
+  const base = name.replace(/\.[^.]+$/, '')
+  const m =
+    /^test_(.+)$/.exec(base) ?? /^(.+)_test$/.exec(base) ?? /^(.+)\.(test|spec)$/.exec(base) ?? /^(.+?)Tests?$/.exec(base)
+  return m ? m[1].toLowerCase() : null
+}
+
+/**
+ * 有测试的文件：测试文件调用了它（任何一种光线从测试文件连过来），或者有同名的测试文件（test_cart.py ↔ cart.py）。
+ * 只是估算（没有跑覆盖率），但不用跑测试、一打开就有
+ */
+export function testedFiles(graph: CodeGraph): Set<string> {
+  const tests = new Set(graph.nodes.filter((n) => n.test).map((n) => n.id))
+  const out = new Set<string>()
+  for (const l of graph.links) if (tests.has(l.source) && !tests.has(l.target)) out.add(l.target)
+  const stems = new Set(graph.nodes.filter((n) => n.test).map((n) => testedStem(n.name)).filter((s): s is string => !!s))
+  for (const n of graph.nodes) {
+    if (!n.test && stems.has(n.name.replace(/\.[^.]+$/, '').toLowerCase())) out.add(n.id)
+  }
+  return out
+}
+
+/** 某种上色方式下每个文件、每个模块的颜色；按子项目（原来的样子）返回 null */
+export function modeColors(graph: CodeGraph, mode: ColorMode): { files: Map<string, string>; modules: Map<string, string> } | null {
+  if (mode === 'group') return null
+  const files = new Map<string, string>()
+  const modules = new Map<string, string>()
+  const byModule = new Map<string, GraphNode[]>()
+  for (const n of graph.nodes) byModule.set(moduleOf(n), [...(byModule.get(moduleOf(n)) ?? []), n])
+  if (mode === 'churn') {
+    const max = Math.max(0, ...graph.nodes.map((n) => n.churn ?? 0))
+    for (const n of graph.nodes) files.set(n.id, churnColor(n.churn ?? 0, max))
+    for (const [m, list] of byModule) modules.set(m, churnColor(Math.max(0, ...list.map((n) => n.churn ?? 0)), max))
+  } else {
+    const tested = testedFiles(graph)
+    for (const n of graph.nodes) files.set(n.id, n.test ? TEST_FILE_COLOR : tested.has(n.id) ? TESTED_COLOR : UNTESTED_COLOR)
+    for (const [m, list] of byModule) {
+      const code = list.filter((n) => !n.test)
+      if (!code.length) {
+        modules.set(m, TEST_FILE_COLOR)
+        continue
+      }
+      // 模块里有测试的占几成：全有是绿，全没有是橙红，中间渐变
+      const share = code.filter((n) => tested.has(n.id)).length / code.length
+      modules.set(m, hslHex(14 + (142 - 14) * share, 85, 58))
+    }
+  }
+  return { files, modules }
+}
+
+/** 「按改动」时改得最多的几个文件（图例里列出来） */
+export function hottest(graph: CodeGraph, count = 5): GraphNode[] {
+  return graph.nodes.filter((n) => (n.churn ?? 0) > 0).sort((a, b) => (b.churn ?? 0) - (a.churn ?? 0)).slice(0, count)
 }

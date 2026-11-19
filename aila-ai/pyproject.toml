@@ -7,3 +7,5 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# 哪个测试卡住超过 5 分钟，就把所有线程的调用栈打出来（偶尔卡住的浏览器测试靠它查）
+faulthandler_timeout = 300

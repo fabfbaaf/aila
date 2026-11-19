@@ -19,6 +19,7 @@ import ProjectsPage from './ProjectsPage.vue'
 import SectionPage from './SectionPage.vue'
 import SettingsPage from './SettingsPage.vue'
 import ChatHistoryPage from './ChatHistoryPage.vue'
+import StudioPage from './StudioPage.vue'
 
 const KnowledgeSection = defineAsyncComponent(() => import('../settings/sections/KnowledgeSection.vue'))
 const MemorySection = defineAsyncComponent(() => import('../settings/sections/MemorySection.vue'))
@@ -38,6 +39,8 @@ const page = computed<{ component: Component; props: Record<string, unknown> }>(
       return { component: SectionPage, props: { section: KnowledgeSection } }
     case 'memory':
       return { component: SectionPage, props: { section: MemorySection } }
+    case 'studio':
+      return { component: StudioPage, props: { work: route.value.work } }
     case 'settings':
       return { component: SettingsPage, props: { section: route.value.section ?? 'model' } }
     default:
@@ -52,7 +55,7 @@ function go(next: ShellRoute): void {
   document.title = name && next.page !== 'tasks' ? `艾拉 · ${name}` : '艾拉'
 }
 
-/** Ctrl+1…6 切页面（和图标栏的顺序一样） */
+/** Ctrl+1…7 切页面（和图标栏的顺序一样） */
 function onKey(e: KeyboardEvent): void {
   if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
   const target = PAGES.find((p) => p.key === e.key)

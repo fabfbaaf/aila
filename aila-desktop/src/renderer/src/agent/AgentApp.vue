@@ -8,7 +8,8 @@
  * 计划和进度从日志推出来（plan.ts），右边有计划进度和「接着做」。
  */
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { agentModes, MODE_HINTS, MODE_LABELS, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { agentModes, MODE_HINTS, MODE_LABELS, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
 import { createAgentSource, type ProjectChoice } from './source'
@@ -23,6 +24,7 @@ import Icon from '../theme/Icon.vue'
 import { deleteNotice, groupSessions, sessionLabel } from './sessions'
 import { canContinue, planState } from './plan'
 import PlanCard from './PlanCard.vue'
+import TaskBoard from './TaskBoard.vue'
 
 const source = createAgentSource()
 /** 告诉主窗口外壳有几个会话在等你（图标栏的角标） */
@@ -71,6 +73,7 @@ const waitingCount = computed(() => sessions.value.filter((s) => s.waiting).leng
 watch(waitingCount, (n) => emit('waiting', n), { immediate: true })
 /** 终端里开的、别的窗口开的会话也可能在等你：每隔一会儿刷新一次列表 */
 const LIST_REFRESH_MS = 15000
+const BOARD_REFRESH_MS = 2500
 let listTimer = 0
 const menuFor = ref('')
 const renaming = ref('')
@@ -159,7 +162,11 @@ const choices = computed<ProjectChoice[]>(() => {
 // ---------- 会话 ----------
 
 let listRequest = 0
-async function refreshList(): Promise<void> {
+/**
+ * 重新取会话列表。loud：你自己触发的（打开页面、搜索）出错要说；后台刷新（定时、事件触发、看板轮询）
+ * 偶尔一次失败不打扰你，下一次刷新就补上了
+ */
+async function refreshList(loud = false): Promise<void> {
   const request = ++listRequest
   try {
     const result = await source.list(query.value)
@@ -172,7 +179,7 @@ async function refreshList(): Promise<void> {
       t.value.budget = validBudget(latest.budget) ? latest.budget : null
     }
   } catch (err) {
-    if (request === listRequest) error.value = (err as Error).message
+    if (request === listRequest && loud) error.value = (err as Error).message
   }
 }
 
@@ -197,6 +204,7 @@ async function open(sid: string): Promise<void> {
     ledger.value = null
     loadLedger()
     void loadNotes()
+    void loadCommands()
     if (s.running && !streaming.has(sid)) {
       streaming.add(sid)
       source.watch(sid, tr.lastSeq) // 正在做（可能是终端里开的）：接上实时事件
@@ -249,7 +257,7 @@ async function pickOther(): Promise<void> {
 // 打字停一下再搜（服务端按标题和项目路径找，能找到很早的会话）
 watch(query, () => {
   clearTimeout(searchTimer)
-  searchTimer = window.setTimeout(() => void refreshList(), 250)
+  searchTimer = window.setTimeout(() => void refreshList(true), 250)
 })
 
 function toggleMenu(sid: string): void {
@@ -581,7 +589,117 @@ source.onFocus((sid) => {
   void open(sid)
 })
 
+// ---------- 看板：几个任务同时做 ----------
+
+const board = ref(false)
+const boardNow = ref(Date.now() / 1000)
+/** 侧栏「看板」按钮上的数字：在做和等你的任务一共几个 */
+const boardBusy = computed(() => sessions.value.filter((s) => s.running || s.waiting).length)
+let boardTimer = 0
+
+watch(board, (on) => {
+  window.clearInterval(boardTimer)
+  if (!on) return
+  void refreshList()
+  // 看板开着时勤快一点刷：别的任务在做什么只能靠列表摘要
+  boardTimer = window.setInterval(() => {
+    boardNow.value = Date.now() / 1000
+    void refreshList()
+  }, BOARD_REFRESH_MS)
+})
+
+function openFromBoard(sid: string): void {
+  board.value = false
+  void open(sid)
+}
+
+async function answerFromBoard(_sid: string, id: string, approved: boolean): Promise<void> {
+  if (!(await source.confirm(id, approved, false))) error.value = '这个确认已经结束了（超时或者被打断）。'
+  void refreshList()
+}
+
+/** 一次开几个：每个都在新分支上做（互不干扰），开好就开始 */
+async function batchFromBoard(cwd: string, mode: AgentMode, tasks: string[]): Promise<void> {
+  error.value = ''
+  for (const task of tasks) {
+    try {
+      const s = await source.create(cwd, mode, true, null, 'project')
+      streaming.add(s.id)
+      source.send(s.id, task)
+    } catch (err) {
+      error.value = `「${task}」没开成：${(err as Error).message}`
+      break
+    }
+  }
+  await refreshList()
+}
+
+// ---------- 命令菜单：输入「/」时列出内置命令和自定义命令 ----------
+
+const commandList = ref<AgentCommandList | null>(null)
+const menuIndex = ref(0)
+/** 按了 Esc：在输入变化前不再弹 */
+const menuClosed = ref(false)
+const menu = computed<MenuItem[]>(() =>
+  menuClosed.value || !current.value || running.value
+    ? []
+    : commandMenu(text.value, commandList.value?.commands ?? [], current.value.kind === 'computer')
+)
+/** 展开看过「发了什么」的自定义命令 */
+const openCommands = reactive(new Set<string>())
+
+async function loadCommands(): Promise<void> {
+  const s = current.value
+  if (!s || !source.commands) return
+  const kind = s.kind ?? 'project'
+  try {
+    const list = await source.commands(kind === 'computer' ? null : s.cwd, kind)
+    if (current.value?.id === s.id) commandList.value = list
+  } catch {
+    commandList.value = null // 取不到（旧服务）：只列内置的
+  }
+}
+
+watch(text, (now, before) => {
+  menuIndex.value = 0
+  menuClosed.value = false
+  if (now === '/' && before !== '/') void loadCommands() // 刚打「/」：重新读一遍，命令文件可能刚加
+})
+
+function pickCommand(item: MenuItem): void {
+  text.value = `/${item.name} `
+  void nextTick(() => input.value?.focus())
+}
+
+function toggleCommand(key: string): void {
+  if (openCommands.has(key)) openCommands.delete(key)
+  else openCommands.add(key)
+}
+
+/** 菜单开着时：↑↓ 选、Tab 补全、Enter 补全（已经是完整命令名就照常发送）、Esc 收起。处理了返回 true */
+function menuKey(e: KeyboardEvent): boolean {
+  const items = menu.value
+  if (!items.length || e.isComposing) return false
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    menuIndex.value = (menuIndex.value + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length
+  } else if (e.key === 'Tab') {
+    pickCommand(items[menuIndex.value])
+  } else if (e.key === 'Escape') {
+    menuClosed.value = true
+    e.stopPropagation() // 不要变成「打断她」
+  } else if (e.key === 'Enter' && !e.shiftKey) {
+    const next = pickOnEnter(text.value, items[menuIndex.value])
+    if (next === null) return false
+    text.value = next
+  } else {
+    return false
+  }
+  e.preventDefault()
+  return true
+}
+
 function onComposerKey(e: KeyboardEvent): void {
+  if (menuKey(e)) return
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     send()
@@ -641,7 +759,7 @@ onMounted(async () => {
     if (running.value && view.value === 'trace') now.value = Date.now() / 1000
   }, 1000)
   if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__agent = { t, open, source }
-  await refreshList()
+  await refreshList(true)
   void source.projects().then((p) => (projects.value = p))
   void source.models().then((m) => (models.value = m))
   const focus = await source.takeFocus()
@@ -664,6 +782,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('click', closeMenus)
   clearInterval(clock)
+  clearInterval(boardTimer)
   clearTimeout(ledgerTimer)
   clearTimeout(searchTimer)
   clearInterval(listTimer)
@@ -675,7 +794,12 @@ onBeforeUnmount(() => {
     <aside class="side">
       <div class="side-head">
         <h2>任务</h2>
-        <button class="new" title="开一个新任务" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+        <div class="head-actions">
+          <button class="board-toggle" :class="{ on: board }" :title="board ? '回到当前任务' : '看板：几个任务同时做时一眼看全'" @click="board = !board">
+            看板<span v-if="boardBusy" class="dot">{{ boardBusy }}</span>
+          </button>
+          <button class="new" title="开一个新任务" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+        </div>
       </div>
       <label class="search">
         <Icon name="search" :size="15" />
@@ -730,7 +854,19 @@ onBeforeUnmount(() => {
       <div class="side-foot">终端里也能用：<code>aila</code></div>
     </aside>
 
-    <main class="main">
+    <TaskBoard
+      v-if="board"
+      class="main"
+      :sessions="sessions"
+      :choices="choices"
+      :now="boardNow"
+      :error="error"
+      @open="openFromBoard"
+      @stop="(sid: string) => void source.interrupt(sid)"
+      @answer="answerFromBoard"
+      @batch="batchFromBoard"
+    />
+    <main v-else class="main">
       <header v-if="current" class="top">
         <div class="proj" :title="current.cwd">
           <b>{{ sessionLabel(current) }}</b>
@@ -767,6 +903,13 @@ onBeforeUnmount(() => {
             <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>只读</span></div>
             <div v-else-if="item.kind === 'user' && item.tag === 'plan'" class="user review"><Icon name="plan" :size="16" />{{ item.text }}<span>只读</span></div>
             <div v-else-if="item.kind === 'user' && item.tag === 'stage'" class="stage-line"><Icon name="play" :size="12" :stroke="2" />{{ item.text }}</div>
+            <div v-else-if="item.kind === 'user' && item.tag === 'command'" class="user command">
+              <div class="command-head">
+                <Icon name="command" :size="16" />{{ item.text }}
+                <button class="link" type="button" @click="toggleCommand(item.key)">{{ openCommands.has(item.key) ? '收起' : '看发了什么' }}</button>
+              </div>
+              <pre v-if="openCommands.has(item.key)" class="command-body">{{ item.detail }}</pre>
+            </div>
             <div v-else-if="item.kind === 'user'" class="user">{{ item.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
             <div v-else-if="item.kind === 'text'" class="md" :class="{ live: item.live }" v-html="renderMarkdown(item.text)"></div>
@@ -816,6 +959,26 @@ onBeforeUnmount(() => {
 
       <footer v-if="current" class="composer">
         <div class="box">
+          <div v-if="menu.length" class="cmd-menu" role="listbox" aria-label="命令">
+            <button
+              v-for="(c, i) in menu"
+              :key="c.source + c.name"
+              type="button"
+              role="option"
+              :aria-selected="i === menuIndex"
+              :class="{ on: i === menuIndex }"
+              @mousedown.prevent="pickCommand(c)"
+              @mouseenter="menuIndex = i"
+            >
+              <b>/{{ c.name }}</b><span class="desc">{{ c.description }}</span><span class="src">{{ SOURCE_LABEL[c.source] }}</span>
+            </button>
+            <div v-if="!commandList?.commands.length" class="cmd-hint">
+              常做的流程可以写成自定义命令：把「名字.md」放进
+              {{ commandList?.project_dir ? '项目的 .aila/commands/' : '' }}{{ commandList?.project_dir ? '，或者 ' : '' }}{{ commandList?.user_dir ?? '数据目录的 commands/' }}，
+              以后输入「/名字」她就照着做
+            </div>
+            <div class="cmd-keys">↑↓ 选 · Tab 补全 · Esc 收起</div>
+          </div>
           <textarea
             ref="input"
             v-model="text"
@@ -859,7 +1022,7 @@ onBeforeUnmount(() => {
       </footer>
     </main>
 
-    <aside v-if="current" class="info">
+    <aside v-if="current && !board" class="info">
       <section v-if="plan && plan.decision !== 'rejected'" class="plan-side">
         <h3>计划</h3>
         <p class="plan-side-goal">{{ plan.goal }}</p>
@@ -1188,6 +1351,39 @@ code {
 .side-head .new {
   padding: 5px 11px 5px 9px;
   font-size: 12.5px;
+}
+
+.head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.board-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r-s);
+  background: transparent;
+  color: var(--dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.board-toggle.on {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.board-toggle .dot {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ui-warn-soft);
+  color: var(--ui-warn);
+  font-size: 11px;
+  text-align: center;
 }
 
 .search {
@@ -1907,6 +2103,99 @@ code {
 /* 输入框：一个圆角盒子，下面一条工具栏 */
 .composer {
   padding: 4px 22px 16px;
+}
+
+/* 输入「/」时的命令菜单：贴在输入框上方 */
+.box {
+  position: relative;
+}
+
+.cmd-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ui-r);
+  background: var(--card);
+  box-shadow: var(--ui-shadow);
+}
+
+.cmd-menu button {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cmd-menu button.on {
+  background: var(--ui-brand-soft);
+}
+
+.cmd-menu b {
+  flex: none;
+  font-family: var(--ui-mono);
+}
+
+.cmd-menu .desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-menu .src {
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cmd-hint,
+.cmd-keys {
+  padding: 6px 10px 2px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cmd-keys {
+  text-align: right;
+}
+
+/* 自定义命令的那句话：/发布 v1.2，可以展开看发了什么 */
+.user.command .command-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user.command .link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-body {
+  max-height: 260px;
+  margin: 8px 0 0;
+  overflow: auto;
+  color: var(--dim);
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .box {

@@ -23,6 +23,8 @@ from .branch import BranchError, BranchInfo, open_branch
 from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
+from .commands import Command, load_commands, match
+from .delivery import DELIVERY, DeliveryError
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, remember_tool
@@ -303,6 +305,25 @@ class Runtime:
             prompt = COMPUTER_PLAN_PROMPT if agent.session.kind == "computer" else PLAN_PROMPT
             return agent, prompt.format(goal=text.strip()), {"plan_request": True, "title": plan_title(text)}
         if not review:
+            # 交活：/commit、/pr、/pr-comments，请求由代码生成（改动清单、分支、PR 评论都是代码查的）
+            head, _, args = text.strip().partition(" ")
+            name = head[1:].lower() if head.startswith("/") else ""
+            if name in DELIVERY:
+                if agent.session.kind == "computer":
+                    raise RuntimeError_("电脑任务不在项目里，没有可以提交或开 PR 的改动。")
+                build, _label = DELIVERY[name]
+                root = agent.session.workdir if agent.session.workdir.is_dir() else agent.session.cwd
+                try:
+                    request = build(root, args)
+                except DeliveryError as err:
+                    raise RuntimeError_(str(err)) from err
+                return agent, request, {"command": name, "title": f"/{name}" + (f" {args.strip()}"[:200] if args.strip() else "")}
+            # 自定义命令：「/发布 v1.2」展开成命令文件里写的话；日志里记着命令名和你写的那一行
+            found = match(text.strip(), self.commands(agent.session.cwd, agent.session.kind))
+            if found:
+                cmd, args = found
+                title = f"/{cmd.name}" + (f" {args}" if args else "")
+                return agent, cmd.expand(args), {"command": cmd.name, "title": title[:200]}
             return agent, text, {}
         if agent.session.kind == "computer":
             raise RuntimeError_("电脑任务没有项目改动可审查。直接说要检查什么，或用 /plan 先出方案。")
@@ -314,6 +335,11 @@ class Runtime:
             raise RuntimeError_(str(err)) from err
         focus = text.strip()
         return agent, request, {"review": True, "title": review_title(focus), **({"focus": focus} if focus else {})}
+
+    def commands(self, cwd: str | Path | None, kind: str = "project") -> dict[str, Command]:
+        """这个项目能用的自定义命令（每次现读：改了命令文件马上生效）。电脑任务只用自己的"""
+        project = Path(cwd) if cwd and kind != "computer" else None
+        return load_commands(project, self.data_dir / "commands")
 
     def undo(self, sid: str, turn_seq: int | None = None) -> Event:
         """只撤销最近完整一轮的文件工具，撤销本身记在同一份追加日志里。"""

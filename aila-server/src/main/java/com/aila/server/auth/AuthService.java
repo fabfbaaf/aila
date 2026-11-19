@@ -56,16 +56,18 @@ public class AuthService {
     }
 
     @Transactional
-    public TokenService.Session login(LoginRequest r) {
+    public TokenService.Session login(LoginRequest r, String ip) {
         var email = normalize(r.email());
-        throttle.check(email);
+        // 锁的是「这个 IP 试这个邮箱」：别人在自己那里输错再多次，也锁不住你
+        var key = email + "|" + ip;
+        throttle.check(key);
         var user = users.findByEmail(email).orElse(null);
         boolean ok = encoder.matches(r.password(), user == null ? dummyHash : user.getPasswordHash());
         if (!ok || user == null) {
-            throttle.failed(email);
+            throttle.failed(key);
             throw new ApiException(HttpStatus.UNAUTHORIZED, "BAD_CREDENTIALS", "邮箱或密码不对");
         }
-        throttle.succeeded(email);
+        throttle.succeeded(key);
         return tokens.issue(user, r.deviceId(), r.deviceName());
     }
 
