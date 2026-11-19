@@ -50,7 +50,7 @@ npm.cmd run dist
 - 装给当前用户，不用管理员权限；开始菜单和桌面有「艾拉」快捷方式。图标是 `scripts/make-icon.mjs` 用代码画的（和托盘一样的紫色圆环）
 - 用户的东西都不写安装目录：大模型密钥（`.env`）、会话、记忆、代码索引、下载的语音模型都在 `%APPDATA%\aila-desktop\ai\` 下面（`AILA_ENV_FILE`、`AILA_DATA_DIR`、`AILA_MODELS_DIR`、`AILA_MCP_CONFIG` 由桌面端指过去，见 `main/serviceNode.ts` 的 `packagedCommand`）。桌面端自己的设置、登录、聊天记录在 `%APPDATA%\aila-desktop` 本身，和开发时、本机测试版是同一个文件夹；AI 服务那边的不一样（开发时用仓库 `aila-ai` 里的 `.env` 和 `data\`），所以在开发的电脑上装了安装包，要在设置里重新填一次密钥
 - 语音模型不放进安装包（约 460MB）：「设置 → 语音」里点「下载语音模型」，下完 AI 服务自动重启一次
-- 开发用的 VRM 示例模型不打进去，她用自带的原创形象
+- 开发用的 VRM 示例模型不打进去，她用自带的原创形象（`out/renderer/avatar/aila.vrm`）；装了 Live2D 运行库的话一起带上（见「Live2D 模型」）
 - 没有代码签名证书：Windows 会弹「已保护你的电脑」，点「更多信息 → 仍要运行」
 - 卸载会删掉安装目录，`%APPDATA%\aila-desktop` 留着（下次装还在）。要彻底删：卸载后再删掉这个文件夹
 
@@ -160,8 +160,22 @@ npm.cmd run dist
 ### 换成别的模型
 
 1. 用免费的 [VRoid Studio](https://vroid.com/studio) 捏一个角色，导出为 `.vrm`；或者用下面的示例模型
-2. 右键艾拉 →「设置…」→「形象」→「选择 VRM 模型…」；下次启动会自动加载这个
+2. 右键艾拉 →「设置…」→「形象」→「选择模型（VRM 或 Live2D）…」；下次启动会自动加载这个
 3. 想换回来：同一个地方点「换回艾拉自己的形象」
+
+### Live2D 模型
+
+也可以换成 Live2D 模型（Cubism 3 以后的格式，选模型文件夹里的 `.model3.json`）：
+
+1. 先装 Live2D 的运行库：`npm run setup:live2d`。Cubism Core 是 Live2D 公司的专有软件，脚本先给你看许可协议的地址，你读过、同意了再加 `-- --accept-license` 运行，才会下载到 `src/renderer/public/live2d/`（不进 Git）
+2. 在「形象」里选 `.model3.json`；主进程把那个文件夹里的贴图、动作、物理文件读给角色窗口（最多 500 个文件、200MB，不跟着链接走）
+3. 官方的免费示例模型（Hiyori 等）在 [Live2D 的示例数据](https://www.live2d.com/en/learn/sample/) 和 [CubismWebSamples](https://github.com/Live2D/CubismWebSamples/tree/develop/Samples/Resources) 里，用 Live2D 免费素材许可
+
+怎么做的（`src/renderer/src/avatar/Live2DAvatar.ts`）：用 PixiJS + pixi-live2d-display 把模型画到离屏画布上，再当贴图贴在 three.js 场景的一个平面上，所以点击判断、镜头构图、省电降帧、行为系统都和 VRM 共用。
+她的姿态和表情换成 Cubism 的标准参数（`live2dParams.ts`：转头、眨眼、眯眼笑、嘴型、眉毛、视线），模型没有的参数会被忽略；
+手没有统一的参数，挥手、伸懒腰在 Live2D 上只有头和表情。页面的 CSP 不许 `eval`，所以加了 `@pixi/unsafe-eval`（名字吓人，其实是换成不用 eval 的实现）。
+
+**打包分发**：装了运行库再 `npm run dist`，安装包里会带上 Cubism Core。拿去分发的话要遵守 Live2D 的许可（商业产品还要看[出版许可](https://www.live2d.com/en/sdk/license/)）；不想带就先删掉 `src/renderer/public/live2d/` 再打包。
 
 ### 示例模型（开发期用过的，不随程序分发）
 

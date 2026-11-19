@@ -9,6 +9,11 @@
 import { WORKS_BUDGET_CHOICES, WORKS_EVERY_CHOICES } from './studio'
 
 export interface DesktopPrefs {
+  /**
+   * 桌面上显示她。关掉以后角色窗口一直藏着：主窗口、托盘、编程任务、语音唤醒照常用，
+   * 提醒改成系统通知（和免打扰一样），打开艾拉时直接开主窗口
+   */
+  showCharacter: boolean
   /** 全屏应用、演示时自动藏起来 */
   hideOnFullscreen: boolean
   /** 没人理她时降帧（拔电时再降） */
@@ -28,6 +33,7 @@ export interface DesktopPrefs {
 }
 
 export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
+  showCharacter: true,
   hideOnFullscreen: true,
   powerSaver: true,
   openAtLogin: false,
@@ -49,7 +55,8 @@ export type FocusState = 'normal' | 'fullscreen' | 'presentation' | 'away'
 export interface Presence {
   visible: boolean
   quiet: boolean
-  reason: 'normal' | 'fullscreen' | 'presentation' | 'away' | 'dnd'
+  /** off：设置里关了「桌面上显示她」 */
+  reason: 'normal' | 'fullscreen' | 'presentation' | 'away' | 'dnd' | 'off'
 }
 
 export interface Reminder {
@@ -82,6 +89,7 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
   const pick = <T extends number>(k: keyof DesktopPrefs, choices: readonly T[]): T =>
     choices.includes(r[k] as T) ? (r[k] as T) : (base[k] as T)
   return {
+    showCharacter: bool('showCharacter'),
     hideOnFullscreen: bool('hideOnFullscreen'),
     powerSaver: bool('powerSaver'),
     openAtLogin: bool('openAtLogin'),

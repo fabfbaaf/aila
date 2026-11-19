@@ -85,6 +85,8 @@ function workHints(
 export class DesktopKeeper {
   prefs: DesktopPrefs
   dnd = false
+  /** 不显示她的时候临时叫出来说话 */
+  private summoned = false
   presence: Presence = { visible: true, quiet: false, reason: 'normal' }
   private focus: FocusState = 'normal'
   private book: ReminderBook
@@ -109,6 +111,8 @@ export class DesktopKeeper {
     this.sit = new SitTimer(this.prefs.sitBreakMinutes)
     this.briefing = o.loadBriefing() ?? {}
     this.life = o.life?.load() ?? {}
+    // 一开始就按偏好算好在不在：关了「桌面上显示她」的话，角色窗口第一次显示前就知道别显示（不会闪一下）
+    this.presence = decidePresence(this.focus, this.dnd, this.prefs)
   }
 
   get file(): string {
@@ -168,6 +172,13 @@ export class DesktopKeeper {
   setDnd(on: boolean): void {
     if (this.dnd === on) return
     this.dnd = on
+    this.applyPresence(true)
+  }
+
+  /** 关了「桌面上显示她」时按「和她说话」：临时叫出来；对话框关了 summon(false) 藏回去 */
+  summon(on: boolean): void {
+    if (this.summoned === on) return
+    this.summoned = on
     this.applyPresence(true)
   }
 
@@ -386,7 +397,7 @@ export class DesktopKeeper {
   // ---------- 在不在、省电、开机启动 ----------
 
   private applyPresence(force = false): void {
-    const next = decidePresence(this.focus, this.dnd, this.prefs)
+    const next = decidePresence(this.focus, this.dnd, this.prefs, this.summoned)
     const same = next.visible === this.presence.visible && next.quiet === this.presence.quiet && next.reason === this.presence.reason
     this.presence = next
     const w = this.o.character()

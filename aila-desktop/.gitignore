@@ -9,3 +9,5 @@ models/*.vrm
 src/renderer/public/mediapipe/
 # 图标由 scripts/make-icon.mjs 生成（npm run dist 会先跑）
 build/
+# Live2D 运行库（专有软件，npm run setup:live2d 下载，不进 Git）
+src/renderer/public/live2d/

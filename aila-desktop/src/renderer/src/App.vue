@@ -17,6 +17,8 @@ import { createTransport } from './chat/transport'
 import { Stage, type HitRegion } from './scene/Stage'
 import { PlaceholderAvatar } from './avatar/PlaceholderAvatar'
 import { loadVrmAvatar } from './avatar/VrmAvatar'
+import { Live2DUnavailable, loadLive2DAvatar } from './avatar/Live2DAvatar'
+import type { LoadedModel } from '../../shared/model'
 import { applyExtensionLines, lines, pick } from './persona/lines'
 import { bridge } from './platform/bridge'
 import { Speaker } from './voice/Speaker'
@@ -537,6 +539,7 @@ async function openChat(): Promise<void> {
 function closeChat(): void {
   chatOpen.value = false
   bridge?.blurWindow() // 把焦点还给之前在用的程序
+  bridge?.chatClosed()
 }
 
 function onSend(text: string): void {
@@ -700,19 +703,20 @@ const subscriptions: (() => void)[] = []
 
 // ---------- 模型 ----------
 
-/** quiet：启动时加载上次的模型，不用说「换好了」 */
-async function useModel(data: ArrayBuffer, quiet = false): Promise<void> {
+/** quiet：启动时加载上次的模型，不用说「换好了」。VRM 和 Live2D 都实现同一个 Avatar 接口 */
+async function useModel(model: LoadedModel, quiet = false): Promise<void> {
   try {
-    const avatar = await loadVrmAvatar(data)
+    const avatar = model.kind === 'live2d' ? await loadLive2DAvatar(model.model) : await loadVrmAvatar(model.data)
     stage?.setAvatar(avatar)
     usingPlaceholder = false
     if (quiet) return
     behavior.react('happy')
     behavior.say(lines.modelLoaded)
   } catch (err) {
-    console.error('加载 VRM 失败', err)
+    console.error(`加载 ${model.kind === 'live2d' ? 'Live2D' : 'VRM'} 模型失败`, err)
     behavior.react('sad')
-    behavior.say(lines.modelFailed)
+    // Live2D 运行库没装：直接说怎么装
+    behavior.say(err instanceof Live2DUnavailable ? `……${err.message}。` : lines.modelFailed)
   }
 }
 
@@ -726,12 +730,12 @@ async function loadBuiltin(announce = false): Promise<void> {
     xhr.onerror = () => resolve(null)
     xhr.send()
   })
-  if (data) await useModel(data, !announce)
+  if (data) await useModel({ kind: 'vrm', data }, !announce)
 }
 
 async function onFile(e: Event): Promise<void> {
   const file = (e.target as HTMLInputElement).files?.[0]
-  if (file) await useModel(await file.arrayBuffer())
+  if (file) await useModel({ kind: 'vrm', data: await file.arrayBuffer() })
 }
 
 // ---------- 鼠标：穿透、视线、点击、拖动 ----------

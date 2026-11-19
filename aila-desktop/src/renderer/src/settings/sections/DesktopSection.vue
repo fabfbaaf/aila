@@ -15,7 +15,8 @@ const REASONS: Record<string, string> = {
   fullscreen: '藏起来了：别的程序在全屏',
   presentation: '藏起来了：在演示',
   away: '在桌面上（屏幕锁着，她不说话）',
-  dnd: '免打扰中：藏起来了'
+  dnd: '免打扰中：藏起来了',
+  off: '不在桌面上显示（只用主窗口）'
 }
 
 const now = computed(() => {
@@ -75,6 +76,16 @@ onActivated(load)
   <template v-if="status">
     <div class="card">
       <h3>不挡事 <span class="state">{{ now }}</span></h3>
+      <div class="row">
+        <span class="label">桌面上显示她</span>
+        <div>
+          <Toggle :model-value="status.prefs.showCharacter" @update:model-value="(v) => set({ showCharacter: v })" />
+          <span class="hint">
+            关掉以后她不在桌面上常驻：编程任务、对话记录、设置都在主窗口里照常用，到点的提醒改成系统通知。
+            托盘菜单里也能随时打开、关掉。
+          </span>
+        </div>
+      </div>
       <div class="row">
         <span class="label">全屏时躲开</span>
         <div>

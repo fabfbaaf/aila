@@ -8,9 +8,9 @@ directories:
   buildResources: build
 asar: true
 files:
+  # 只带构建产物：她自带的原创形象 out/renderer/avatar/aila.vrm、手势的 mediapipe/、装了的话 Live2D 运行库 live2d/ 都在里面。
+  # 开发用的示例 VRM（aila-desktop/models/）不在 out/ 里，本来就不会打进去
   - out/**/*
-  # 开发用的临时 VRM 模型不打进去（正式版要换原创形象）；渲染层的 avatar/、mediapipe/ 在 out/ 里
-  - "!**/*.vrm"
   # 渲染层的依赖 Vite 已经打进 out/ 了；主进程运行时只 require 了 ws。这些不重复带（省约 80MB）
   - "!node_modules/@mediapipe/**"
   - "!node_modules/three/**"
@@ -18,6 +18,9 @@ files:
   - "!node_modules/vue/**"
   - "!node_modules/@vue/**"
   - "!node_modules/d3-*/**"
+  - "!node_modules/pixi.js/**"
+  - "!node_modules/@pixi/**"
+  - "!node_modules/pixi-live2d-display/**"
 extraResources:
   # PyInstaller 打的 AI 服务目录（serviceNode.ts 的 packagedCommand 用它）
   - from: ../aila-ai/dist/aila-ai
