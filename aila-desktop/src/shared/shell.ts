@@ -38,6 +38,7 @@ export const SETTINGS_TABS: { id: SettingsSection; name: string }[] = [
   { id: 'voice', name: '语音' },
   { id: 'desktop', name: '桌面' },
   { id: 'skills', name: '技能包' },
+  { id: 'extensions', name: '扩展' },
   { id: 'account', name: '账号与同步' },
   { id: 'appearance', name: '形象' },
   { id: 'status', name: '运行状态' },

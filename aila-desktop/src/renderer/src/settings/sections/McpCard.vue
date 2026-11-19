@@ -30,7 +30,8 @@ async function run(label: string, action: () => Promise<{ ok: boolean; data?: Mc
       error.value = res.error ?? '没成功，重试一下。'
       return false
     }
-    if (res.data) servers.value = res.data
+    // 扩展包带的服务在「扩展」那一页管（开关、设置、卸载），这里只列你自己加的
+    if (res.data) servers.value = res.data.filter((s) => !s.extension)
     notice.value = done
     return true
   } finally {

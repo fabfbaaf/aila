@@ -15,6 +15,8 @@ export type SettingsSection =
   /** 桌面上的她：全屏时躲开、免打扰、省电、开机启动、提醒 */
   | 'desktop'
   | 'agent'
+  /** 扩展包：导入、开关、设置、卸载 */
+  | 'extensions'
 
 /** 一个项目里「以后都允许」的命令；路径和命令都按原文删除。 */
 export interface AgentRuleGroup {

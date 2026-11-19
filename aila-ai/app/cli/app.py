@@ -733,6 +733,10 @@ def run() -> None:
             stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
         except (AttributeError, ValueError):
             pass
+    if sys.argv[1:2] == ["ext"]:  # aila ext ……：管扩展包
+        from .ext import main as ext_main
+
+        sys.exit(ext_main(sys.argv[2:]))
     try:
         sys.exit(asyncio.run(main()))
     except KeyboardInterrupt:

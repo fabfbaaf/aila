@@ -1,0 +1,7 @@
+{
+  "id": "git-helper",
+  "name": "Git 小助手",
+  "version": "1.0.0",
+  "aila": ">=0.1",
+  "description": "写更新日志、讲清一段改动；按约定式提交（Conventional Commits）写提交信息。只有命令和本事，不运行任何程序。"
+}

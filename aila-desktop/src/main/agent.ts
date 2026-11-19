@@ -23,6 +23,7 @@ import type {
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
+import type { ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 
 export interface RelayHooks {
   /** 一个事件 → 工作窗口 */
@@ -159,6 +160,34 @@ export class AgentRelay {
 
   mcpDisable(name: string, disabled: boolean): Promise<AiResult<McpServerInfo[]>> {
     return this.call('PUT', `/agent/mcp/${encodeURIComponent(name)}/disabled`, { disabled }, 120000)
+  }
+
+  // ----- 扩展包（选文件在主进程，这里只转发） -----
+
+  extList(): Promise<AiResult<ExtensionList>> {
+    return this.call('GET', '/extensions', undefined, 30000)
+  }
+
+  extInspect(path: string): Promise<AiResult<{ token: string; plan: ExtensionPlan }>> {
+    return this.call('POST', '/extensions/inspect', { path }, 60000)
+  }
+
+  /** 装好会按新配置补开工具服务（默认停着，通常很快），给长一点 */
+  extInstall(token: string): Promise<AiResult<ExtensionList & { installed: string }>> {
+    return this.call('POST', '/extensions/install', { token }, 120000)
+  }
+
+  extDiscard(token: string): Promise<AiResult<{ ok: boolean }>> {
+    return this.call('POST', '/extensions/discard', { token })
+  }
+
+  /** 打开工具服务要等它起来（npx 第一次会下载） */
+  extUpdate(id: string, update: ExtensionUpdate): Promise<AiResult<ExtensionList>> {
+    return this.call('PATCH', `/extensions/${encodeURIComponent(id)}`, update, 180000)
+  }
+
+  extRemove(id: string): Promise<AiResult<ExtensionList>> {
+    return this.call('DELETE', `/extensions/${encodeURIComponent(id)}`, undefined, 60000)
   }
 
   mcpRemove(name: string): Promise<AiResult<McpServerInfo[]>> {

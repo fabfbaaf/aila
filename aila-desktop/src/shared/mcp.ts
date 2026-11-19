@@ -22,6 +22,8 @@ export interface McpServerInfo {
   command: string
   /** 给这个服务的环境变量：只有名字，值（常常是密钥）不回传 */
   envKeys: string[]
+  /** 扩展包带的服务：扩展 id（在设置的「扩展」里管，这里不列） */
+  extension?: string | null
   disabled: boolean
   status: McpStatus
   error: string

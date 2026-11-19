@@ -60,7 +60,8 @@ cd aila-server
 
 ## 目录速查
 
-- `aila-ai/app/runtime/`：编程 Agent。`session.py` 只追加的事件日志、`loop.py` Agent 循环、`tools.py` 编码工具、`permissions.py` 权限、`shell.py` 跑命令、`runner.py` 后台运行和订阅、`branch.py` 在新分支上做、`codetools.py` 代码库当工具、`memory.py` 项目记忆、`mcp.py` 外部工具（MCP）客户端、`planning.py` 长任务的计划和阶段
+- `aila-ai/app/runtime/`：编程 Agent。`session.py` 只追加的事件日志、`loop.py` Agent 循环、`tools.py` 编码工具、`permissions.py` 权限、`shell.py` 跑命令、`runner.py` 后台运行和订阅、`branch.py` 在新分支上做、`codetools.py` 代码库当工具、`memory.py` 项目记忆、`mcp.py` 外部工具（MCP）客户端、`planning.py` 长任务的计划和阶段、`skilltool.py` 读扩展的本事
+- `aila-ai/app/extensions.py`：扩展包（说明书检查、导入、装卸、开关；命令、本事、工具服务从这里接到编程 Agent 和对话）；写扩展见 `docs/extensions.md`，例子在 `examples/extensions/`
 - `aila-ai/app/cli/`：终端版 `aila`；`aila-ai/app/routes/agent.py`：`/agent` 接口
 - `aila-desktop/src/main/agent.ts`：主进程转发编程 Agent 的事件；`src/renderer/src/shell/`：主窗口的外壳和页面（页面地址规则在 `src/shared/shell.ts`）；`src/renderer/src/agent/`：任务页
 - 上下文要按 DeepSeek 前缀缓存排：系统提示词、工具列表、会话开头的环境说明一旦定下来就不改；历史只追加（详见 `aila-ai/README.md`「编程 Agent 运行时」）

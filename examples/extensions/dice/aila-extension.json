@@ -1,0 +1,19 @@
+{
+  "id": "dice",
+  "name": "骰子",
+  "version": "1.0.0",
+  "aila": ">=0.1",
+  "description": "示例：带一个外部工具服务的扩展。掷骰子、抽一个，用 Python 标准库写的 MCP 服务，不联网。",
+  "requires": ["py"],
+  "mcpServers": {
+    "dice": {
+      "command": "py",
+      "args": ["-3", "${extension}/server.py"],
+      "env": { "DICE_SIDES": "${setting:sides}" },
+      "readOnly": true
+    }
+  },
+  "settings": [
+    { "key": "sides", "label": "默认几面", "description": "不填就是 6 面" }
+  ]
+}
