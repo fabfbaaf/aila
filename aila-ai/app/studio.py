@@ -112,12 +112,14 @@ class Hints:
 
 
 class Studio:
-    def __init__(self, data_dir: Path, runtime: Callable[[], Runtime], model: Callable[[], ChatModel]) -> None:
+    def __init__(self, data_dir: Path, runtime: Callable[[], Runtime], model: Callable[[], ChatModel],
+                 persona: Callable[[], str] = lambda: "") -> None:
         self.root = data_dir / "works"
         self.root.mkdir(parents=True, exist_ok=True)
         self.index = self.root / "works.json"
         self._runtime = runtime
         self._model = model
+        self._persona = persona  # 设置里调的性格：挑点子时也按这个来
         self._lock = asyncio.Lock()
 
     # ---------- 存取 ----------
@@ -217,7 +219,7 @@ class Studio:
         if complete is not None:
             try:
                 raw = await asyncio.wait_for(complete([
-                    {"role": "system", "content": IDEA_PROMPT},
+                    {"role": "system", "content": IDEA_PROMPT + self._persona()},
                     {"role": "user", "content": idea_material(hints, past)},
                 ]), IDEA_TIMEOUT)
                 data = json.loads(raw)

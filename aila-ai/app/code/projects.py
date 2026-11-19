@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,8 @@ from typing import Any
 from ..memory.embedder import Embedder
 from .fix import FixRunner
 from .index import CodeIndex, RefreshStats
+from .ignore import clean
+from .ignore import read_file as read_ignore_file
 
 STALE_SECONDS = 20.0
 CHURN_COMMITS = 300  # 「按改动」看最近多少次提交：够看出热点，又不会在大仓库里慢
@@ -31,6 +33,8 @@ class Project:
     name: str
     root: str
     addedAt: str
+    # 「项目」页里加的忽略（文件夹、文件、通配符），和项目里的 .ailaignore 合起来用
+    ignore: list[str] = field(default_factory=list)
 
 
 class CodeProjects:
@@ -82,6 +86,22 @@ class CodeProjects:
         (self._dir / f"{project_id}.sqlite3").unlink(missing_ok=True)
         return True
 
+    def _ignore_of(self, project_id: str) -> list[str]:
+        project = self.get(project_id)
+        return project.ignore if project else []
+
+    def set_ignore(self, project_id: str, patterns: list[str]) -> Project:
+        """改这个项目的忽略；下次刷新（马上在后台刷）时忽略掉的文件从索引里清出去"""
+        with self._lock:
+            projects = self.all()
+            project = next((p for p in projects if p.id == project_id), None)
+            if project is None:
+                raise KeyError(project_id)
+            project.ignore = clean(patterns)
+            self._save(projects)
+            self._checked.pop(project_id, None)  # 下次用到时马上重新看一遍文件
+        return project
+
     def get(self, project_id: str) -> Project | None:
         return next((p for p in self.all() if p.id == project_id), None)
 
@@ -91,7 +111,8 @@ class CodeProjects:
                 project = next((p for p in self.all() if p.id == project_id), None)
                 if project is None:
                     raise KeyError(project_id)
-                self._indexes[project_id] = CodeIndex(Path(project.root), self._dir / f"{project_id}.sqlite3", self._embedder)
+                self._indexes[project_id] = CodeIndex(Path(project.root), self._dir / f"{project_id}.sqlite3", self._embedder,
+                                                      lambda pid=project_id: self._ignore_of(pid))
             return self._indexes[project_id]
 
     def refresh(self, project_id: str) -> RefreshStats:
@@ -187,7 +208,8 @@ class CodeProjects:
                 stats = self.index(p.id).stats()
             except Exception:
                 stats = {}
-            out.append({**asdict(p), **stats, **self.status.get(p.id, {"state": "ready" if stats.get("files") else "new"})})
+            out.append({**asdict(p), "ignoreFile": read_ignore_file(Path(p.root)), **stats,
+                        **self.status.get(p.id, {"state": "ready" if stats.get("files") else "new"})})
         return out
 
     def _save(self, projects: list[Project]) -> None:

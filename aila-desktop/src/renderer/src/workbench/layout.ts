@@ -227,12 +227,26 @@ export function textWidth(text: string, size: number): number {
 export function withoutTests(graph: CodeGraph): CodeGraph {
   const nodes = graph.nodes.filter((n) => !n.test)
   const keep = new Set(nodes.map((n) => n.id))
-  return { nodes, links: graph.links.filter((l) => keep.has(l.source) && keep.has(l.target)) }
+  const libs = (graph.libs ?? [])
+    .map((lib) => ({ ...lib, users: lib.users.filter((u) => keep.has(u)) }))
+    .map((lib) => ({ ...lib, count: lib.users.length }))
+    .filter((lib) => lib.count > 0) // 只有测试在用的库（pytest、vitest）也一起藏起来
+  return { nodes, links: graph.links.filter((l) => keep.has(l.source) && keep.has(l.target)), libs }
+}
+
+/** 选中文件的 import：它 import 了谁（out）、谁 import 了它（in）、它用到的第三方库 */
+export function importsOf(graph: CodeGraph, id: string): { out: string[]; in: string[]; libs: string[] } {
+  const imports = graph.links.filter((l) => kindOf(l) === 'import')
+  return {
+    out: imports.filter((l) => l.source === id).map((l) => l.target),
+    in: imports.filter((l) => l.target === id).map((l) => l.source),
+    libs: (graph.libs ?? []).filter((lib) => lib.users.includes(id)).map((lib) => lib.name)
+  }
 }
 
 /** 选中文件的跨进程光线：它请求了谁（out）、谁请求了它（in），面板里列出来 */
 export function crossLinks(graph: CodeGraph, id: string): { out: GraphLink[]; in: GraphLink[] } {
-  const cross = graph.links.filter((l) => kindOf(l) !== 'call')
+  const cross = graph.links.filter((l) => kindOf(l) === 'http' || kindOf(l) === 'ipc')
   return { out: cross.filter((l) => l.source === id), in: cross.filter((l) => l.target === id) }
 }
 

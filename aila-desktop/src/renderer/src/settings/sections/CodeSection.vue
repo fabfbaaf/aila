@@ -39,6 +39,26 @@ async function refresh(p: CodeProject): Promise<void> {
   await load()
 }
 
+/** 正在改哪个项目的忽略 */
+const editing = ref('')
+const ignoreText = ref('')
+
+function editIgnore(p: CodeProject): void {
+  editing.value = editing.value === p.id ? '' : p.id
+  ignoreText.value = (p.ignore ?? []).join('\n')
+}
+
+async function saveIgnore(p: CodeProject): Promise<void> {
+  error.value = ''
+  const res = await api.codeIgnore(p.id, ignoreText.value.split(/\r?\n/))
+  if (!res.ok) {
+    error.value = res.error ?? '没存上'
+    return
+  }
+  editing.value = ''
+  await load()
+}
+
 async function remove(p: CodeProject): Promise<void> {
   await api.codeRemove(p.id)
   await load()
@@ -83,8 +103,23 @@ onDeactivated(() => clearTimeout(timer))
           <div class="hint path">{{ p.root }}</div>
           <div class="hint">{{ state(p) }}</div>
           <div v-if="p.files" class="hint">{{ languages(p) }}</div>
+          <div v-if="p.ignoreFile?.length || p.ignore?.length" class="hint">
+            不看：{{ [...(p.ignoreFile ?? []), ...(p.ignore ?? [])].join('、') }}
+          </div>
+          <div v-if="editing === p.id" class="ignore-edit">
+            <textarea v-model="ignoreText" rows="4" spellcheck="false" placeholder="一行一个，比如：&#10;docs/examples&#10;fixtures&#10;*.min.js"></textarea>
+            <span class="hint">
+              代码检索和星图都不看这些：从项目根目录算的路径、不带斜杠的文件夹名（哪一层都算）、带 * 的通配符。
+              <template v-if="p.ignoreFile?.length">项目里的 .ailaignore 已经写了 {{ p.ignoreFile.join('、') }}（要改就改那个文件）。</template>
+            </span>
+            <div class="actions">
+              <button class="btn primary" @click="saveIgnore(p)">保存并重新扫描</button>
+              <button class="btn" @click="editing = ''">算了</button>
+            </div>
+          </div>
         </td>
         <td class="ops">
+          <button class="link" @click="editIgnore(p)">忽略……</button>
           <button class="link" :disabled="p.state === 'indexing'" @click="refresh(p)">重新扫描</button>
           <button class="x" title="不再登记这个项目（代码不动）" @click="remove(p)">×</button>
         </td>
@@ -113,6 +148,24 @@ onDeactivated(() => clearTimeout(timer))
 </template>
 
 <style scoped>
+.ignore-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ignore-edit textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-s);
+  background: var(--ui-field);
+  color: var(--ui-text);
+  font-family: var(--ui-mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
 .name {
   font-weight: 600;
 }

@@ -22,6 +22,7 @@ import {
   codeLocateAll,
   codeOutline,
   codeProjectAction,
+  setCodeIgnore,
   deleteKnowledge,
   forgetAgentRule,
   getAgentRules,
@@ -591,6 +592,11 @@ function registerIpc(): void {
     return addCodeProject(AI_URL, picked.filePaths[0])
   })
   ipcMain.handle('code:refresh', (e, id: string) => (fromMainWindow(e) ? codeProjectAction(AI_URL, String(id), 'refresh') : MAIN_ONLY))
+  ipcMain.handle('code:ignore', (e, id: unknown, patterns: unknown) =>
+    fromMainWindow(e) && typeof id === 'string' && Array.isArray(patterns) && patterns.length <= 100 && patterns.every((p) => typeof p === 'string' && p.length <= 200)
+      ? setCodeIgnore(AI_URL, id, patterns as string[])
+      : MAIN_ONLY
+  )
 
   // 代码星图
   ipcMain.handle('code:graph', (_e, id: string) => codeGraph(AI_URL, String(id)))

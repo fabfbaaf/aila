@@ -74,6 +74,21 @@ async def refresh_project(project_id: str, projects: CodeProjects = Depends(get_
     return {"ok": True}
 
 
+class IgnoreUpdate(BaseModel):
+    patterns: list[str] = Field(default_factory=list, max_length=100)
+
+
+@router.put("/code/projects/{project_id}/ignore")
+async def set_ignore(project_id: str, req: IgnoreUpdate, projects: CodeProjects = Depends(get_code_projects)) -> dict[str, Any]:
+    """改这个项目要忽略的文件夹（和项目里的 .ailaignore 合起来用），马上在后台重新扫：忽略掉的从索引里清出去"""
+    try:
+        project = projects.set_ignore(project_id, req.patterns)
+    except KeyError as err:
+        raise HTTPException(status_code=404, detail="没有这个项目") from err
+    _start_refresh(projects, project_id)
+    return asdict(project)
+
+
 @router.delete("/code/projects/{project_id}")
 def delete_project(project_id: str, projects: CodeProjects = Depends(get_code_projects)) -> dict[str, bool]:
     """不再登记这个项目，删掉它的索引（项目里的代码不动）"""

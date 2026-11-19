@@ -157,6 +157,15 @@ export type AgentProgress =
   | { kind: 'plan_end' }
   | { kind: 'plan_pause'; text: string }
   | { kind: 'error'; message: string }
+  /** 她跑了一次测试：ok 过没过；streak 连着没过几次（过了是 0）；recovered 之前没过、这次过了 */
+  | { kind: 'tests'; ok: boolean; streak: number; recovered: boolean }
+
+/** 是不是在跑测试（她用 run_command 跑的那条命令）：常见的测试命令 */
+export function isTestCommand(command: string): boolean {
+  return /(^|[\s;&|/\\])(pytest|vitest|jest|mocha)(\s|$)|-m\s+pytest|\b(npm|pnpm|yarn)(\.cmd)?\s+(run\s+)?test\b|\bnpx(\.cmd)?\s+(vitest|jest)\b|mvnw?(\.cmd)?\s+(-\S+\s+)*test\b|\bgradlew?\s+test\b|\b(go|cargo|dotnet)\s+test\b|\bnode\s+--test\b/i.test(
+    command
+  )
+}
 /** 浏览器生成的截屏只用文件名在事件里引用，不携带本机路径。 */
 export function isAgentScreenshotName(value: unknown): value is string {
   return typeof value === 'string' && value.length === 36 && /^[0-9a-f]{32}\.png$/.test(value)

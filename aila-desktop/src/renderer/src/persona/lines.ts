@@ -89,6 +89,9 @@ export const lines = {
     '……眼睛也休息一下吧。看看远处。',
     `……盯着屏幕 ${minutes} 分钟了。去倒杯水吧，我等你。`
   ],
+  // 测试
+  testsRecovered: ['……全过了。', '过了。……刚才那几次没白折腾。', '终于全绿了。'],
+  testsStruggling: ['……又没过。别急，一个一个来。', '嗯……这个有点难缠。我再仔细看看。', '没关系，测试挂了说明它在干活。'],
   // 她自己的作品
   workDone: (title: string, why: string): string =>
     `……我自己做了个小东西，叫「${title}」。${why ? `${why.replace(/[。.]$/, '')}。` : ''}要看看吗？`,

@@ -207,6 +207,7 @@ const api = {
   /** 弹出选文件夹的对话框；取消了返回 null */
   codeAdd: (): Promise<AiResult<CodeProject> | null> => ipcRenderer.invoke('code:add'),
   codeRefresh: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:refresh', id),
+  codeIgnore: (id: string, patterns: string[]): Promise<AiResult<CodeProject>> => ipcRenderer.invoke('code:ignore', id, patterns),
   codeRemove: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('code:remove', id),
   onKnowledgeBusy: (cb: (count: number) => void): Unsubscribe => listen('knowledge:busy', cb),
 

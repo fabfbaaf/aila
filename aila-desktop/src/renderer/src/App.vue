@@ -639,6 +639,20 @@ function onAgentProgress(p: AgentProgress): void {
       behavior.react('sad')
       if (!quiet) behavior.say(lines.agentError, 3500)
       break
+    case 'tests':
+      // 小情绪：过了就高兴（之前一直没过的话说一句），连着没过三次叹口气、打打气（之后每多三次再说一次）
+      if (p.ok) {
+        behavior.react('happy')
+        if (p.recovered) {
+          behavior.gesture('nod')
+          if (!quiet) behavior.say(pick(lines.testsRecovered), 2600)
+        }
+      } else if (p.streak >= 3 && p.streak % 3 === 0) {
+        behavior.react('sad')
+        behavior.gesture('think')
+        if (!quiet) behavior.say(pick(lines.testsStruggling), 3500)
+      }
+      break
     case 'budget':
       stopAgentWork()
       behavior.gesture('tilt')

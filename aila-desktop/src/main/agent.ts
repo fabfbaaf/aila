@@ -5,6 +5,7 @@
 // - 等你确认的改文件操作交给星图显示（双手合十也能确认）
 // 工作窗口关了，正在做的任务照样做完（AI 服务那边在做），做完她会说一声。
 import { SseParser } from '../shared/chat'
+import { isTestCommand } from '../shared/agent'
 import type {
   AgentActivity,
   AgentBudgetEvent,
@@ -46,6 +47,10 @@ export class AgentRelay {
   private cwds = new Map<string, string>()
   /** 工具调用 → 它碰的文件 */
   private callFiles = new Map<string, string>()
+  /** 她发出去的哪些命令是在跑测试（sid:调用 id） */
+  private testCalls = new Set<string>()
+  /** 每个会话连着几次测试没过 */
+  private testStreak = new Map<string, number>()
   /** 正在按计划做的会话（这一轮是某个阶段） */
   private planTurns = new Set<string>()
   /** 正在做的阶段叫什么（阶段做完时她说一句用） */
@@ -286,6 +291,15 @@ export class AgentRelay {
         break
       case 'assistant':
         for (const c of (e.tool_calls as { id: string; name: string; arguments: string }[]) ?? []) {
+          if (c.name === 'run_command') {
+            try {
+              const command = String((JSON.parse(c.arguments) as { command?: unknown }).command ?? '')
+              if (isTestCommand(command)) this.testCalls.add(`${sid}:${c.id}`)
+            } catch {
+              // 参数不是 JSON：不管
+            }
+            continue
+          }
           if (!READ_TOOLS.has(c.name) && !EDIT_TOOLS.has(c.name)) continue
           try {
             const path = String((JSON.parse(c.arguments) as { path?: unknown }).path ?? '')
@@ -312,6 +326,14 @@ export class AgentRelay {
         break
       case 'tool':
         this.callFiles.delete(`${sid}:${String(e.id)}`)
+        // 跑的是测试：过了高兴一下（之前一直没过的话说一句），连着没过就叹口气、给你打打气
+        if (this.testCalls.delete(`${sid}:${String(e.id)}`) && e.status !== 'skipped') {
+          const ok = e.status === 'ok'
+          const before = this.testStreak.get(sid) ?? 0
+          const streak = ok ? 0 : before + 1
+          this.testStreak.set(sid, streak)
+          this.hooks.progress({ kind: 'tests', ok, streak, recovered: ok && before > 0 })
+        }
         if (e.status === 'ok' && typeof e.file === 'string') {
           this.turnFiles.get(sid)?.add(e.file)
           this.hooks.activity({ sid, cwd, file: e.file, kind: 'edit' })

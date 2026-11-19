@@ -32,10 +32,11 @@ class DiaryError(Exception):
 
 
 class Diary:
-    def __init__(self, data_dir: Path, model: Callable[[], ChatModel]) -> None:
+    def __init__(self, data_dir: Path, model: Callable[[], ChatModel], persona: Callable[[], str] = lambda: "") -> None:
         self.root = data_dir / "diary"
         self.root.mkdir(parents=True, exist_ok=True)
         self._model = model
+        self._persona = persona  # 设置里调的性格（接在提示词后面）
 
     def entries(self, limit: int = 60) -> list[dict[str, Any]]:
         out = []
@@ -68,7 +69,7 @@ class Diary:
         if complete is not None and material:
             try:
                 raw = await asyncio.wait_for(complete([
-                    {"role": "system", "content": DIARY_PROMPT},
+                    {"role": "system", "content": DIARY_PROMPT + self._persona()},
                     {"role": "user", "content": f"<今天 日期=\"{day}\">\n" + "\n".join(material) + "\n</今天>"},
                 ]), 40)
                 text = str(json.loads(raw).get("text", "")).strip()

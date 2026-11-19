@@ -1,0 +1,3 @@
+# 艾拉的代码检索和星图不看这些（见 aila-ai/app/code/ignore.py）
+# 评测用的小项目、参考答案、隐藏测试
+aila-ai/eval/tasks

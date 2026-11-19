@@ -68,6 +68,20 @@ export function codeProjectAction(aiUrl: string, id: string, action: 'refresh' |
   )
 }
 
+/** 改项目要忽略的文件夹（AI 服务会马上在后台重新扫） */
+export function setCodeIgnore(aiUrl: string, id: string, patterns: string[]): Promise<AiResult<CodeProject>> {
+  return attempt(async () =>
+    json<CodeProject>(
+      await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/ignore`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ patterns }),
+        signal: AbortSignal.timeout(5000)
+      })
+    )
+  )
+}
+
 /** 看屏幕的状态和上次的统计（设置窗口显示） */
 export function getScreenStatus(aiUrl: string): Promise<AiResult<ScreenStatus>> {
   return attempt(async () => json<ScreenStatus>(await fetch(`${aiUrl}/screen/status`, { signal: AbortSignal.timeout(3000) })))
