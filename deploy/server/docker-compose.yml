@@ -1,0 +1,60 @@
+# 云端同步服务（aila-server）+ PostgreSQL，可选 Caddy 自动 HTTPS。用法见同目录的 README.md。
+#
+#   cp .env.example .env    # 填数据库密码、JWT 密钥（必填）
+#   docker compose up -d --build                    # 只开同步服务（局域网、ZeroTier 用）
+#   docker compose --profile https up -d --build    # 再加上 Caddy：有域名时自动申请 HTTPS 证书
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aila
+      POSTGRES_USER: aila
+      POSTGRES_PASSWORD: ${AILA_DB_PASSWORD:?在 .env 里填 AILA_DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aila -d aila"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # 数据库不对外开端口：只有同一个 compose 里的 server 连得到
+
+  server:
+    build: ../../aila-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      AILA_DB_URL: jdbc:postgresql://db:5432/aila
+      AILA_DB_USER: aila
+      AILA_DB_PASSWORD: ${AILA_DB_PASSWORD}
+      AILA_JWT_SECRET: ${AILA_JWT_SECRET:?在 .env 里填 AILA_JWT_SECRET（32 字节以上的 Base64）}
+      # 只有放在 Caddy 后面（--profile https）时才设 native；直接对外时保持 none，不然谁都能伪造来源 IP 绕过限流
+      AILA_FORWARD_HEADERS: ${AILA_FORWARD_HEADERS:-none}
+    ports:
+      # 默认只在本机听；局域网、ZeroTier 里别的电脑要连，在 .env 里把 AILA_BIND 改成 0.0.0.0
+      - "${AILA_BIND:-127.0.0.1}:8790:8790"
+
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      AILA_DOMAIN: ${AILA_DOMAIN:?用 HTTPS 时在 .env 里填 AILA_DOMAIN（解析到这台机器的域名）}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

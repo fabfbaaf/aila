@@ -54,6 +54,11 @@ describe('扩展的动作和台词', () => {
     expect(avatarPathOk('C:\\Windows\\evil.vrm', 'cute', '小艾')).toBe(false)
     expect(avatarPathOk('/x/extensions/other/avatars/小艾.vrm', 'cute', '小艾')).toBe(false)
     expect(avatarPathOk('/x/extensions/cute/avatars/../../../secret/extensions/cute/avatars/小艾.vrm', 'cute', '小艾')).toBe(false)
+    // Live2D：avatars/<名字>/<随便>.model3.json，只认那一层
+    expect(avatarPathOk('C:\\d\\extensions\\cute\\avatars\\hiyori\\Hiyori.model3.json', 'cute', 'hiyori')).toBe(true)
+    expect(avatarPathOk('C:\\d\\extensions\\cute\\avatars\\hiyori\\sub\\x.model3.json', 'cute', 'hiyori')).toBe(false)
+    expect(avatarPathOk('C:\\d\\extensions\\cute\\avatars\\hiyori\\evil.exe', 'cute', 'hiyori')).toBe(false)
+    expect(avatarPathOk('C:\\d\\extensions\\cute\\avatars\\other\\x.model3.json', 'cute', 'hiyori')).toBe(false)
     const companion = { motions: {}, lines: { add: {}, replace: {} }, avatars: [{ extension: 'cute', extensionName: '可爱', name: '小艾', file, size: 1 }] }
     expect(findAvatar(companion, 'cute', '小艾')).toBe(file)
     expect(findAvatar(companion, 'cute', '别的')).toBeNull()

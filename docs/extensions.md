@@ -18,7 +18,7 @@ my-extension/
   server/...                   工具服务的程序（在说明书的 mcpServers 里写怎么启动）
   motions/<名字>.json          桌面上的她的动作
   lines.json                   台词
-  avatars/<名字>.vrm           形象
+  avatars/<名字>.vrm           形象（VRM；Live2D 是 avatars/<名字>/ 整个文件夹）
   pages/<名字>.html            自带的小页面（沙盒窗口里打开）
 ```
 
@@ -143,9 +143,11 @@ description: 按约定式提交的格式写提交信息，项目里有 commitlin
 `wake` 睡醒、`sleepy` 犯困、`wakeHere` 被叫醒、`forgetOne` 忘掉一件事、`agentStart` 开始做任务、`agentTaskStarted` 任务开始了、
 `testsRecovered` 测试修好了、`testsStruggling` 测试一直挂、`workMaking` 在写作品、`lateNight` 深夜。每句最多 80 个字，每个场合最多 30 句。
 
-### 形象 `avatars/<名字>.vrm`
+### 形象 `avatars/<名字>.vrm` 或 `avatars/<名字>/`
 
-放 VRM 模型（最大 100MB）。装好以后在扩展页点「换上」；想换回来去「形象」点「换回艾拉自己的形象」。
+放 VRM 模型（最大 100MB），或者一个 Live2D 模型的整个文件夹：`avatars/<名字>/` 里放且只放一个 `.model3.json`，贴图、动作、物理文件按它里面写的相对路径放在同一个文件夹里（最多 500 个文件、200MB）。Live2D 形象要用的人先装好 Live2D 运行库（`npm run setup:live2d`）。
+
+装好以后在扩展页点「换上」；想换回来去「形象」点「换回艾拉自己的形象」。
 **只放你有权分发的模型**（自己做的，或者许可证允许再分发的）。
 
 ## 扩展自带的页面 `pages/<名字>.html`

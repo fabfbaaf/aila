@@ -88,6 +88,8 @@ cd aila-server
 .\mvnw spring-boot:test-run     # 内嵌数据库，不用装 PostgreSQL；监听 8790
 ```
 
+要在几台电脑之间同步，把云端服务部署到一台都连得到的机器上（Docker 一条命令，可选自动 HTTPS）：见 [deploy/server/README.md](deploy/server/README.md)。
+
 她的原创形象随仓库自带（`aila-desktop/src/renderer/public/avatar/aila.vrm`，由脚本生成），也可以换成任何 VRM 模型，见 [aila-desktop/README.md](aila-desktop/README.md)。
 
 ## 架构

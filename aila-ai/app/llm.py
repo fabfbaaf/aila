@@ -7,6 +7,7 @@ import secrets
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import openai
 from openai import AsyncOpenAI
@@ -14,6 +15,9 @@ from openai import AsyncOpenAI
 from .config import Settings
 
 Message = dict[str, Any]
+
+# DeepSeek 官方模型规格：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+DEEPSEEK_LONG_CONTEXT_MODELS = {"deepseek-flash", "deepseek-v4-pro"}
 
 
 @dataclass
@@ -76,6 +80,9 @@ class OpenAICompatibleModel:
 
     def __init__(self, settings: Settings) -> None:
         self.name = settings.llm_model
+        self.context_window: int | None = None
+        if urlsplit(settings.llm_base_url).hostname == "api.deepseek.com" and self.name in DEEPSEEK_LONG_CONTEXT_MODELS:
+            self.context_window = 1_000_000
         self._client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,

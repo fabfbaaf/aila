@@ -35,6 +35,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     for key in ("LLM_API_KEY", "SEARCH_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "AILA_CODER_MODEL", "AILA_CODER_FAST_MODEL",
                 "SEARCH_PROVIDER"):
         os.environ.pop(key, None)
+    # 固定用例里的对话模型，避免测试结果受本机配置影响。
+    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
     monkeypatch.setenv("AILA_DATA_DIR", str(tmp_path / "data"))  # 别在 aila-ai/data 里建资料库
     # 改设置时是按环境变量重新加载的：照 EXAMPLE 放进去，不跟着默认值或真的 .env 走
     monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com")
