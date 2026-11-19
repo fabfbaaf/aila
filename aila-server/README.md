@@ -28,6 +28,10 @@ cd aila-server
 | `AILA_DB_URL` / `AILA_DB_USER` / `AILA_DB_PASSWORD` | 本机 `aila` 库 | |
 | `AILA_JWT_SECRET` | 空 | Base64，至少 32 字节。留空时每次启动随机生成，正式部署必须配置 |
 
+## 部署
+
+放到一台大家都连得到的机器上（云服务器、常开的电脑）：用 `deploy/server/` 里的 Docker 配置，同步服务 + PostgreSQL，有域名时用 Caddy 自动配 HTTPS。步骤见 [deploy/server/README.md](../deploy/server/README.md)。镜像由本目录的 `Dockerfile` 构建（多阶段，运行时只有 JRE，用普通用户跑）。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |

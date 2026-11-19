@@ -52,7 +52,8 @@ export interface ExtensionExtras {
   lines: Record<string, number>
   /** 整组换掉这些场合的台词，而不是往里加 */
   linesReplace: boolean
-  avatars: { name: string; size: number }[]
+  /** kind：vrm 一个文件；live2d 一整个文件夹（要先装 Live2D 运行库） */
+  avatars: { name: string; size: number; kind?: 'vrm' | 'live2d' }[]
   pages: { name: string; title: string }[]
 }
 
@@ -164,7 +165,7 @@ const MOTION_NAME = /^[a-z][a-z0-9_]{1,19}$/
 export interface Companion {
   motions: Record<string, { label: string; phases: MotionPhase[] }>
   lines: { add: Record<string, string[]>; replace: Record<string, string[]> }
-  avatars: { extension: string; extensionName: string; name: string; file: string; size: number }[]
+  avatars: { extension: string; extensionName: string; name: string; file: string; size: number; kind?: 'vrm' | 'live2d' }[]
 }
 
 const clamp = (v: number, [lo, hi]: [number, number]): number => Math.min(hi, Math.max(lo, v))
@@ -272,7 +273,12 @@ export function validMotionName(name: unknown): name is string {
 /** 扩展形象的文件：必须是 …/extensions/<扩展 id>/avatars/<名字>.vrm（防止 AI 服务那边给出别的地方） */
 export function avatarPathOk(file: string, extId: string, name: string): boolean {
   const norm = file.replace(/\\/g, '/')
-  return norm.endsWith(`/extensions/${extId}/avatars/${name}.vrm`) && !norm.includes('/../')
+  if (norm.includes('/../')) return false
+  if (norm.endsWith(`/extensions/${extId}/avatars/${name}.vrm`)) return true
+  // Live2D：…/avatars/<名字>/<随便>.model3.json（就在那个文件夹里，不能再往下一层）
+  const base = `/extensions/${extId}/avatars/${name}/`
+  const at = norm.lastIndexOf(base)
+  return at >= 0 && /^[^/]+\.model3\.json$/i.test(norm.slice(at + base.length))
 }
 
 /** 从扩展列表里找形象文件 */

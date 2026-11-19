@@ -1,0 +1,5 @@
+# 有域名时：Caddy 自动申请、续期 HTTPS 证书，把请求转给同步服务（WebSocket 也自动转）
+{$AILA_DOMAIN} {
+	encode gzip
+	reverse_proxy server:8790
+}

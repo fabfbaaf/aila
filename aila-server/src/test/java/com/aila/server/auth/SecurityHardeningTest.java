@@ -1,6 +1,7 @@
 package com.aila.server.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
 import java.time.Instant;
@@ -10,13 +11,11 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketHttpHeaders;
@@ -25,13 +24,15 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import com.aila.server.IntegrationTest;
-import tools.jackson.databind.JsonNode;
 
 /** 安全检查（2026-11）补上的几条 */
 class SecurityHardeningTest extends IntegrationTest {
 
     @Autowired
     JwtEncoder encoder;
+
+    @Autowired
+    AuthService auth;
 
     private String token(String issuer, long userId, Instant expiresAt) {
         var claims = JwtClaimsSet.builder()
@@ -69,15 +70,13 @@ class SecurityHardeningTest extends IntegrationTest {
         var here = post("/api/auth/login", Map.of("email", email, "password", "correct-horse", "deviceId", "pc", "deviceName", "x"));
         assertThat(here.getStatusCode().value()).isEqualTo(429);
 
-        // 从另一个地址（IPv6 的本机）登录：不受影响
-        var other = RestClient.builder().baseUrl("http://[::1]:" + port)
-                .defaultStatusHandler(HttpStatusCode::isError, (req, res) -> {
-                })
-                .build()
-                .post().uri("/api/auth/login")
-                .body(Map.of("email", email, "password", "correct-horse", "deviceId", "pc", "deviceName", "x"))
-                .retrieve().toEntity(JsonNode.class);
-        assertThat(other.getStatusCode().value()).isEqualTo(200);
+        // 从另一个地址登录：不受影响。直接调登录服务、给它另一个 IP（以前用 IPv6 的本机 [::1] 连，
+        // 有的电脑上 IPv6 回环连不上，测试就时好时坏）
+        var other = auth.login(new AuthDtos.LoginRequest(email, "correct-horse", "pc", "x"), "203.0.113.9");
+        assertThat(other.user().getEmail()).isEqualTo(email);
+        // 同一个地址还锁着
+        assertThatThrownBy(() -> auth.login(new AuthDtos.LoginRequest(email, "correct-horse", "pc", "x"), "127.0.0.1"))
+                .hasMessageContaining("错误次数太多");
     }
 
     @Test

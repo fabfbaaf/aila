@@ -2,7 +2,8 @@
 
     motions/<名字>.json      一段动作：和内置的点头、挥手同样的格式（几段姿态，每段多久、头和手到什么程度、带什么表情）
     lines.json               台词：往她各种场合的台词池里加句子（被戳、被拖、刚醒……），也可以整组换掉
-    avatars/<名字>.vrm       形象：在设置的「形象」里能换上
+    avatars/<名字>.vrm       形象（VRM）：在扩展页点「换上」
+    avatars/<名字>/*.model3.json   形象（Live2D 模型的整个文件夹）：要先装 Live2D 运行库
     pages/<名字>.html        页面：在扩展页点「打开」，在沙盒窗口里显示（不能联网、碰不到本机服务）
 
 为什么动作只能动这些「姿态值」而不是直接转骨骼：值的范围由代码限住（抬手最多抬到 1、头最多歪多少），
@@ -42,6 +43,9 @@ PAGE_NAME = re.compile(r"^[\w一-鿿-]{1,40}$")
 AVATAR_NAME = PAGE_NAME
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_AVATAR_BYTES = 100 * 1024 * 1024
+# Live2D 形象是一整个文件夹（和桌面端 shared/model.ts 的上限一样）
+MAX_LIVE2D_FILES = 500
+MAX_LIVE2D_BYTES = 200 * 1024 * 1024
 TITLE = re.compile(r"<title>(.*?)</title>", re.I | re.S)
 
 
@@ -143,13 +147,32 @@ def read_lines(folder: Path, strict: bool = False) -> tuple[dict[str, list[str]]
         return {}, False
 
 
+def _live2d_avatar(sub: Path) -> dict[str, Any] | None:
+    """avatars/<名字>/ 文件夹里有且只有一个 .model3.json：一个 Live2D 形象（整个文件夹都是它的贴图、动作……）"""
+    entries = [p for p in sub.glob("*.model3.json") if p.is_file()]
+    if len(entries) != 1:
+        return None
+    files = [p for p in sub.rglob("*") if p.is_file() and not p.is_symlink()]
+    size = sum(p.stat().st_size for p in files)
+    if len(files) > MAX_LIVE2D_FILES or size > MAX_LIVE2D_BYTES:
+        return None
+    return {"name": sub.name, "file": str(entries[0]), "size": size, "kind": "live2d"}
+
+
 def scan_avatars(folder: Path) -> list[dict[str, Any]]:
+    """avatars/<名字>.vrm（VRM）和 avatars/<名字>/<随便>.model3.json（Live2D）"""
     root = folder / "avatars"
     if not root.is_dir():
         return []
-    return [{"name": p.stem, "file": str(p), "size": p.stat().st_size}
-            for p in sorted(root.glob("*.vrm")) if p.is_file() and AVATAR_NAME.fullmatch(p.stem)
-            and p.stat().st_size <= MAX_AVATAR_BYTES]
+    out: list[dict[str, Any]] = []
+    for p in sorted(root.iterdir()):
+        if not AVATAR_NAME.fullmatch(p.stem if p.is_file() else p.name) or p.is_symlink():
+            continue
+        if p.is_file() and p.suffix.lower() == ".vrm" and p.stat().st_size <= MAX_AVATAR_BYTES:
+            out.append({"name": p.stem, "file": str(p), "size": p.stat().st_size, "kind": "vrm"})
+        elif p.is_dir() and (found := _live2d_avatar(p)):
+            out.append(found)
+    return out
 
 
 def scan_pages(folder: Path) -> list[dict[str, str]]:
@@ -186,7 +209,7 @@ def extras_summary(folder: Path, strict: bool = False) -> dict[str, Any]:
         "motions": [{"name": m.name, "label": m.label} for m in scan_motions(folder, strict)],
         "lines": {k: len(v) for k, v in lines.items()},
         "linesReplace": replace,
-        "avatars": [{"name": a["name"], "size": a["size"]} for a in scan_avatars(folder)],
+        "avatars": [{"name": a["name"], "size": a["size"], "kind": a["kind"]} for a in scan_avatars(folder)],
         "pages": scan_pages(folder),
     }
 

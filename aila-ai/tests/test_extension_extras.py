@@ -89,6 +89,7 @@ def test_companion_merges_enabled_extensions(tmp_path: Path) -> None:
     assert set(c["motions"]) == {"cheer", "shy"} and c["motions"]["cheer"]["label"].startswith("欢呼")
     assert c["lines"]["add"]["pokeHead"][0] == "……又、又戳？" and c["lines"]["replace"] == {"wake": ["……早。"]}
     assert c["avatars"][0]["name"] == "小艾" and c["avatars"][0]["extension"] == "quiet"
+    assert c["avatars"][0]["kind"] == "vrm"
     assert store.avatar_file("quiet", "小艾").name == "小艾.vrm"
     with pytest.raises(ExtensionError):
         store.avatar_file("quiet", "../../x")
@@ -235,3 +236,24 @@ async def test_remote_catalog_only_public_https(tmp_path: Path) -> None:
         assert plan["id"] == "git-helper"
         assert "https://cdn.example.com/git-helper.zip" in seen  # 跟着跳转、每一跳都查过
         store.discard(token)
+
+
+def test_live2d_avatars_are_whole_folders(tmp_path: Path) -> None:
+    from app.extension_extras import scan_avatars
+
+    root = tmp_path / "ext"
+    l2d = root / "avatars" / "hiyori"
+    (l2d / "textures").mkdir(parents=True)
+    (l2d / "hiyori.model3.json").write_text("{}", encoding="utf-8")
+    (l2d / "hiyori.moc3").write_bytes(b"MOC3")
+    (l2d / "textures" / "t.png").write_bytes(b"png")
+    (root / "avatars" / "two").mkdir()  # 两个 model3.json：认不出是哪个，不算
+    (root / "avatars" / "two" / "a.model3.json").write_text("{}", encoding="utf-8")
+    (root / "avatars" / "two" / "b.model3.json").write_text("{}", encoding="utf-8")
+    (root / "avatars" / "empty").mkdir()
+    (root / "avatars" / "v.vrm").write_bytes(b"glTF")
+    found = {a["name"]: a for a in scan_avatars(root)}
+    assert set(found) == {"hiyori", "v"}
+    assert found["hiyori"]["kind"] == "live2d" and found["hiyori"]["file"].endswith("hiyori.model3.json")
+    assert found["hiyori"]["size"] == 2 + 4 + 3
+    assert found["v"]["kind"] == "vrm"

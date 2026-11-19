@@ -237,7 +237,7 @@ onActivated(load)
           </li>
           <li v-if="staged.plan.avatars.length">
             <span class="k">形象</span>
-            <span>{{ staged.plan.avatars.map((a) => `${a.name}（${mb(a.size)}）`).join('、') }}</span>
+            <span>{{ staged.plan.avatars.map((a) => `${a.name}（${a.kind === 'live2d' ? 'Live2D，' : ''}${mb(a.size)}）`).join('、') }}</span>
           </li>
           <li v-if="staged.plan.pages.length">
             <span class="k">页面</span>
@@ -308,7 +308,7 @@ onActivated(load)
             <div v-for="a in e.avatars" :key="a.name" class="block">
               <span class="k">形象</span>
               <span>
-                {{ a.name }}（{{ mb(a.size) }}）
+                {{ a.name }}（{{ a.kind === 'live2d' ? 'Live2D，' : '' }}{{ mb(a.size) }}）
                 <button class="link" :disabled="!e.enabled || Boolean(busy)" @click="useAvatar(e, a.name)">换上</button>
               </span>
             </div>
