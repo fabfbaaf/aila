@@ -7,6 +7,9 @@
       commands/*.md             新的 /命令（和项目里 .aila/commands/ 的写法一样）
       skills/<名字>/SKILL.md    一项「本事」：开头 --- 包起来的 description 是一句话简介，下面是全文
       server/...                外部工具服务（MCP），在说明书的 mcpServers 里写怎么启动
+      motions/ lines.json avatars/ pages/   桌面伙伴的动作、台词、形象和自带页面（见 extension_extras.py）
+
+从目录（catalog.json）浏览、下载见 extension_catalog.py。
 
 说明书：
     {
@@ -38,6 +41,16 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from .extension_extras import (
+    ExtrasError,
+    Motion,
+    extras_summary,
+    page_file,
+    read_lines,
+    scan_avatars,
+    scan_motions,
+)
 
 # 艾拉自己的版本：扩展在说明书里写「aila」: ">=0.1" 要求最低版本
 AILA_VERSION = "0.1.0"
@@ -345,6 +358,14 @@ def plan(folder: Path, installed: "Extension | None" = None) -> dict[str, Any]:
         warnings.append("它会给她新的做事说明（下面的「本事」）：用得上的时候她会照着做。只装你信得过的扩展。")
     if m.servers:
         warnings.append("它会在你的电脑上运行下面的程序（装好后先停着，你打开才运行）。只读之外的工具每次用都会先问你。")
+    try:
+        extras = extras_summary(folder, strict=True)  # 动作、台词写错了导入时就说，不等装好以后默默不生效
+    except ExtrasError as err:
+        raise ExtensionError(str(err)) from err
+    if extras["linesReplace"] and extras["lines"]:
+        warnings.append("它会整组换掉她在这些场合说的话：" + "、".join(extras["lines"]) + "。")
+    if extras["pages"]:
+        warnings.append("它带了页面：在单独的沙盒窗口里打开，不能联网，也碰不到艾拉的服务。")
     if installed is not None:
         warnings.append(f"已经装了 {installed.manifest.version} 版，会换成 {m.version} 版（开关、设置、「以后都不用问」保留）。")
 
@@ -363,6 +384,7 @@ def plan(folder: Path, installed: "Extension | None" = None) -> dict[str, Any]:
         "settings": [{"key": s.key, "label": s.label, "secret": s.secret, "required": s.required,
                       "description": s.description} for s in m.settings],
         "requires": m.requires,
+        **extras,
         "warnings": warnings,
         "upgrade": installed is not None,
     }
@@ -602,7 +624,58 @@ class ExtensionStore:
                           "value": "" if s.secret else ext.settings.get(s.key, "")} for s in ext.manifest.settings],
             "missing": ext.missing_settings(),
             "requires": ext.manifest.requires,
+            **extras_summary(ext.folder),
         }
+
+    # ----- 第二期：桌面伙伴（动作、台词、形象） -----
+
+    def motions(self) -> list[Motion]:
+        """启用的扩展带的动作；重名的先装（按 id 排序）的那个算"""
+        out: list[Motion] = []
+        seen: set[str] = set()
+        for e in self.enabled():
+            for m in scan_motions(e.folder):
+                if m.name not in seen:
+                    seen.add(m.name)
+                    out.append(m)
+        return out
+
+    def companion(self) -> dict[str, Any]:
+        """给桌面伙伴窗口的：动作（姿态段）、台词（加进去的、整组换掉的）、能换的形象"""
+        add: dict[str, list[str]] = {}
+        replace: dict[str, list[str]] = {}
+        avatars = []
+        for e in self.enabled():
+            lines, whole = read_lines(e.folder)
+            for key, items in lines.items():
+                target = replace if whole else add
+                target.setdefault(key, []).extend(items)
+            avatars += [{"extension": e.id, "extensionName": e.manifest.name, **a} for a in scan_avatars(e.folder)]
+        return {
+            "motions": {m.name: {"label": m.label, "phases": m.phases} for m in self.motions()},
+            "lines": {"add": add, "replace": replace},
+            "avatars": avatars,
+        }
+
+    def avatar_file(self, ext_id: str, name: str) -> Path:
+        ext = self.get(ext_id)
+        if not ext.enabled:
+            raise ExtensionError(f"「{ext.manifest.name}」停用了。")
+        found = next((a for a in scan_avatars(ext.folder) if a["name"] == name), None)
+        if found is None:
+            raise ExtensionError(f"「{ext.manifest.name}」里没有叫 {name} 的形象。")
+        return Path(found["file"])
+
+    # ----- 第三期：扩展自带的页面 -----
+
+    def page(self, ext_id: str, name: str) -> Path:
+        ext = self.get(ext_id)
+        if not ext.enabled:
+            raise ExtensionError(f"「{ext.manifest.name}」停用了。")
+        try:
+            return page_file(ext.folder, name)
+        except ExtrasError as err:
+            raise ExtensionError(str(err)) from err
 
 
 def skills_context(skills: list[SkillInfo]) -> str:

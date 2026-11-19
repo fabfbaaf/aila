@@ -40,7 +40,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import WebSocket from 'ws'
 import { AI_SERVICE_URL, answerConfirm, streamChat, type ChatMessage } from '../shared/chat'
 import type { AuthForm, MemoryOp, StoredMessage } from '../shared/cloud'
-import type { AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
+import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
 import { routeForSection, toHash, type ShellRoute } from '../shared/shell'
@@ -51,7 +51,8 @@ import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
 import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
-import { cleanUpdate, validExtensionId, validStageToken } from '../shared/extensions'
+import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionName, validPageName, validStageToken } from '../shared/extensions'
+import { openExtensionPage } from './extensions'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
@@ -723,13 +724,58 @@ function registerIpc(): void {
     if (picked.canceled || picked.filePaths.length === 0) return { ok: true, data: null }
     return agentRelay.extInspect(picked.filePaths[0])
   })
-  ipcMain.handle('ext:install', (e, token: unknown) => (fromAgent(e) && validStageToken(token) ? agentRelay.extInstall(token) : notAllowed))
+  // 装了、改了、卸了以后告诉桌面上的她重新拿动作和台词
+  const extChanged = <T,>(res: AiResult<T>): AiResult<T> => {
+    if (res.ok) win?.webContents.send('ext:changed')
+    return res
+  }
+  ipcMain.handle('ext:install', async (e, token: unknown) =>
+    fromAgent(e) && validStageToken(token) ? extChanged(await agentRelay.extInstall(token)) : notAllowed
+  )
   ipcMain.handle('ext:discard', (e, token: unknown) => (fromAgent(e) && validStageToken(token) ? agentRelay.extDiscard(token) : notAllowed))
-  ipcMain.handle('ext:update', (e, id: unknown, raw: unknown) => {
+  ipcMain.handle('ext:update', async (e, id: unknown, raw: unknown) => {
     const update = cleanUpdate(raw)
-    return fromAgent(e) && validExtensionId(id) && update ? agentRelay.extUpdate(id, update) : notAllowed
+    return fromAgent(e) && validExtensionId(id) && update ? extChanged(await agentRelay.extUpdate(id, update)) : notAllowed
   })
-  ipcMain.handle('ext:remove', (e, id: unknown) => (fromAgent(e) && validExtensionId(id) ? agentRelay.extRemove(id) : notAllowed))
+  ipcMain.handle('ext:remove', async (e, id: unknown) =>
+    fromAgent(e) && validExtensionId(id) ? extChanged(await agentRelay.extRemove(id)) : notAllowed
+  )
+  // 第二期：桌面伙伴。动作和台词不是机密，两个窗口都能读（角色窗口要用）
+  ipcMain.handle('ext:companion', () => agentRelay.extCompanion())
+  // 扩展页里点「试一下」：让桌面上的她做这个动作（动作数据由她自己那边从扩展列表拿，这里只传名字）
+  ipcMain.on('ext:play', (e, name: unknown) => {
+    if (fromAgent(e) && validMotionName(name)) win?.webContents.send('ext:play', name)
+  })
+  // 换成扩展带的形象：路径从 AI 服务的列表里取，再确认在扩展文件夹的 avatars 里
+  ipcMain.handle('ext:use-avatar', async (e, id: unknown, name: unknown) => {
+    if (!fromAgent(e) || !validExtensionId(id) || !validPageName(name)) return notAllowed
+    const res = await agentRelay.extCompanion()
+    const file = findAvatar(res.data, id, name)
+    if (!file) return { ok: false, error: '没找到这个形象（扩展可能停用或者卸载了）' }
+    const data = readModel(file)
+    if (!data || !win) return { ok: false, error: '形象文件读不了' }
+    saveSettings({ ...loadSettings(), modelPath: file })
+    win.webContents.send('model:loaded', data)
+    broadcast('model:path', file)
+    return { ok: true, data: { ok: true } }
+  })
+  // 第三期：扩展自带的页面，开在沙盒窗口里
+  ipcMain.handle('ext:open-page', (e, id: unknown, name: unknown, title: unknown) =>
+    fromAgent(e) && validExtensionId(id) && validPageName(name)
+      ? openExtensionPage(AI_URL, id, name, typeof title === 'string' ? title.slice(0, 40) : name, mainWin)
+      : notAllowed
+  )
+  // 第三期：目录（联网下载在 AI 服务那边做，只许 https 公网地址、要对上 sha256）
+  ipcMain.handle('ext:catalog', (e) => (fromAgent(e) ? agentRelay.extCatalog() : notAllowed))
+  ipcMain.handle('ext:catalog-sources', (e, raw: unknown) => {
+    const urls = cleanSources(raw)
+    return fromAgent(e) && urls ? agentRelay.extCatalogSources(urls) : notAllowed
+  })
+  ipcMain.handle('ext:catalog-inspect', (e, catalog: unknown, id: unknown) =>
+    fromAgent(e) && typeof catalog === 'string' && catalog.length <= 1000 && validExtensionId(id)
+      ? agentRelay.extCatalogInspect(catalog, id)
+      : notAllowed
+  )
   ipcMain.handle('agent:rules:forget', (e, project: unknown, command: unknown) => {
     if (!fromAgent(e)) return notAllowed
     if (typeof project !== 'string' || !project.trim() || project.length > 1000 ||

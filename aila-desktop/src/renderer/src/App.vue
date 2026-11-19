@@ -5,7 +5,8 @@ import SpeechBubble from './components/SpeechBubble.vue'
 import ChatInput from './components/ChatInput.vue'
 import type { BubbleAsk } from './components/bubble'
 import type { CharacterEvent } from '../../shared/settings'
-import type { ConfirmAsk } from '../../shared/chat'
+import { BUILTIN_GESTURES, type ConfirmAsk } from '../../shared/chat'
+import { cleanMotions } from '../../shared/extensions'
 import type { AgentProgress } from '../../shared/agent'
 import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
@@ -16,7 +17,7 @@ import { createTransport } from './chat/transport'
 import { Stage, type HitRegion } from './scene/Stage'
 import { PlaceholderAvatar } from './avatar/PlaceholderAvatar'
 import { loadVrmAvatar } from './avatar/VrmAvatar'
-import { lines, pick } from './persona/lines'
+import { applyExtensionLines, lines, pick } from './persona/lines'
 import { bridge } from './platform/bridge'
 import { Speaker } from './voice/Speaker'
 import { VoiceController } from './voice/VoiceController'
@@ -824,6 +825,14 @@ function onMouseMove(e: MouseEvent): void {
 
 // ---------- 启动 ----------
 
+/** 扩展包带的动作和台词（AI 服务没开、没装扩展时就是内置的那些） */
+async function loadCompanion(): Promise<void> {
+  const res = await bridge?.extCompanion()
+  const c = res?.ok ? res.data : undefined
+  behavior.setExtraGestures(cleanMotions(c?.motions, BUILTIN_GESTURES))
+  applyExtensionLines(c?.lines)
+}
+
 onMounted(async () => {
   stage = new Stage(stageEl.value!, behavior)
   stage.onStep = (dt) => {
@@ -876,8 +885,12 @@ onMounted(async () => {
         if (convAsk.value?.id === id) conversation.answer(true)
       }),
       bridge.onDesktopStatus(applyDesktop),
-      bridge.onClipboardAsk(() => void sendWithClipboard('帮我看看剪贴板里的这段报错'))
+      bridge.onClipboardAsk(() => void sendWithClipboard('帮我看看剪贴板里的这段报错')),
+      // 扩展包：装卸、开关以后重新拿动作和台词；扩展页点了「试一下」就做那个动作
+      bridge.onExtChanged(() => void loadCompanion()),
+      bridge.onExtPlay((name) => behavior.gesture(name))
     )
+    void loadCompanion()
     // 说出来的话提到剪贴板，也先带上剪贴板的内容
     voiceControl.onHeard = (text) => {
       if (!mentionsClipboard(text)) return false

@@ -63,7 +63,9 @@ def spoken_prefix(text: str, state: SpokenPrefix, final: bool = False) -> tuple[
 
 
 class TagParser:
-    def __init__(self) -> None:
+    def __init__(self, extra_actions: frozenset[str] = frozenset()) -> None:
+        # 扩展包带的动作名（见 app/extension_extras.py）：和内置动作一样认
+        self._extra_actions = extra_actions
         self._buf = ""
         self._after_tag = False
         self._used_say = False
@@ -106,7 +108,7 @@ class TagParser:
                 continue
 
             name = self._buf[1:end].strip().lower() if end < MAX_TAG_LEN else ""
-            event = _tag_event(name)
+            event = _tag_event(name, self._extra_actions)
             if event is None and name not in ("say", "/say"):
                 # 不是标签，比如代码里的 a[i]：把 "[" 当普通文字，继续往后找
                 text.append("[")
@@ -163,10 +165,10 @@ class TagParser:
             events.append({"type": "text", "text": text, "spoken": False})
 
 
-def _tag_event(name: str) -> Event | None:
+def _tag_event(name: str, extra_actions: frozenset[str] = frozenset()) -> Event | None:
     name = ALIASES.get(name, name)
     if name in EMOTIONS:
         return {"type": "emotion", "name": name}
-    if name in ACTIONS:
+    if name in ACTIONS or name in extra_actions:
         return {"type": "action", "name": name}
     return None

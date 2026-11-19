@@ -29,7 +29,7 @@ export interface ExtensionServer {
   log: string[]
 }
 
-export interface ExtensionInfo {
+export interface ExtensionInfo extends ExtensionExtras {
   id: string
   name: string
   version: string
@@ -45,6 +45,17 @@ export interface ExtensionInfo {
   requires: string[]
 }
 
+/** 动作、台词、形象、页面（第二、三期）：清单和列表里都有 */
+export interface ExtensionExtras {
+  motions: { name: string; label: string }[]
+  /** 台词池 → 加了几句 */
+  lines: Record<string, number>
+  /** 整组换掉这些场合的台词，而不是往里加 */
+  linesReplace: boolean
+  avatars: { name: string; size: number }[]
+  pages: { name: string; title: string }[]
+}
+
 export interface ExtensionList {
   extensions: ExtensionInfo[]
   /** 装在哪（给你看，方便自己打开看看） */
@@ -52,7 +63,7 @@ export interface ExtensionList {
 }
 
 /** 装之前给你看的清单：AI 服务从说明书和文件算出来的，不是扩展自己的介绍 */
-export interface ExtensionPlan {
+export interface ExtensionPlan extends ExtensionExtras {
   id: string
   name: string
   version: string
@@ -65,6 +76,8 @@ export interface ExtensionPlan {
   warnings: string[]
   /** 已经装了旧版：这次是升级 */
   upgrade: boolean
+  /** 从哪个目录下载的（从目录装时才有） */
+  source?: string
 }
 
 export interface ExtensionUpdate {
@@ -112,7 +125,7 @@ export function cleanUpdate(raw: unknown): ExtensionUpdate | null {
 }
 
 /** 列表里每个扩展的一行小结：「2 个命令 · 1 项本事 · 1 个工具服务（开着 1 个）」 */
-export function summarize(e: Pick<ExtensionInfo, 'commands' | 'skills' | 'servers'>): string {
+export function summarize(e: Pick<ExtensionInfo, 'commands' | 'skills' | 'servers'> & Partial<ExtensionExtras>): string {
   const parts: string[] = []
   if (e.commands.length) parts.push(`${e.commands.length} 个命令`)
   if (e.skills.length) parts.push(`${e.skills.length} 项本事`)
@@ -120,5 +133,151 @@ export function summarize(e: Pick<ExtensionInfo, 'commands' | 'skills' | 'server
     const on = e.servers.filter((s) => !s.disabled).length
     parts.push(`${e.servers.length} 个工具服务${on ? `（开着 ${on} 个）` : '（都停着）'}`)
   }
+  if (e.motions?.length) parts.push(`${e.motions.length} 个动作`)
+  const lines = Object.values(e.lines ?? {}).reduce((a, b) => a + b, 0)
+  if (lines) parts.push(`${lines} 句台词`)
+  if (e.avatars?.length) parts.push(`${e.avatars.length} 个形象`)
+  if (e.pages?.length) parts.push(`${e.pages.length} 个页面`)
   return parts.join(' · ') || '里面什么都没有'
 }
+
+// ---------- 第二期：桌面伙伴（动作、台词、形象） ----------
+
+/** 扩展动作的一段：和内置动作（Behavior 的 Phase）同一个格式 */
+export interface MotionPhase {
+  dur: number
+  pose?: Partial<Record<PoseKey, number>>
+  expr?: Partial<Record<ExprKey, number>>
+}
+
+export type PoseKey = 'headPitch' | 'headYaw' | 'headRoll' | 'bodyLean' | 'bodySway' | 'armRaise' | 'forearmSwing' | 'armsUp'
+export type ExprKey = 'happy' | 'sad' | 'surprised' | 'relaxed' | 'blink'
+
+/** 和 AI 服务（app/extension_extras.py）一样的范围；这边再截一次，不只信那边 */
+export const POSE_LIMITS: Record<PoseKey, [number, number]> = {
+  headPitch: [-0.6, 0.6], headYaw: [-0.8, 0.8], headRoll: [-0.5, 0.5], bodyLean: [-0.3, 0.3], bodySway: [-0.3, 0.3],
+  armRaise: [0, 1], forearmSwing: [-1, 1], armsUp: [0, 1]
+}
+const EXPR_KEYS: ExprKey[] = ['happy', 'sad', 'surprised', 'relaxed', 'blink']
+const MOTION_NAME = /^[a-z][a-z0-9_]{1,19}$/
+
+export interface Companion {
+  motions: Record<string, { label: string; phases: MotionPhase[] }>
+  lines: { add: Record<string, string[]>; replace: Record<string, string[]> }
+  avatars: { extension: string; extensionName: string; name: string; file: string; size: number }[]
+}
+
+const clamp = (v: number, [lo, hi]: [number, number]): number => Math.min(hi, Math.max(lo, v))
+
+/** 扩展的动作 → 能直接播放的几段姿态：不认识的键丢掉、值截到范围里、太长的不要；不对就返回 null */
+export function cleanMotion(phases: unknown): MotionPhase[] | null {
+  if (!Array.isArray(phases) || phases.length === 0 || phases.length > 40) return null
+  const out: MotionPhase[] = []
+  let total = 0
+  for (const raw of phases) {
+    if (!raw || typeof raw !== 'object') return null
+    const p = raw as Record<string, unknown>
+    if (typeof p.dur !== 'number' || !(p.dur >= 0.05 && p.dur <= 5)) return null
+    total += p.dur
+    const phase: MotionPhase = { dur: p.dur }
+    if (p.pose && typeof p.pose === 'object') {
+      const pose: Partial<Record<PoseKey, number>> = {}
+      for (const [k, v] of Object.entries(p.pose)) {
+        if (k in POSE_LIMITS && typeof v === 'number' && Number.isFinite(v)) pose[k as PoseKey] = clamp(v, POSE_LIMITS[k as PoseKey])
+      }
+      phase.pose = pose
+    }
+    if (p.expr && typeof p.expr === 'object') {
+      const expr: Partial<Record<ExprKey, number>> = {}
+      for (const [k, v] of Object.entries(p.expr)) {
+        if ((EXPR_KEYS as string[]).includes(k) && typeof v === 'number' && Number.isFinite(v)) expr[k as ExprKey] = clamp(v, [0, 1])
+      }
+      phase.expr = expr
+    }
+    out.push(phase)
+  }
+  return total <= 10 ? out : null
+}
+
+/** 扩展的动作表 → 名字合规、能播放的那些 */
+export function cleanMotions(raw: Companion['motions'] | undefined, builtin: readonly string[]): Record<string, MotionPhase[]> {
+  const out: Record<string, MotionPhase[]> = {}
+  for (const [name, m] of Object.entries(raw ?? {})) {
+    if (!MOTION_NAME.test(name) || builtin.includes(name)) continue
+    const phases = cleanMotion(m?.phases)
+    if (phases) out[name] = phases
+  }
+  return out
+}
+
+/**
+ * 台词池：内置的 + 扩展加的；扩展说整组换掉的就只用扩展的。
+ * 只动内置里本来就是句子列表的那些键，每句限长。
+ */
+export function mergeLines(base: Record<string, readonly string[]>, extra: Companion['lines'] | undefined): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  const ok = (list: unknown): string[] =>
+    Array.isArray(list) ? list.filter((t): t is string => typeof t === 'string' && t.trim().length > 0).map((t) => t.slice(0, 80)).slice(0, 30) : []
+  for (const [key, lines] of Object.entries(base)) {
+    const replaced = ok(extra?.replace?.[key])
+    out[key] = replaced.length ? replaced : [...lines, ...ok(extra?.add?.[key])]
+  }
+  return out
+}
+
+// ---------- 第三期：目录 ----------
+
+export interface CatalogEntry {
+  id: string
+  name: string
+  version: string
+  description: string
+  size: number | null
+  /** 装了的版本；没装是 null */
+  installed: string | null
+  upgrade: boolean
+}
+
+export interface CatalogListing {
+  sources: string[]
+  catalogs: { source: string; name: string; error: string; extensions: CatalogEntry[] }[]
+}
+
+/** 目录地址：https 网址或者本机的完整路径；每行一个，最多 10 个 */
+export function cleanSources(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length > 10) return null
+  const out: string[] = []
+  for (const s of raw) {
+    if (typeof s !== 'string') return null
+    const t = s.trim()
+    if (!t) continue
+    if (t.length > 1000) return null
+    out.push(t)
+  }
+  return out
+}
+
+// ---------- 主进程用的检查（第二、三期） ----------
+
+const PAGE_NAME = /^[\w一-鿿-]{1,40}$/
+
+export function validPageName(name: unknown): name is string {
+  return typeof name === 'string' && PAGE_NAME.test(name)
+}
+
+export function validMotionName(name: unknown): name is string {
+  return typeof name === 'string' && MOTION_NAME.test(name)
+}
+
+/** 扩展形象的文件：必须是 …/extensions/<扩展 id>/avatars/<名字>.vrm（防止 AI 服务那边给出别的地方） */
+export function avatarPathOk(file: string, extId: string, name: string): boolean {
+  const norm = file.replace(/\\/g, '/')
+  return norm.endsWith(`/extensions/${extId}/avatars/${name}.vrm`) && !norm.includes('/../')
+}
+
+/** 从扩展列表里找形象文件 */
+export function findAvatar(companion: Companion | undefined, extId: string, name: string): string | null {
+  const found = companion?.avatars.find((a) => a.extension === extId && a.name === name)
+  return found && avatarPathOk(found.file, extId, name) ? found.file : null
+}
+

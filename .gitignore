@@ -4,3 +4,5 @@
 .vscode/
 Thumbs.db
 .DS_Store
+# examples/extensions/make_catalog.py 打出来的 zip 和目录
+examples/extensions/dist/
