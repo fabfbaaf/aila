@@ -1,7 +1,7 @@
 """她自己的浏览器：一个单独的 Edge 窗口，用独立的配置目录（aila-ai/data/browser），
 和用户自己的浏览器、登录状态互不相干。用户看得到她在做什么，也可以随时接手（比如自己登录）。
 
-- 懒启动：第一次用到才开；10 分钟没用自动关；用户关掉窗口也没关系，下次用到再开
+- 懒启动：第一次用到才开；10 分钟没用自动关；交给用户的标签页在使用期间保持打开
 - 地址检查：所有请求（网页、跳转、图片、脚本发的请求）都经过这里，和 read_page 一样只许公网地址，
   免得网页里的内容诱导她去访问本机或内网（路由器管理页、本机服务）
 - 不下载文件；弹窗（alert / confirm）自动关掉；新开的标签页自动切过去
@@ -119,6 +119,8 @@ class BrowserSession:
         self._pw: Any = None
         self._context: Any = None
         self._page: Any = None
+        self._user_pages: set[Any] = set()
+        self._opening_user_page = False
         self._snapshot: Snapshot | None = None
         self._snapshot_page: Any = None
         self._hosts: dict[str, tuple[str | None, float]] = {}
@@ -146,6 +148,31 @@ class BrowserSession:
             page = await self._ensure()
             await self._goto(page, url)
             return await self._snap()
+
+    async def open_for_user(self, url: str) -> None:
+        """在同一份登录资料里新开一页，由用户操作；不读取正文或表单。"""
+        from playwright.async_api import Error as PlaywrightError
+
+        async with self._lock:
+            await self._check_nav(url)
+            if self._context is None:
+                await self._launch()
+            self._snapshot = self._snapshot_page = None
+            page = None
+            opened = False
+            self._opening_user_page = True
+            try:
+                page = await self._context.new_page()
+                await page.bring_to_front()
+                await page.goto(url, wait_until="commit")
+                opened = True
+            except PlaywrightError:
+                raise BrowserError("网页没能打开，看看浏览器窗口或网络连接。") from None
+            finally:
+                self._opening_user_page = False
+                if not opened and page is not None:
+                    with contextlib.suppress(Exception):
+                        await page.close()
 
     async def read(self) -> str:
         async with self._lock:
@@ -254,6 +281,8 @@ class BrowserSession:
     # ---------- 启动和关闭 ----------
 
     async def _ensure(self) -> Any:
+        if self._user_pages:
+            raise BrowserError("浏览器已交给用户，关掉手动操作的标签页后可以继续。")
         self._last_used = time.monotonic()
         if self._context is None:
             await self._launch()
@@ -301,6 +330,11 @@ class BrowserSession:
 
     def _on_page(self, page: Any) -> None:
         """新标签页（链接在新窗口打开、脚本 window.open）：切过去，弹窗自动关掉"""
+        if self._opening_user_page or self._user_pages:
+            # 登录可能经过新窗口，人工操作期间的新页都归用户，直到用户关掉它们。
+            self._user_pages.add(page)
+            page.once("close", self._user_page_closed)
+            return
 
         async def dismiss(dialog: Any) -> None:
             with contextlib.suppress(Exception):
@@ -309,14 +343,20 @@ class BrowserSession:
         page.on("dialog", dismiss)
         self._page = page
 
+    def _user_page_closed(self, page: Any) -> None:
+        self._user_pages.discard(page)
+        self._last_used = time.monotonic()
+
     def _forget(self, ctx: Any) -> None:
         """窗口被关掉了（用户关的，或者空闲太久我们关的）"""
         if self._context is ctx:
-            self._context = self._page = self._snapshot = None
+            self._context = self._page = self._snapshot = self._snapshot_page = None
+            self._user_pages.clear()
 
     async def _close_context(self) -> None:
         ctx, self._context = self._context, None
-        self._page = self._snapshot = None
+        self._page = self._snapshot = self._snapshot_page = None
+        self._user_pages.clear()
         if self._watchdog and self._watchdog is not asyncio.current_task():
             self._watchdog.cancel()
         self._watchdog = None
@@ -328,7 +368,8 @@ class BrowserSession:
     async def _idle_watch(self) -> None:
         while self._context is not None:
             await asyncio.sleep(min(30.0, self._idle / 2))
-            if self._context is not None and time.monotonic() - self._last_used > self._idle and not self._lock.locked():
+            if (self._context is not None and not self._user_pages and not self._lock.locked()
+                    and time.monotonic() - self._last_used > self._idle):
                 log.info("浏览器 %.0f 秒没用，关掉", self._idle)
                 await self.close()
                 return

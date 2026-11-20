@@ -6,6 +6,7 @@
 - 密码、验证码不填；页面变了不乱点；本机和内网地址拦下
 """
 
+import asyncio
 import json
 import threading
 from collections.abc import AsyncIterator, Iterator
@@ -222,12 +223,50 @@ async def test_new_tab_becomes_current(browser: BrowserSession, site: Site) -> N
 
 
 @pytest.mark.anyio
+async def test_user_handoff_keeps_login_and_pauses_tools_until_popups_close(
+    tmp_path: Path, site: Site,
+) -> None:
+    session = BrowserSession(tmp_path / "profile", no_dns, headless=True,
+                             allow_private=True, idle_seconds=0.5)
+    try:
+        await opened(session, site.url + "/")
+        original = session._page
+        await original.evaluate("localStorage.setItem('login-test', 'same-profile')")
+        old_ref = ref_of(session, "点赞")
+        assert await session.open_for_user(site.url + "/") is None
+        [manual] = session._user_pages
+        assert manual is not original
+        assert await manual.evaluate("localStorage.getItem('login-test')") == "same-profile"
+        assert not await manual.locator("[data-aila-ref]").count()
+        assert session.element(old_ref) is None and session.page_info == ("", "")
+
+        async with manual.expect_popup() as opened_popup:
+            await manual.get_by_text("新窗口打开").click()
+        popup = await opened_popup.value
+        await manual.close()
+        await asyncio.sleep(0.8)  # 等过空闲回收时间，人工登录弹页还要留给用户
+        with pytest.raises(BrowserError, match="交给用户"):
+            await session.read()
+        with pytest.raises(BrowserError):
+            await session.click(old_ref, approved=True)
+        assert site.posts() == []
+        await popup.close()
+        assert "网页标题：测试首页" in await session.read()
+        assert session._page is original
+    finally:
+        await session.shutdown()
+
+
+@pytest.mark.anyio
 async def test_private_addresses_are_blocked(tmp_path: Path, site: Site) -> None:
     """网页诱导她去访问本机或内网：打开不了，网页里的图片和脚本请求也被拦下"""
     session = BrowserSession(tmp_path / "profile", no_dns, headless=True)
     try:
         with pytest.raises(BrowserError, match="内网"):
             await session.open(site.url + "/")
+        with pytest.raises(BrowserError, match="内网"):
+            await session.open_for_user(site.url + "/")
+        assert not session.is_open
         try:
             page = await session._ensure()
         except BrowserError:
