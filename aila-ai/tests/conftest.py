@@ -32,11 +32,12 @@ def isolated_data(tmp_path: Path) -> Iterator[None]:
     """所有测试的本机数据（资料库）都放临时目录，不碰 aila-ai/data"""
     saved = deps.settings
     deps.settings = replace(saved, data_dir=tmp_path / "data")
-    for cache in (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime):
+    caches = (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime, deps.get_memory_store)
+    for cache in caches:
         cache.cache_clear()
     yield
     deps.settings = saved
-    for cache in (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime):
+    for cache in caches:
         cache.cache_clear()
 
 

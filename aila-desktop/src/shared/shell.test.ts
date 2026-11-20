@@ -27,7 +27,10 @@ describe('主窗口的页面地址', () => {
 
   it('主进程传来的页面先检查', () => {
     expect(cleanRoute({ page: 'projects', tab: 'map' })).toEqual({ page: 'projects', tab: 'map' })
-    expect(cleanRoute({ page: 'settings', section: 'skills' })).toEqual({ page: 'settings', section: 'skills' })
+    expect(cleanRoute({ page: 'settings', section: 'agent' })).toEqual({ page: 'settings', section: 'agent' })
+    // 「技能包」并进了「技能和扩展」：旧地址、托盘菜单里的旧入口都去新的那一页
+    expect(cleanRoute({ page: 'settings', section: 'skills' })).toEqual({ page: 'settings', section: 'extensions' })
+    expect(parseHash('#/settings/skills')).toEqual({ page: 'settings', section: 'extensions' })
     expect(cleanRoute({ page: 'evil' })).toEqual({ page: 'tasks' })
     expect(cleanRoute('tasks')).toEqual({ page: 'tasks' })
   })

@@ -21,6 +21,8 @@ from .config import load_settings
 from .confirm import Confirmations
 from .knowledge import KnowledgeBase, knowledge_skill
 from .llm import ChatModel, CoderModel, MockModel, OpenAICompatibleModel
+from .memory.episodes import Digester
+from .memory.store import MemoryStore
 from .browser import BrowserSession
 from .runtime.loop import AgentConfig
 from .runtime.mock import MockCoderModel
@@ -98,7 +100,8 @@ def get_runtime() -> Runtime:
     # 用函数而不是直接传模型：设置里换了密钥或模型以后，新会话用新的
     runtime = Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
-                      computer_inventory=settings.computer_inventory, extensions=get_extensions())
+                      computer_inventory=settings.computer_inventory, extensions=get_extensions(),
+                      memory_store=lambda: get_memory_store())
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     return runtime
 
@@ -176,6 +179,16 @@ def get_embedder() -> Any:
 @lru_cache
 def get_knowledge() -> KnowledgeBase:
     return KnowledgeBase(settings.data_dir / "knowledge.sqlite3", get_embedder)
+
+
+@lru_cache
+def get_memory_store() -> MemoryStore:
+    """记忆库（memory/store.py）：关于你的事、对话摘要、编程任务的经历、项目约定。向量模型用到时现取"""
+    return MemoryStore(settings.data_dir / "memory.sqlite3", lambda: get_embedder())
+
+
+# 滑出对话窗口的那段：后台写摘要（同一时间只做一份）
+digester = Digester()
 
 
 def _search_provider() -> SearchProvider | None:

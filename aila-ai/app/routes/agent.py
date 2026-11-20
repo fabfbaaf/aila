@@ -50,6 +50,7 @@ from ..runtime.mcp import McpError, parse_import
 from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 from ..runtime.session import Event
+from ..sse import with_heartbeat
 
 router = APIRouter(prefix="/agent")
 
@@ -118,7 +119,8 @@ def _sse(events: AsyncIterator[Event]) -> StreamingResponse:
         async for event in events:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(body(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    # 隔 15 秒没事件就发一行心跳：她跑长命令、想很久时连接不会被桌面端当成断了
+    return StreamingResponse(with_heartbeat(body()), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 def _session_or_404(rt: Runtime, sid: str):  # noqa: ANN202

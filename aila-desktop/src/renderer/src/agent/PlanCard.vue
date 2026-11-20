@@ -8,7 +8,8 @@ import { ref } from 'vue'
 import Icon from '../theme/Icon.vue'
 import type { PlanView } from './plan'
 
-const props = defineProps<{ plan: PlanView; busy: boolean }>()
+/** readOnly：这个任务现在是只读模式；批准时会先换成「先问再改」，按钮上写明 */
+const props = defineProps<{ plan: PlanView; busy: boolean; readOnly?: boolean }>()
 const emit = defineEmits<{ approve: [pauseEach: boolean]; reject: [] }>()
 const pauseEach = ref(false)
 
@@ -45,7 +46,9 @@ function label(): string {
       <label class="pause-each"><input v-model="pauseEach" type="checkbox" />每个阶段做完停一下，等我看过再接着做</label>
       <span class="hint">想改就直接在下面说，她会重新交一份</span>
       <button class="ghost" :disabled="busy" @click="emit('reject')">不用了</button>
-      <button class="go" :disabled="busy" @click="emit('approve', pauseEach)"><Icon name="play" :size="13" :stroke="2" />照这个做</button>
+      <button class="go" :disabled="busy" :title="readOnly ? '现在是只读模式，按计划做要改文件：会先换成「先问再改」' : ''" @click="emit('approve', pauseEach)">
+        <Icon name="play" :size="13" :stroke="2" />{{ readOnly ? '换成「先问再改」并照这个做' : '照这个做' }}
+      </button>
     </div>
   </div>
 </template>

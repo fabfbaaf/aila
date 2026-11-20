@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 import numpy as np
 
@@ -42,7 +43,8 @@ def active(memories: list[Memory], now: datetime) -> list[Memory]:
     return [m for m in memories if m.expires_at is None or m.expires_at > now]
 
 
-def recall(memories: list[Memory], query: str, embedder: Embedder | None, now: datetime) -> list[Memory]:
+def recall(memories: list[Memory], query: str, embedder: Embedder | None, now: datetime, store: Any = None) -> list[Memory]:
+    """store：记忆库（memory/store.py）。给了就用它的检索（关键词 + 存好的向量），不用每次把全部记忆重算一遍向量"""
     alive = sorted(active(memories, now), key=lambda m: m.updated_at or now, reverse=True)
     if len(alive) <= MAX_RECALL:
         return alive
@@ -55,6 +57,8 @@ def recall(memories: list[Memory], query: str, embedder: Embedder | None, now: d
             picked[m.id] = m
 
     rest = [m for m in alive if m.id not in picked]
+    if store is not None and query.strip():
+        return list(_from_store(store, rest, query, picked).values())
     if embedder is None or not query.strip():
         # 没有向量模型时退而求其次：最近更新的几条
         for m in rest[: MAX_RECALL - len(picked)]:
@@ -71,6 +75,27 @@ def recall(memories: list[Memory], query: str, embedder: Embedder | None, now: d
     return list(picked.values())
 
 
+def _from_store(store: Any, rest: list[Memory], query: str, picked: dict[str, Memory]) -> dict[str, Memory]:
+    """和上面按相似度挑一样的规矩；多了一条：关键词命中（名字、地名这种字面一样的）也算相关"""
+    by_id = {m.id: m for m in rest}
+    taken = 0
+    for hit in store.search(query, ("fact",), k=20):
+        m = by_id.get(hit.entry.id)
+        if m is None:
+            continue
+        if len(picked) >= MAX_RECALL:
+            break
+        sim = hit.similarity
+        relevant = hit.keyword or (sim is not None and sim >= FLOOR)
+        if not relevant:
+            continue
+        if taken >= TOP_RELATED and (sim is None or sim < STRONG):
+            continue
+        picked[m.id] = m
+        taken += 1
+    return picked
+
+
 def related(memories: list[Memory], text: str, embedder: Embedder | None, k: int) -> list[Memory]:
     """和一段话最相关的 k 条（提取记忆时，用来找可能要修改或删除的旧记忆）"""
     if len(memories) <= k or embedder is None:
@@ -79,8 +104,11 @@ def related(memories: list[Memory], text: str, embedder: Embedder | None, k: int
     return [memories[i] for i in np.argsort(-scores)[:k]]
 
 
-def describe(memories: list[Memory], now: datetime) -> str:
-    """跟着用户最新一句话的背景（放在 <背景> 里，系统提示词保持不变）"""
+def describe(memories: list[Memory], now: datetime, earlier: str = "", episodes: list[str] | None = None) -> str:
+    """跟着用户最新一句话的背景（放在 <背景> 里，系统提示词保持不变）。
+
+    earlier：滑出对话窗口的那段的摘要（最近一份）；episodes：和这次话题相关的以前的经历（对话摘要、编程任务、项目约定）
+    """
     weekday = "一二三四五六日"[now.weekday()]
     lines = [f"今天是 {now.year} 年 {now.month} 月 {now.day} 日，星期{weekday}，现在 {now:%H:%M}。"]
     if memories:
@@ -90,4 +118,13 @@ def describe(memories: list[Memory], now: datetime) -> str:
             when = f"（到 {m.expires_at.month} 月 {m.expires_at.day} 日）" if m.expires_at else ""
             lines.append(f"- {m.content}{when}")
         lines.append("自然地用上这些，比如称呼、关心近况；不要每次都提，也不要说「根据我的记忆」。")
+    if earlier:
+        lines.append("")
+        lines.append("更早聊过的（太久的对话只留了摘要）：")
+        lines.append(earlier)
+    if episodes:
+        lines.append("")
+        lines.append("以前的事里和现在话题可能有关的：")
+        lines.extend(f"- {e}" for e in episodes)
+        lines.append("用得上就用，用不上就当没看见。")
     return "\n".join(lines)

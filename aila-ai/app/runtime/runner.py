@@ -10,6 +10,7 @@ import logging
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -29,7 +30,9 @@ from .skilltool import read_skill_tool
 from .delivery import DELIVERY, DeliveryError
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
-from .memory import ProjectMemory, remember_tool
+from .memory import ProjectMemory, project_key, remember_tool
+from ..memory.episodes import coding_context, task_episode
+from ..memory.store import MemoryStore
 from .planning import MAX_CONTINUES, PLAN_PROMPT, plan_state, plan_title, plan_tools, stage_message
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, ComputerPolicy, Mode, Policy, Rules
@@ -80,8 +83,12 @@ class Runtime:
         mcp_config: Path | None = None,
         computer_inventory: bool = True,
         extensions: ExtensionStore | None = None,
+        memory_store: "Callable[[], MemoryStore] | None" = None,
     ) -> None:
         self.store = SessionStore(data_dir / "sessions")
+        # 记忆库（和对话共用）：会话开头回想关于你的事和这个项目最近几次，每轮做完记一条经历；用到时现取
+        self.memory_store = memory_store
+        self._recorded: set[tuple[str, int]] = set()
         # 「在新分支上做」的临时目录（git worktree）
         self.work_dir = data_dir / "worktrees"
         # 代码库（代码 RAG + 调用图）：给了就让她能按意思搜、按报错定位、看调用关系
@@ -92,6 +99,9 @@ class Runtime:
         self.data_dir = data_dir
         # 项目记忆：她学到的项目约定，下次在这个项目开会话时放进环境说明
         self.memory = ProjectMemory(data_dir / "project_memory.json")
+        # 项目约定也放进记忆库一份（对话里也能想起来）：改了就同步，第一次用记忆库时把已有的都放进去
+        self.memory.on_change = self._sync_project_notes
+        self._notes_synced = False
         # MCP 外部工具服务（和对话共用 aila-ai/mcp.json，你在设置页加）：第一次用到时在后台开起来
         # 扩展包（app/extensions.py）：命令、本事、外部工具服务
         self.extensions = extensions or ExtensionStore(data_dir / "extensions")
@@ -145,14 +155,15 @@ class Runtime:
                                         {"kind": "computer", **skill_meta})
         elif not isolate:
             session = self.store.create(root, mode, model.name,
-                                        build_context(root, self.shell.label) + self.memory.context(root) + skill_note, skill_meta)
+                                        build_context(root, self.shell.label) + self.memory.context(root)
+                                        + self._recall(root) + skill_note, skill_meta)
         else:
             try:
                 info = open_branch(root, self.work_dir)
             except BranchError as err:
                 raise RuntimeError_(str(err)) from err
             context = (build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
-                       + self.memory.context(root) + skill_note)
+                       + self.memory.context(root) + self._recall(root) + skill_note)
             session = self.store.create(root, mode, model.name, context, {"branch": asdict(info), **skill_meta})
         if budget is not None:
             session.append({"type": "budget", "amount": budget})
@@ -436,7 +447,8 @@ class Runtime:
         agent.model = self.model_factory()  # 设置里换了模型或密钥：从这一轮起用新的
         events = agent.turn(text.strip(), extra)
         if extra and (extra.get("review") or extra.get("plan_request")):
-            events = self._read_only(sid, agent, events)
+            hint = PLAN_DENY_HINT if extra.get("plan_request") else REVIEW_DENY_HINT
+            events = self._read_only(sid, agent, events, hint)
         events = self._with_mcp(agent, events)
         self._tasks[sid] = asyncio.create_task(self._drive(sid, events))
 
@@ -450,6 +462,9 @@ class Runtime:
         state = plan_state(agent.session.events)
         if state is None or state.decision != "proposed":
             raise RuntimeError_("现在没有等你决定的计划。")
+        if approved and agent.policy.mode == "read_only":
+            # 只读模式下按计划做，每个阶段都改不了文件，只会一轮轮原地打转
+            raise RuntimeError_("现在是只读模式：按计划做要改文件。先换成「先问再改」再批准。")
         event = agent.session.append({"type": "plan_decision", "approved": bool(approved), "pause_each": bool(pause_each)})
         self._publish(sid, event)
         return event
@@ -521,16 +536,18 @@ class Runtime:
         async for event in events:
             yield event
 
-    async def _read_only(self, sid: str, agent: Agent, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
-        """/review 这一轮按只读模式把关；结束（做完、出错、打断）后换回原来的模式，
-        中途用户换过模式就换成新的那个"""
+    async def _read_only(self, sid: str, agent: Agent, events: AsyncIterator[Event], hint: str = "") -> AsyncIterator[Event]:
+        """/review、出方案这一轮按只读模式把关；结束（做完、出错、打断）后换回原来的模式，
+        中途用户换过模式就换成新的那个。hint：被挡下时告诉她这一轮该怎么做"""
         self._reviewing[sid] = agent.policy.mode
         agent.policy.mode = "read_only"
+        agent.deny_hint = hint
         try:
             async for event in events:
                 yield event
         finally:
             agent.policy.mode = self._reviewing.pop(sid, agent.policy.mode)
+            agent.deny_hint = ""
 
     def project_dir(self, project_id: str) -> str:
         """代码库里登记的项目 → 它的文件夹"""
@@ -589,9 +606,58 @@ class Runtime:
         finally:
             for event in session.events[published + 1 :]:
                 self._publish(sid, event)  # 打断时补上的事件
+            self._remember_turn(session)
             if close:
                 for q in self._listeners.get(sid, set()):
                     q.put_nowait(None)  # 这一轮结束了
+
+    # ---------- 记忆库 ----------
+
+    def _memories(self) -> "MemoryStore | None":
+        if self.memory_store is None:
+            return None
+        try:
+            store = self.memory_store()
+        except Exception as err:  # 记忆库打不开：编程照常，只是不回想、不记经历
+            log.warning("记忆库打不开：%s", err)
+            return None
+        if not self._notes_synced:
+            self._notes_synced = True
+            try:
+                for key, notes in self.memory.all_projects():
+                    store.sync_project(key, [(n.id, n.text) for n in notes])
+            except Exception as err:
+                log.warning("项目记忆放进记忆库失败：%s", err)
+        return store
+
+    def _recall(self, root: Path) -> str:
+        """会话开头的「回想」：关于你的几条 + 这个项目最近几次做了什么（定下来就不改）"""
+        try:
+            return coding_context(self._memories(), project_key(root), datetime.now().astimezone())
+        except Exception as err:
+            log.warning("回想失败：%s", err)
+            return ""
+
+    def _remember_turn(self, session: Session) -> None:
+        """一轮做完（做完、出错、打断都算），记一条经历：让她做什么、改了哪些文件、最后怎么说的"""
+        if session.kind != "project" or not session.events or session.events[-1].get("type") != "turn_end":
+            return
+        key = (session.id, len(session.events))
+        if key in self._recorded:
+            return
+        self._recorded.add(key)
+        try:
+            text = task_episode(session.events)
+            store = self._memories() if text else None
+            if store is not None:
+                store.add_episode(project_key(session.cwd), text, {"source": "task", "session": session.id})
+        except Exception as err:
+            log.warning("记经历失败：%s", err)
+
+    def _sync_project_notes(self, key: str, notes: list) -> None:
+        store = self._memories()
+        if store is not None:
+            store.sync_project(key, [(n.id, n.text) for n in notes])
 
     def _publish(self, sid: str, event: Event) -> None:
         for q in self._listeners.get(sid, set()):
@@ -643,12 +709,17 @@ class Runtime:
         await self.mcp.stop_all()
 
 
+PLAN_DENY_HINT = ("这一轮只出方案、不动手：不要换别的办法去改，把要改的地方写进计划，用 propose_plan 交上来，"
+                  "用户批准以后才会一阶段一阶段去做。")
+REVIEW_DENY_HINT = "这一轮只是审查改动、不动手：把发现的问题和建议写下来就好。"
+
 _STOP_WHY = {
     "interrupted": "你打断了",
     "budget": "花到上限了",
     "error": "出错了",
     "rejected": "你没同意她要做的操作",
     "timeout": "等你确认等超时了",
+    "denied": "她要做的事连着被权限挡下（比如只读模式下要改文件）",
 }
 
 

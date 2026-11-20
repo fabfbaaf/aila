@@ -32,6 +32,7 @@
 - 解压时挡掉 ../、绝对路径、链接，限制文件数和大小
 """
 
+import hashlib
 import json
 import re
 import secrets
@@ -306,6 +307,84 @@ def unpack(archive: Path, dest: Path) -> None:
             inner.rmdir()
 
 
+def _slug(label: str) -> str:
+    """文件夹名 → 扩展 id：英文的照着转小写；中文这类转不出来的用名字算一个短号（同一个包再导入是同一个 id）"""
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:24].strip("-")
+    if ID.fullmatch(slug):
+        return slug
+    return "skill-" + hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
+
+
+def _skill_name(folder: Path, fallback: str) -> str:
+    try:
+        meta, _ = _front(folder.joinpath("SKILL.md").read_text(encoding="utf-8-sig").replace("\r\n", "\n"))
+    except (OSError, UnicodeDecodeError):
+        meta = {}
+    for name in (meta.get("name", ""), fallback):
+        name = re.sub(r"[^\w一-鿿-]+", "-", name).strip("-")[:40]
+        if SKILL_NAME.fullmatch(name):
+            return name
+    return "skill"
+
+
+def wrap_skills(dest: Path, label: str) -> bool:
+    """没有说明书、只有 SKILL.md 的文件夹（别处常见的技能包写法）：自动包成一个只带本事的扩展。
+
+    认三种：SKILL.md 就在最外面；外面多包了一层文件夹；一个文件夹里放了好几项（每个子文件夹一个 SKILL.md）。
+    别的文件原样跟着本事走，本事外面的文件丢掉。包好了返回 True，认不出来返回 False（照常报「没有说明书」）
+    """
+    if (dest / MANIFEST).exists():
+        return False
+    root = dest
+    subs = list(dest.iterdir())
+    if not (dest / "SKILL.md").is_file() and len(subs) == 1 and subs[0].is_dir():
+        root, label = subs[0], subs[0].name
+    if (root / "SKILL.md").is_file():
+        found = [(root, label)]
+    else:
+        found = [(p, p.name) for p in sorted(root.iterdir()) if p.is_dir() and (p / "SKILL.md").is_file()][:MAX_SKILLS]
+    if not found:
+        return False
+
+    # 先读好名字和简介，再挪文件
+    names: list[str] = []
+    for folder, fallback in found:
+        name = base = _skill_name(folder, fallback)
+        n = 2
+        while name in names:
+            name = f"{base[:37]}-{n}"
+            n += 1
+        names.append(name)
+    first = scan_desc(found[0][0])
+
+    raw = dest.with_name(dest.name + "-raw")
+    dest.rename(raw)
+    dest.mkdir()
+    skills = dest / "skills"
+    skills.mkdir()
+    for (folder, _), name in zip(found, names):
+        (raw / folder.relative_to(dest)).rename(skills / name)
+    shutil.rmtree(raw, ignore_errors=True)
+    manifest = {
+        "id": _slug(label),
+        "name": label[:40] or "技能包",
+        "version": "1.0.0",
+        "description": (first or "从 SKILL.md 导入的技能包")[:300],
+    }
+    (dest / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
+def scan_desc(folder: Path) -> str:
+    """一项本事的一句话简介：开头的 description，没有就取第一行"""
+    try:
+        text = folder.joinpath("SKILL.md").read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    meta, body = _front(text)
+    return (meta.get("description") or next((ln.strip().lstrip("#").strip() for ln in body.splitlines() if ln.strip()), ""))[:200]
+
+
 def copy_folder(src: Path, dest: Path) -> None:
     count = total = 0
     for path in src.rglob("*"):
@@ -466,6 +545,7 @@ class ExtensionStore:
                 unpack(source, dest)
             else:
                 raise ExtensionError("扩展包要是一个文件夹或者 .zip。")
+            wrap_skills(dest, source.stem if source.is_file() else source.name)
             m = read_manifest(dest)
             installed = next((e for e in self.installed() if e.id == m.id), None)
             return token, plan(dest, installed)

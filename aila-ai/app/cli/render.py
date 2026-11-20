@@ -28,6 +28,7 @@ FENCE = re.compile(r"^\s*(```|~~~)", re.MULTILINE)
 REASONS = {
     "done": ("✓", "green", "做完了"),
     "max_steps": ("■", "yellow", "步数到上限了：说「继续」可以接着做"),
+    "denied": ("■", "yellow", "她要做的事连着被权限挡下，先停下了：换个权限模式，或者说清楚接下来怎么做"),
     "budget": ("■", "yellow", "花到上限了：先调高上限，再说「继续」"),
     "rejected": ("■", "yellow", "停下来了，等你说接下来怎么做"),
     "timeout": ("■", "yellow", "一直没等到你的回答，先停下了"),

@@ -5,7 +5,6 @@ import { MODE_HINTS, MODE_LABELS, type AgentMode } from '../../../../shared/agen
 import type { AgentRuleGroup } from '../../../../shared/settings'
 import { loadAgentRules, removeAgentRule } from '../agentRules'
 import { loadComputerContext, loadComputerSettings, saveComputerInventory } from '../computer'
-import McpCard from './McpCard.vue'
 
 const modes: AgentMode[] = ['read_only', 'ask', 'auto']
 const groups = ref<AgentRuleGroup[]>([])
@@ -194,7 +193,7 @@ onActivated(loadComputer)
       </section>
     </div>
 
-    <McpCard />
+    <p class="hint moved">外部工具（MCP）的加、删、开关移到了设置里的「技能和扩展」，和扩展包、技能包放在一起。</p>
   </section>
 </template>
 

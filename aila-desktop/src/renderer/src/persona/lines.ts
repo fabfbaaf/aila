@@ -58,7 +58,8 @@ export const lines = {
   agentStopped: {
     rejected: '……好，我先停下。你说怎么做，我再接着来。',
     timeout: '……你好像在忙，我先停下了。',
-    max_steps: '步骤有点多……我先停在这里。说「继续」我就接着做。'
+    max_steps: '步骤有点多……我先停在这里。说「继续」我就接着做。',
+    denied: '……这样我改不了东西。换个权限模式，或者告诉我接下来怎么做吧。'
   } as Record<string, string>,
   agentError: '……出错了，没做完。原因写在任务页里。',
   agentBudget: '……花到上限了，我先停在这里。调高或取消上限后，说「继续」我再接着做。',

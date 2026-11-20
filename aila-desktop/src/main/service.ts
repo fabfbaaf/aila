@@ -30,7 +30,13 @@ export interface ServiceDependencies {
   port: string
 }
 
-const MISSING = '找不到 AI 服务或 Python。在 aila-ai 里运行 py -3.12 -m venv .venv，再用 .venv\\Scripts\\pip install -r requirements.txt 安装依赖。也可以设置 AILA_AI_PYTHON 和 AILA_AI_DIR。'
+/**
+ * 起来以后连续几次（每次隔 10 秒）没回应才当它挂了重启。以前是 3 次：刚启动那几分钟她要下载向量模型、
+ * 建代码索引、加载语音，一忙起来健康检查就慢，被当成挂了重启，重启后又从头忙，反复重启。
+ * 进程真退出了不靠这个（exit 事件马上就知道），所以放宽到 6 次（约一分钟）只影响「卡住」的判断。
+ */
+const MAX_MISSES = 6
+const MISSING ='找不到 AI 服务或 Python。在 aila-ai 里运行 py -3.12 -m venv .venv，再用 .venv\\Scripts\\pip install -r requirements.txt 安装依赖。也可以设置 AILA_AI_PYTHON 和 AILA_AI_DIR。'
 
 /** 日志只记输出；常见密钥和 URL 里的认证信息在进入缓冲前就去掉。 */
 export function cleanServiceLog(text: string): string {
@@ -187,8 +193,8 @@ export class ServiceKeeper {
         await this.crash(generation, 'AI 服务启动超过 60 秒还没准备好。')
         return
       }
-    } else if (++this.missed >= 3) {
-      await this.crash(generation, 'AI 服务连续三次没有响应，正在重新启动。')
+    } else if (++this.missed >= MAX_MISSES) {
+      await this.crash(generation, 'AI 服务快一分钟没有响应，正在重新启动。')
       return
     }
     this.wait(this.state.phase === 'starting' ? 500 : 10_000, () => { void this.poll(generation, process) })

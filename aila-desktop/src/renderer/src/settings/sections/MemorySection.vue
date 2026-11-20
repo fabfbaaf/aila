@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { MemoryKind, StoredMemory } from '../../../../shared/cloud'
+import { computed, onActivated, onMounted, ref } from 'vue'
+import type { MemoryEpisode, MemoryKind, StoredMemory } from '../../../../shared/cloud'
 import { bridge } from '../../platform/bridge'
 import { store } from '../store'
 
@@ -26,6 +26,40 @@ function until(m: StoredMemory): string {
 
 function forget(id: string): void {
   api.memoryDelete(id)
+}
+
+// 经历：较早聊天的摘要、编程任务每一轮做了什么（只在这台电脑的 AI 服务里）
+const episodes = ref<MemoryEpisode[]>([])
+const confirmingEpisodes = ref(false)
+
+async function loadEpisodes(): Promise<void> {
+  episodes.value = await api.memoryEpisodes()
+}
+onMounted(loadEpisodes)
+onActivated(loadEpisodes)
+
+function episodeTag(e: MemoryEpisode): string {
+  if (e.source !== 'task') return '聊天'
+  const name = e.project.split(/[\\/]/).filter(Boolean).pop()
+  return name ? `任务 · ${name}` : '任务'
+}
+
+function episodeDate(e: MemoryEpisode): string {
+  const d = new Date(e.at)
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日`
+}
+
+async function forgetEpisode(id: string): Promise<void> {
+  if (await api.memoryForgetEpisode(id)) episodes.value = episodes.value.filter((e) => e.id !== id)
+}
+
+async function forgetAllEpisodes(): Promise<void> {
+  if (!confirmingEpisodes.value) {
+    confirmingEpisodes.value = true
+    return
+  }
+  confirmingEpisodes.value = false
+  if (await api.memoryForgetEpisode()) episodes.value = []
 }
 
 async function forgetAll(): Promise<void> {
@@ -66,6 +100,29 @@ async function forgetAll(): Promise<void> {
     </button>
     <button v-if="confirming" class="link" @click="confirming = false">算了</button>
   </div>
+
+  <h3 class="sub">她记下的经历</h3>
+  <p class="lead">
+    聊得久了，较早的那段她会写成一小段摘要；编程任务每做完一轮，记一句做了什么、改了哪些文件。
+    聊天和开新任务时挑相关的用上。只存在这台电脑上，不同步。
+  </p>
+  <div v-if="!episodes.length" class="card empty">还没有。聊得久了、做过编程任务以后这里会有。</div>
+  <div v-else class="card">
+    <table class="list">
+      <tr v-for="e in episodes" :key="e.id">
+        <td class="meta">{{ episodeTag(e) }}</td>
+        <td>{{ e.content }}</td>
+        <td class="meta">{{ episodeDate(e) }}</td>
+        <td class="del"><button class="x" title="删掉这条" @click="forgetEpisode(e.id)">×</button></td>
+      </tr>
+    </table>
+  </div>
+  <div v-if="episodes.length" class="actions">
+    <button class="btn" :class="{ danger: confirmingEpisodes }" @click="forgetAllEpisodes">
+      {{ confirmingEpisodes ? `真的把 ${episodes.length} 条经历都删掉吗？再点一次` : '经历全部删掉' }}
+    </button>
+    <button v-if="confirmingEpisodes" class="link" @click="confirmingEpisodes = false">算了</button>
+  </div>
 </template>
 
 <style scoped>
@@ -83,5 +140,9 @@ async function forgetAll(): Promise<void> {
 
 .del {
   width: 1%;
+}
+
+.sub {
+  margin-top: 28px;
 }
 </style>

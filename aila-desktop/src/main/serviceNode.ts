@@ -92,7 +92,8 @@ export async function checkServiceHealth(baseUrl: string, signal: AbortSignal): 
   const url = new URL(baseUrl.replace(/\/$/, '') + '/health')
   const result = await new Promise<Health | null>((resolve) => {
     const send = url.protocol === 'https:' ? secureRequest : request
-    const req = send(url, { signal, timeout: 1500, agent: false }, (res) => {
+    // 4 秒：她在忙（加载模型、建索引）时健康检查会慢一点，不算没回应
+    const req = send(url, { signal, timeout: 4000, agent: false }, (res) => {
       let body = ''
       res.setEncoding('utf8')
       res.on('data', (part: string) => {

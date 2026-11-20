@@ -78,6 +78,17 @@ export type MemoryOp =
 
 export const DEFAULT_SERVER_URL = 'http://127.0.0.1:8790'
 
+/** 她记下的经历（本机 AI 服务的记忆库里，不同步）：滑出对话窗口的那段的摘要、编程任务每一轮做了什么 */
+export interface MemoryEpisode {
+  id: string
+  content: string
+  /** chat：对话摘要；task：编程任务 */
+  source: string
+  /** 编程任务在哪个项目（对话摘要是空的） */
+  project: string
+  at: string
+}
+
 // ---------- 资料库和技能包（本地 AI 服务提供） ----------
 
 export interface KnowledgeDoc {
