@@ -6,7 +6,6 @@ import { SETTINGS_TABS, type ShellRoute } from '../../../shared/shell'
 import { bridge } from '../platform/bridge'
 import ModelSection from '../settings/sections/ModelSection.vue'
 import VoiceSection from '../settings/sections/VoiceSection.vue'
-import SkillsSection from '../settings/sections/SkillsSection.vue'
 import AccountSection from '../settings/sections/AccountSection.vue'
 import AppearanceSection from '../settings/sections/AppearanceSection.vue'
 import StatusSection from '../settings/sections/StatusSection.vue'
@@ -21,7 +20,8 @@ const VIEWS: Partial<Record<SettingsSection, Component>> = {
   model: ModelSection,
   voice: VoiceSection,
   desktop: DesktopSection,
-  skills: SkillsSection,
+  // 技能包并进了「技能和扩展」（routeForSection 已经把旧地址转过去，这里再兜一层）
+  skills: ExtensionsSection,
   account: AccountSection,
   appearance: AppearanceSection,
   status: StatusSection,

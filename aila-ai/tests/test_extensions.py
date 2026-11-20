@@ -167,6 +167,40 @@ def test_skill_files_stay_inside_their_folder(tmp_path: Path) -> None:
     assert skills_context([]) == ""
 
 
+def test_bare_skill_folders_are_wrapped(tmp_path: Path) -> None:
+    """没有说明书、只有 SKILL.md 的文件夹也能导入：自动包成一个只带本事的扩展"""
+    store = ExtensionStore(tmp_path / "exts")
+
+    # 1. SKILL.md 就在最外面；名字取开头的 name，别的文件跟着走
+    one = tmp_path / "Code Review"
+    one.mkdir()
+    (one / "SKILL.md").write_text("---\nname: review\ndescription: 怎么审代码\n---\n先看测试。\n", encoding="utf-8")
+    (one / "checklist.md").write_text("- 有没有测试", encoding="utf-8")
+    token, plan = store.stage(one)
+    assert plan["id"] == "code-review" and plan["skills"] == [{"name": "review", "description": "怎么审代码"}]
+    ext = store.install(token)
+    skill = store.skills()[0]
+    assert ext.manifest.version == "1.0.0" and read_skill_file(skill, "checklist.md") == "- 有没有测试"
+    assert not (one / "aila-extension.json").exists()  # 原来的文件夹不动
+
+    # 2. 一个文件夹里好几项，zip 外面还多包了一层；中文名的 id 用短号，再导入还是同一个
+    many = tmp_path / "技能合集.zip"
+    with zipfile.ZipFile(many, "w") as z:
+        z.writestr("技能合集/写周报/SKILL.md", "# 周报的写法\n三段。")
+        z.writestr("技能合集/翻译/SKILL.md", "---\ndescription: 中译英\n---\n直译。")
+        z.writestr("技能合集/README.md", "说明")
+    token, plan = store.stage(many)
+    assert plan["id"].startswith("skill-") and sorted(s["name"] for s in plan["skills"]) == ["写周报", "翻译"]
+    assert store.stage(many)[1]["id"] == plan["id"]
+
+    # 3. 什么都不是：照常报没有说明书
+    empty = tmp_path / "空的"
+    empty.mkdir()
+    (empty / "readme.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ExtensionError, match="没有 aila-extension.json"):
+        store.stage(empty)
+
+
 def test_examples_in_repo_are_valid(tmp_path: Path) -> None:
     store = ExtensionStore(tmp_path / "exts")
     git_plan = store.stage(EXAMPLES / "git-helper")[1]

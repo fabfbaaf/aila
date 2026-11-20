@@ -8,6 +8,7 @@ import type {
   KnowledgeDoc,
   RemoteChanges,
   SkillInfo,
+  MemoryEpisode,
   StoredMemory,
   StoredMessage
 } from '../shared/cloud'
@@ -111,6 +112,9 @@ const api = {
   memoryList: (): Promise<StoredMemory[]> => ipcRenderer.invoke('memory:list'),
   memoryDelete: (id: string): void => ipcRenderer.send('memory:delete', id),
   memoryForgetAll: (): Promise<number> => ipcRenderer.invoke('memory:forget-all'),
+  memoryEpisodes: (): Promise<MemoryEpisode[]> => ipcRenderer.invoke('memory:episodes'),
+  /** id 不给就是全部删 */
+  memoryForgetEpisode: (id?: string): Promise<boolean> => ipcRenderer.invoke('memory:forget-episode', id),
   onMemoryChanged: (cb: (list: StoredMemory[]) => void): Unsubscribe => listen('memory:changed', cb),
 
   // 资料库（文件只存在本机的 AI 服务里）
@@ -189,6 +193,9 @@ const api = {
   // 扩展包（只有主窗口能用）：pick 弹窗选包并检查，返回清单（取消了 data 是 null）
   extList: (): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:list'),
   extPick: (kind: 'zip' | 'folder'): Promise<AiResult<{ token: string; plan: ExtensionPlan } | null>> => ipcRenderer.invoke('ext:pick', kind),
+  /** 拖进来的 zip 或文件夹：路径只能从真的拖放文件里取（页面自己造的 File 没有路径），主进程再核对一遍 */
+  extDropFile: (file: File): Promise<AiResult<{ token: string; plan: ExtensionPlan } | null>> =>
+    ipcRenderer.invoke('ext:dropped', webUtils.getPathForFile(file)),
   extInstall: (token: string): Promise<AiResult<ExtensionList & { installed: string }>> => ipcRenderer.invoke('ext:install', token),
   extDiscard: (token: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('ext:discard', token),
   extUpdate: (id: string, update: ExtensionUpdate): Promise<AiResult<ExtensionList>> => ipcRenderer.invoke('ext:update', id, update),

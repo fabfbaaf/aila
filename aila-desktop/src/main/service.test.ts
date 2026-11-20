@@ -112,18 +112,18 @@ describe('AI 服务托管状态机', () => {
     await f.keeper.shutdown()
   })
 
-  it('ready 每十秒检查，连续三次失败才重启，恢复会重置连续次数', async () => {
+  it('ready 每十秒检查，连续六次（约一分钟）失败才重启，恢复会重置连续次数', async () => {
     const f = fixture()
     await f.keeper.start()
     f.health('ready')
     await advance(500)
     f.health('offline')
-    await advance(20_000)
-    expect(f.keeper.status().phase).toBe('ready')
+    await advance(50_000)
+    expect(f.keeper.status().phase).toBe('ready') // 五次没回应：刚启动时忙，还不算挂
     f.health('ready')
     await advance(10_000)
     f.health('offline')
-    await advance(20_000)
+    await advance(50_000)
     expect(f.keeper.status().phase).toBe('ready')
     await advance(10_000)
     expect(f.keeper.status().phase).toBe('crashed')

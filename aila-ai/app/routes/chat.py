@@ -15,10 +15,13 @@ from .. import deps
 from ..agent import run_agent
 from ..confirm import Confirmations
 from ..extension_extras import motions_prompt
-from ..deps import get_confirmations, get_embedder, get_model, get_registry, status
+from ..deps import get_confirmations, get_embedder, get_memory_store, get_model, get_registry, status
 from ..llm import ChatModel, Message, classify_error
-from ..memory import Memory, Turn, describe, extract, recall
+from ..memory import Memory, Turn, extract
+from ..memory.episodes import Line, chat_context
+from ..memory.store import EPISODE, MemoryStore
 from ..persona import system_prompt
+from ..sse import with_heartbeat
 from ..tags import Event
 from ..tools import SkillRegistry
 
@@ -56,6 +59,14 @@ def _aware(t: datetime | None) -> datetime | None:
     return t.astimezone() if t is not None else None
 
 
+def window_start(n: int, max_history: int) -> int:
+    """对话窗口从第几句开始：太长时一次丢一批（max_history 的四分之一），前面的滑出窗口"""
+    if n <= max_history:
+        return 0
+    chunk = max(2, max_history // 4)
+    return -(-(n - max_history) // chunk) * chunk
+
+
 def build_messages(history: list[ChatMessage], max_history: int, context: str = "", system: str = "") -> list[Message]:
     """固定的系统提示词 + 最近的对话；日期和记忆放在最后一句话前面的 <背景> 里。
 
@@ -65,11 +76,7 @@ def build_messages(history: list[ChatMessage], max_history: int, context: str = 
     - 历史太长时一次丢一批（不是每轮丢最早的一条）：开头隔好几轮才变一次
     连续同一角色的消息合并，有些模型不接受连续两条用户消息。
     """
-    chunk = max(2, max_history // 4)
-    start = 0
-    if len(history) > max_history:
-        start = -(-(len(history) - max_history) // chunk) * chunk
-    recent = history[start:]
+    recent = history[window_start(len(history), max_history):]
     while recent and recent[0].role != "user":
         recent = recent[1:]  # 截断后要从用户消息开始
 
@@ -84,14 +91,16 @@ def build_messages(history: list[ChatMessage], max_history: int, context: str = 
     return [{"role": "system", "content": system or system_prompt()}, *merged]
 
 
-async def memory_context(req: ChatRequest, embedder: Any) -> str:
-    """今天的日期 + 和最近两句话相关的记忆"""
+async def memory_context(req: ChatRequest, embedder: Any, store: MemoryStore | None = None) -> str:
+    """今天的日期 + 和最近几句话相关的记忆 + 更早对话的摘要和相关的经历（记忆库里的）"""
     now = datetime.now().astimezone()
-    if not req.memories:
-        return describe([], now)
     query = "\n".join(m.content for m in req.messages if m.role == "user")[-300:]
-    picked = await asyncio.to_thread(recall, [m.to_memory() for m in req.memories], query, embedder, now)
-    return describe(picked, now)
+    memories = [m.to_memory() for m in req.memories]
+    try:
+        return await asyncio.to_thread(chat_context, store, memories, query, embedder, now)
+    except Exception as err:  # 记忆库坏了也照常聊天：退回到不查库的挑法
+        log.warning("记忆库读不了：%s", err)
+        return await asyncio.to_thread(chat_context, None, memories, query, embedder, now)
 
 
 def sse(event: Event) -> str:
@@ -122,14 +131,22 @@ async def chat(
     registry: SkillRegistry = Depends(get_registry),
     embedder: Any = Depends(get_embedder),
     confirms: Confirmations = Depends(get_confirmations),
+    store: MemoryStore = Depends(get_memory_store),
 ) -> StreamingResponse:
     if req.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="最后一条必须是用户消息")
     s = deps.settings
     # 扩展包带的动作：系统提示词里列出来（装卸扩展时才变，平时前缀不变），标签解析也认
     motions = deps.get_extensions().motions()
-    messages = build_messages(req.messages, s.max_history, await memory_context(req, embedder),
+    messages = build_messages(req.messages, s.max_history, await memory_context(req, embedder, store),
                               system_prompt(s.persona_style, s.persona_call, s.persona_catchphrase) + motions_prompt(motions))
+    # 滑出对话窗口的那段：后台写成摘要存进记忆库（以后每次带上最新的一份）
+    start = window_start(len(req.messages), s.max_history)
+    if start:
+        try:
+            deps.digester.schedule(model, store, [Line(m.role, m.content) for m in req.messages[:start]])
+        except Exception as err:
+            log.warning("安排对话摘要失败：%s", err)
     # 这次能用哪些工具：用户开着的技能包里的（资料库空着时不给）
     toolbox = await asyncio.to_thread(registry.toolbox, req.skills)
 
@@ -144,7 +161,8 @@ async def chat(
             yield sse({"type": "error", "code": code, "message": message})
 
     # 客户端断开时 Starlette 会取消这个生成器，大模型请求和工具调用也随之停止，等着的确认也作废
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    # 等你确认某个操作时可能好一会儿没事件：心跳让连接不被当成断了
+    return StreamingResponse(with_heartbeat(events()), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 class ConfirmAnswer(BaseModel):
@@ -177,7 +195,41 @@ async def memory_extract(
     memories = [m.to_memory() for m in req.memories]
     try:
         ops = await extract(model, turns, memories, embedder, datetime.now().astimezone())
-    except Exception as err:  # 整理记忆是后台的事，失败了就这轮不记，不影响聊天
+    except Exception as err:  # 大模型没连上、超时：告诉桌面端这次没整理成，它过一会儿再试（以前是当成「没什么要记的」）
         log.warning("整理记忆失败：%s", err)
-        ops = []
+        code, message = classify_error(err)
+        raise HTTPException(status_code=502, detail={"code": code, "message": message}) from err
     return {"ops": ops}
+
+
+class FactsIn(BaseModel):
+    memories: list[MemoryIn] = Field(default_factory=list, max_length=2000)
+
+
+@router.put("/memory/facts")
+async def memory_facts(req: FactsIn, store: MemoryStore = Depends(get_memory_store)) -> dict[str, int]:
+    """桌面端的全部记忆（正本在桌面端）对齐到记忆库：记忆变了、AI 服务刚启动时推一次。删掉的在这里也删掉"""
+    changed = await asyncio.to_thread(store.sync_facts, [m.to_memory() for m in req.memories])
+    return {"changed": changed, "total": len(req.memories)}
+
+
+@router.get("/memory/episodes")
+def memory_episodes(limit: int = 100, store: MemoryStore = Depends(get_memory_store)) -> list[dict[str, Any]]:
+    """她记下的经历（对话摘要、编程任务做了什么），新的在前：记忆页上给你看、给你删"""
+    out = []
+    for e in store.recent(EPISODE, None, max(1, min(limit, 300))):
+        out.append({"id": e.id, "content": e.content, "source": e.meta.get("source", ""), "project": e.scope,
+                    "at": datetime.fromtimestamp(e.updated_at).astimezone().isoformat()})
+    return out
+
+
+@router.delete("/memory/episodes/{entry_id}")
+def memory_forget_episode(entry_id: str, store: MemoryStore = Depends(get_memory_store)) -> dict[str, bool]:
+    if not store.forget_episode(entry_id):
+        raise HTTPException(status_code=404, detail="没有这条")
+    return {"ok": True}
+
+
+@router.delete("/memory/episodes")
+def memory_forget_episodes(store: MemoryStore = Depends(get_memory_store)) -> dict[str, int]:
+    return {"deleted": store.forget_episodes()}

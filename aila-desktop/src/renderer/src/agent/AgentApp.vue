@@ -431,6 +431,8 @@ async function planAction(action: 'approve' | 'continue' | 'reject', pauseEach =
   planBusy.value = true
   error.value = ''
   try {
+    // 只读模式下按计划做什么都改不了：批准时先换成「先问再改」（按钮上写明了）
+    if (action === 'approve' && t.value.mode === 'read_only') await setMode('ask')
     if (action !== 'reject') streaming.add(sid)
     await source.plan(sid, action, pauseEach)
     void refreshList()
@@ -830,7 +832,7 @@ onBeforeUnmount(() => {
               @blur="saveRename(s)"
             />
             <template v-else>
-              <div class="title"><i v-if="s.running" class="live" title="她在做"></i>{{ s.title }}</div>
+              <div class="title"><i v-if="s.running" class="live-dot" title="她在做"></i>{{ s.title }}</div>
               <div class="meta">
                 <span>{{ sessionLabel(s) }}</span>
                 <span v-if="s.branch" class="meta-branch" :title="`在分支 ${s.branch} 上做`"><Icon name="branch" :size="12" /></span>
@@ -912,11 +914,12 @@ onBeforeUnmount(() => {
             </div>
             <div v-else-if="item.kind === 'user'" class="user">{{ item.text }}</div>
             <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
-            <div v-else-if="item.kind === 'text'" class="md" :class="{ live: item.live }" v-html="renderMarkdown(item.text)"></div>
+            <div v-else-if="item.kind === 'text'" class="md" :class="{ streaming: item.live }" v-html="renderMarkdown(item.text)"></div>
             <PlanCard
               v-else-if="item.kind === 'tool' && item.key === latestPlanKey && plan"
               :plan="plan"
               :busy="planBusy || running"
+              :read-only="t.mode === 'read_only'"
               @approve="(pause: boolean) => planAction('approve', pause)"
               @reject="planAction('reject')"
             />
@@ -1338,7 +1341,15 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 16px 14px 10px 18px;
+}
+
+/* 窗口窄（侧栏 216px）时标题和按钮也不折行：以前「任务」被挤成两行、按钮文字竖着排 */
+.side-head h2,
+.head-actions > * {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .side-head h2 {
@@ -1596,7 +1607,8 @@ code {
   outline: none;
 }
 
-.live {
+/* 会话列表里「她在做」的小圆点。名字别叫 live：流式输出的文字以前也用了 live，被这条规则压成 7px 宽，一个字一行 */
+.live-dot {
   display: inline-block;
   width: 7px;
   height: 7px;

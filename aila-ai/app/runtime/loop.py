@@ -46,6 +46,9 @@ NOT_DONE = {
     "timeout": "用户一直没有回答，这个操作没有执行。先停下来，等用户回来。",
 }
 SKIPPED = "前面的操作没有被同意，这个也没有执行。"
+# 一轮里连着几次被权限挡下（deny，不是你点了「不要」）就停下：以前只读模式下她会换着法子一直试，
+# 看起来像一直在想；停下来以后任务页写清原因，你换个模式或者说清楚再接着做
+MAX_DENIED = 3
 INTERRUPTED = "被用户打断了，没有执行。"
 # 一步里连着的可以一起跑的调用（子 Agent），最多同时跑几个
 MAX_PARALLEL = 4
@@ -96,6 +99,8 @@ class Agent:
         self.confirms = confirms
         self.config = config or AgentConfig()
         self.hooks = hooks or Hooks()
+        # 被权限挡下时接在原因后面的一句提示（runner 在出方案、/review 那一轮设，结束后清掉）
+        self.deny_hint = ""
         self.system = system
         # 这一步说到一半的话（被打断时记下来）
         self._partial = ""
@@ -107,6 +112,7 @@ class Agent:
         yield self.session.append({"type": "user", "text": text, **(extra or {})})
         await self.hooks.emit("turn_start", session=self.session, text=text)
         reason, error = "done", ""
+        denied = 0  # 连着被权限挡下几次（中间有一次做成了就清零）
         try:
             for step in range(1, self.config.max_steps + 1):
                 if self._budget_exhausted():
@@ -134,15 +140,21 @@ class Agent:
                     if len(batch) > 1:
                         async for e in self._run_parallel(batch):
                             yield e
+                            denied = self._count_denied(e, denied)
                         i += len(batch)
                         continue
                     async for e in self._run_tool(calls[i]):
                         yield e
+                        denied = self._count_denied(e, denied)
                         if e.get("type") == "confirm_end" and e["result"] != "approved":
                             stop = e["result"]
                     i += 1
                 if stop:
                     reason = stop
+                    break
+                if denied >= MAX_DENIED:
+                    # 权限一直挡着（比如只读模式下想改文件）：再试下去只会原地打转，停下来说明白
+                    reason = "denied"
                     break
             else:
                 reason = "max_steps"
@@ -214,7 +226,9 @@ class Agent:
         decision = self.policy.decide(kind, command)
 
         if decision.verdict == "deny":
-            yield self._tool_event(call, Outcome(decision.reason, ok=False), status="denied")
+            # deny_hint：这一轮为什么只读、该怎么做（出方案那一轮：别换着法子试，把要改的写进计划交上来）
+            reason = decision.reason + (f"\n{self.deny_hint}" if self.deny_hint else "")
+            yield self._tool_event(call, Outcome(reason, ok=False), status="denied")
             return
         if decision.verdict == "ask":
             if self.confirms is None:
@@ -318,6 +332,15 @@ class Agent:
             }))
         await self.hooks.emit("post_tool", session=self.session, call=call, args=args, outcome=outcome)
         return events
+
+    @staticmethod
+    def _count_denied(event: Event, denied: int) -> int:
+        """工具结果是被权限挡下的就加一，做成了就清零，别的事件不变"""
+        if event.get("type") != "tool":
+            return denied
+        if event.get("status") == "denied":
+            return denied + 1
+        return 0 if event.get("status") == "ok" else denied
 
     def _tool_event(self, call: ToolCall, outcome: Outcome, status: str | None = None) -> Event:
         return self.session.append({

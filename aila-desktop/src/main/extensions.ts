@@ -3,6 +3,8 @@
  * - 扩展自带的页面：和她的作品一样，开在独立的沙盒窗口里，只放行这一个页面的地址（不能联网、碰不到本机服务的别的接口）
  * - 换成扩展带的形象：文件路径从 AI 服务的扩展列表里取（渲染层只说「哪个扩展的哪个形象」），还要确认确实在扩展文件夹的 avatars 里
  */
+import { statSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { BrowserWindow, session } from 'electron'
 import type { AiResult } from '../shared/settings'
 
@@ -36,4 +38,20 @@ export async function openExtensionPage(aiUrl: string, extId: string, name: stri
     return { ok: false, error: `打不开这个页面：${err instanceof Error ? err.message : String(err)}` }
   }
   return { ok: true, data: { ok: true } }
+}
+
+/** 拖进来的东西：绝对路径、存在、是文件夹或者 .zip（别的文件、空路径都不收） */
+export function droppedPathOk(path: unknown, stat: (p: string) => { isDirectory(): boolean; isFile(): boolean } | null = safeStat): path is string {
+  if (typeof path !== 'string' || !path || path.length > 1000 || !isAbsolute(path)) return false
+  const st = stat(path)
+  if (!st) return false
+  return st.isDirectory() || (st.isFile() && path.toLowerCase().endsWith('.zip'))
+}
+
+function safeStat(path: string): { isDirectory(): boolean; isFile(): boolean } | null {
+  try {
+    return statSync(path)
+  } catch {
+    return null
+  }
 }

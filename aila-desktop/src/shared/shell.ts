@@ -37,8 +37,8 @@ export const SETTINGS_TABS: { id: SettingsSection; name: string }[] = [
   { id: 'model', name: '对话' },
   { id: 'voice', name: '语音' },
   { id: 'desktop', name: '桌面' },
-  { id: 'skills', name: '技能包' },
-  { id: 'extensions', name: '扩展' },
+  // 技能包、扩展、外部工具（MCP）合在一页：以前分在三个地方，去「技能包」里找不到导入
+  { id: 'extensions', name: '技能和扩展' },
   { id: 'account', name: '账号与同步' },
   { id: 'appearance', name: '形象' },
   { id: 'status', name: '运行状态' },
@@ -55,6 +55,7 @@ export function routeForSection(section: SettingsSection | undefined): ShellRout
   if (section === 'knowledge') return { page: 'knowledge' }
   if (section === 'memory') return { page: 'memory' }
   if (section === 'code') return { page: 'projects', tab: 'list' }
+  if (section === 'skills') return { page: 'settings', section: 'extensions' } // 技能包并进了「技能和扩展」
   return { page: 'settings', section: section && TAB_IDS.has(section) ? section : 'model' }
 }
 

@@ -9,6 +9,8 @@ import { summarize, type CatalogListing, type ExtensionInfo, type ExtensionPlan,
 import { MCP_STATUS_LABELS } from '../../../../shared/mcp'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
+import McpCard from './McpCard.vue'
+import SkillsSection from './SkillsSection.vue'
 
 const items = ref<ExtensionInfo[]>([])
 const folder = ref('')
@@ -170,22 +172,35 @@ async function fromCatalog(source: string, id: string): Promise<void> {
   }
 }
 
+/** 拖进来的 zip 或文件夹：路径由预加载脚本从真的拖放文件里取（渲染层自己造不出路径） */
+const dropping = ref(false)
+async function onDrop(e: DragEvent): Promise<void> {
+  dropping.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (!file || !bridge) return
+  if (staged.value) await discard()
+  const data = await run('drop', () => bridge!.extDropFile(file))
+  if (data) staged.value = data
+}
+
 onMounted(load)
 onActivated(load)
 </script>
 
 <template>
-  <h2>扩展</h2>
+  <h2>技能和扩展</h2>
   <p class="lead">
-    扩展包能一次给她加上新的命令、做事的本事和外部工具。只装你信得过的：装之前会列出它会加什么、会在电脑上运行什么程序。
+    她会什么都在这一页：导入扩展包（新的命令、做事的本事、外部工具、动作和形象），开关技能包，接外部工具（MCP）。
+    只装你信得过的：装之前会列出它会加什么、会在电脑上运行什么程序。
   </p>
 
   <div v-if="!bridge" class="offline">扩展要在桌面版里管理。</div>
 
   <template v-else>
-    <div class="card">
+    <div class="card drop" :class="{ dropping }" @dragenter.prevent="dropping = true" @dragover.prevent="dropping = true"
+      @dragleave.self="dropping = false" @drop.prevent="onDrop">
       <div class="heading">
-        <h3>导入扩展包</h3>
+        <h3>导入</h3>
         <div class="actions-inline">
           <button class="btn primary" :disabled="Boolean(busy)" @click="pick('zip')">
             {{ busy === 'pick:zip' ? '正在检查…' : '选一个 .zip' }}
@@ -196,9 +211,11 @@ onActivated(load)
         </div>
       </div>
       <p class="hint">
-        扩展包是一个带 <code>aila-extension.json</code> 的文件夹（或者把它压成 zip）。仓库里的
-        <code>examples/extensions</code> 有三个例子；怎么写见 <code>docs/extensions.md</code>。
+        把 zip 或文件夹<b>直接拖到这里</b>也行。扩展包是一个带 <code>aila-extension.json</code> 的文件夹（或者压成 zip）；
+        只有一个 <code>SKILL.md</code> 的文件夹（别人分享的一项本事）也能直接导入，会自动包成一个扩展。
+        仓库里的 <code>examples/extensions</code> 有三个例子；怎么写见 <code>docs/extensions.md</code>。
       </p>
+      <p v-if="dropping" class="drop-hint">松开就开始检查</p>
 
       <div v-if="staged" class="plan" role="region" aria-label="装之前的清单">
         <div class="plan-head">
@@ -406,6 +423,10 @@ onActivated(load)
         </ul>
       </div>
     </div>
+
+    <SkillsSection embedded />
+
+    <McpCard />
   </template>
 </template>
 
@@ -448,6 +469,10 @@ onActivated(load)
 .settings { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--line); }
 .settings input { width: 280px; }
 .where { margin-top: 10px; }
+.drop { transition: border-color 0.15s, background 0.15s; }
+.drop.dropping { border-color: var(--accent); background: var(--accent-soft); }
+.drop-hint { margin: 6px 0 0; color: var(--accent); font-weight: 600; }
+.section-title { margin: 26px 0 8px; }
 .chip .link { margin-left: 4px; font-size: 12px; }
 .sources {
   box-sizing: border-box;

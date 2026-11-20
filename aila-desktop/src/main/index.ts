@@ -24,6 +24,8 @@ import {
   codeProjectAction,
   setCodeIgnore,
   deleteKnowledge,
+  forgetEpisodes,
+  listEpisodes,
   forgetAgentRule,
   getAgentRules,
   getAiSettings,
@@ -52,7 +54,7 @@ import { AgentRelay } from './agent'
 import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
 import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionName, validPageName, validStageToken } from '../shared/extensions'
-import { openExtensionPage } from './extensions'
+import { droppedPathOk, openExtensionPage } from './extensions'
 import { loadModelFile } from './modelFiles'
 import { modelKind, type LoadedModel } from '../shared/model'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
@@ -60,6 +62,8 @@ import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
+import { forAi } from './cloud/keeper'
+import type { StoredMemory } from '../shared/cloud'
 import type { SocketLike } from './cloud/sync'
 import { createServiceKeeper, serviceLocator } from './serviceNode'
 import { ModelDownloader } from './models'
@@ -77,13 +81,41 @@ const CHAT_SHORTCUT = 'Alt+Shift+A'
 const LISTEN_SHORTCUT = 'Alt+Shift+V'
 /** 免打扰：把她藏起来 / 叫回来（H = Hide） */
 const HIDE_SHORTCUT = 'Alt+Shift+H'
+// 开发调试：AILA_USER_DATA=文件夹 时数据放那里（打包后无效）。在真窗口里试东西不碰你自己的记忆、对话和设置，
+// 也不和已经开着的艾拉抢「只开一个」的锁。要在下面任何 getPath('userData') 之前设
+if (process.env['AILA_USER_DATA'] && !app.isPackaged) app.setPath('userData', process.env['AILA_USER_DATA'])
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
 const locateAi = serviceLocator({ packaged: app.isPackaged, appPath: app.getAppPath(), userData: app.getPath('userData') })
+let servicePhase = ''
 const serviceKeeper = createServiceKeeper({
   locate: locateAi,
   url: AI_URL,
-  changed: (state) => broadcast('service:state', state)
+  changed: (state) => {
+    broadcast('service:state', state)
+    const up = state.phase === 'ready' || state.phase === 'external'
+    // AI 服务刚起来：把记忆推过去一次（它重启、换了数据目录也能对上）
+    if (up && servicePhase !== 'ready' && servicePhase !== 'external' && account) pushFacts(account.memories.list())
+    servicePhase = state.phase
+  }
 })
+
+/**
+ * 关于你的记忆推给 AI 服务的记忆库（正本在这边，经云端同步）：记忆变了、服务刚起来时推一次，
+ * 编程任务开头的「回想」用得上；删掉的那边也删。没推成也没关系，每次对话都会带着全部记忆再对齐一遍。
+ * 一个接一个地推，后改的不会被先改的盖掉
+ */
+let factsPush: Promise<unknown> = Promise.resolve()
+function pushFacts(list: StoredMemory[]): void {
+  const body = JSON.stringify({ memories: forAi(list) })
+  factsPush = factsPush.then(() =>
+    fetch(`${AI_URL}/memory/facts`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(30_000)
+    }).catch(() => undefined)
+  )
+}
 // 设置页「语音」里的「下载语音模型」：进度只发给主窗口
 const modelDownloader = new ModelDownloader({
   command: locateAi,
@@ -433,7 +465,10 @@ function createAccount(): Account {
       win?.webContents.send('history:remote', changes)
       mainWin?.webContents.send('history:changed')
     },
-    onMemories: (list) => broadcast('memory:changed', list),
+    onMemories: (list) => {
+      broadcast('memory:changed', list)
+      pushFacts(list)
+    },
     extractMemories: async (req) => {
       const res = await fetch(`${AI_URL}/memory/extract`, {
         method: 'POST',
@@ -585,6 +620,11 @@ function registerIpc(): void {
     account?.deleteMemory(String(id))
     characterEvent({ kind: 'forget-one' })
   })
+  // 经历（对话摘要、编程任务做了什么）：只在本机的 AI 服务里，只给主窗口看、只让主窗口删
+  ipcMain.handle('memory:episodes', (e) => (fromMainWindow(e) ? listEpisodes(AI_URL) : []))
+  ipcMain.handle('memory:forget-episode', (e, id: unknown) =>
+    fromMainWindow(e) ? forgetEpisodes(AI_URL, typeof id === 'string' && id ? id.slice(0, 64) : undefined) : false
+  )
   ipcMain.handle('memory:forget-all', (e) => {
     if (!fromMainWindow(e)) return 0
     const n = account?.forgetEverything() ?? 0
@@ -753,6 +793,12 @@ function registerIpc(): void {
     if (res.ok) win?.webContents.send('ext:changed')
     return res
   }
+  // 拖进设置页的 zip 或文件夹：预加载脚本从拖放的文件里取的路径，这里再核对是个存在的文件夹或 .zip
+  ipcMain.handle('ext:dropped', (e, path: unknown) => {
+    if (!fromAgent(e)) return notAllowed
+    if (!droppedPathOk(path)) return { ok: false, error: '拖进来的要是一个文件夹或者 .zip' }
+    return agentRelay.extInspect(path)
+  })
   ipcMain.handle('ext:install', async (e, token: unknown) =>
     fromAgent(e) && validStageToken(token) ? extChanged(await agentRelay.extInstall(token)) : notAllowed
   )
@@ -985,6 +1031,7 @@ function registerIpc(): void {
       },
       { type: 'separator' },
       { label: '技能包', submenu: skillItems },
+      { label: '导入扩展…', click: () => openSettings('extensions') },
       { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
       { label: '项目和地图…', click: () => openMain({ page: 'projects', tab: 'map' }) },
       { label: '资料库…', click: () => openMain({ page: 'knowledge' }) },
@@ -1027,6 +1074,7 @@ function updateTray(): void {
       { label: '桌面上显示她', type: 'checkbox', checked: shown, click: () => setShowCharacter(!shown) },
       { label: '免打扰（藏起来）', type: 'checkbox', checked: dnd, enabled: shown, accelerator: HIDE_SHORTCUT, click: () => toggleDnd() },
       { label: '让她回到右下角', enabled: shown, click: resetPosition },
+      { label: '导入扩展…', click: () => openSettings('extensions') },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() }
     ])

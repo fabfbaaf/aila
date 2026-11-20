@@ -14,6 +14,7 @@ import os
 import secrets
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -57,6 +58,20 @@ class ProjectMemory:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
+        # 记了、删了以后通知一声（项目键，这个项目现在的全部记忆）：编程 Agent 用它同步到记忆库
+        self.on_change: Callable[[str, list[Note]], None] | None = None
+
+    def _changed(self, key: str, project: Path | str) -> None:
+        if self.on_change is None:
+            return
+        try:
+            self.on_change(key, self.notes(project))
+        except Exception:  # 同步失败不影响记下来
+            pass
+
+    def all_projects(self) -> list[tuple[str, list[Note]]]:
+        """所有项目的（项目键，记忆）"""
+        return [(key, self._parse(entry)) for key, entry in self._load().items() if isinstance(entry, dict)]
 
     def _load(self) -> dict[str, dict]:
         try:
@@ -72,7 +87,10 @@ class ProjectMemory:
         tmp.replace(self.path)
 
     def notes(self, project: Path | str) -> list[Note]:
-        entry = self._load().get(project_key(project), {})
+        return self._parse(self._load().get(project_key(project), {}))
+
+    @staticmethod
+    def _parse(entry: object) -> list[Note]:
         out = []
         for raw in entry.get("notes", []) if isinstance(entry, dict) else []:
             if isinstance(raw, dict) and isinstance(raw.get("text"), str) and raw.get("id"):
@@ -95,6 +113,7 @@ class ProjectMemory:
             notes.append(asdict(note))
             data[key] = {"path": str(project), "notes": notes[-NOTE_LIMIT:]}
             self._save(data)
+        self._changed(key, project)
         return note, True
 
     def remove(self, project: Path | str, note_id: str) -> bool:
@@ -113,6 +132,7 @@ class ProjectMemory:
             else:
                 del data[key]
             self._save(data)
+        self._changed(key, project)
         return True
 
     def context(self, project: Path | str) -> str:

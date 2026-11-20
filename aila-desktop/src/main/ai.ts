@@ -1,7 +1,7 @@
 // 主进程调用本地 AI 服务的几个接口：设置、资料库、技能包、看屏幕的状态。对话和语音合成在 index.ts 里
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
-import type { KnowledgeAddResult, KnowledgeDoc, SkillInfo, SkillOverrides } from '../shared/cloud'
+import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
 import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, ScreenStatus } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 
@@ -160,6 +160,26 @@ export async function addKnowledge(aiUrl: string, paths: string[]): Promise<Know
     }
   }
   return result
+}
+
+/** 记忆库里的经历；AI 服务没开时是空的 */
+export async function listEpisodes(aiUrl: string): Promise<MemoryEpisode[]> {
+  try {
+    return await json<MemoryEpisode[]>(await fetch(`${aiUrl}/memory/episodes?limit=200`, { signal: AbortSignal.timeout(5000) }))
+  } catch {
+    return []
+  }
+}
+
+/** 删一条经历（id 给了就删这条，没给就全部删）；返回删没删成 */
+export async function forgetEpisodes(aiUrl: string, id?: string): Promise<boolean> {
+  try {
+    const path = id ? `/memory/episodes/${encodeURIComponent(id)}` : '/memory/episodes'
+    const res = await fetch(`${aiUrl}${path}`, { method: 'DELETE', signal: AbortSignal.timeout(5000) })
+    return res.ok || res.status === 404
+  } catch {
+    return false
+  }
 }
 
 export async function deleteKnowledge(aiUrl: string, id: string): Promise<void> {

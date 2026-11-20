@@ -334,3 +334,55 @@ async def test_waiting_marks_for_inbox(tmp_path: Path) -> None:
             rt.confirms.answer(e["id"], False)
     assert session.waiting() == "paused"  # 你回答了，回到计划停着的状态
     await rt.shutdown()
+
+
+# ---------- 只读时别原地打转 ----------
+
+
+@pytest.mark.anyio
+async def test_plan_round_denials_say_what_to_do_and_stop_after_three(tmp_path: Path) -> None:
+    root = project(tmp_path)
+    # 模型一直想改文件：被挡三次就停下，不再走满步数
+    model = Scripted([[call("write_file", path="x.py", content="1")]])
+    rt = runtime(tmp_path, model)
+    sid = rt.create(str(root), "ask").id
+    events = await propose(rt, sid)
+    denied = [e for e in events if e["type"] == "tool" and e.get("status") == "denied"]
+    assert len(denied) == 3
+    assert "propose_plan" in denied[0]["content"]  # 告诉她这一轮该怎么做
+    assert next(e for e in events if e["type"] == "turn_end")["reason"] == "denied"
+    assert len(model.requests) == 3
+    assert rt.agent(sid).deny_hint == "" and rt.agent(sid).policy.mode == "ask"  # 这一轮结束，提示和模式都还原
+    await rt.shutdown()
+
+
+@pytest.mark.anyio
+async def test_a_success_in_between_resets_the_denial_count(tmp_path: Path) -> None:
+    root = project(tmp_path)
+    model = Scripted([
+        [call("write_file", path="a.py", content="1")],
+        [call("write_file", path="b.py", content="1")],
+        [call("read_file", path="cart.py")],
+        [call("write_file", path="c.py", content="1")],
+        [call("write_file", path="d.py", content="1")],
+        ["算了，我先说说看法。"],
+    ])
+    rt = runtime(tmp_path, model)
+    sid = rt.create(str(root), "read_only").id
+    events = [e async for e in rt.run(sid, "改一下")]
+    assert next(e for e in events if e["type"] == "turn_end")["reason"] == "done"
+    await rt.shutdown()
+
+
+@pytest.mark.anyio
+async def test_approving_in_read_only_mode_is_refused(tmp_path: Path) -> None:
+    root = project(tmp_path)
+    model = Scripted([[call("propose_plan", **TWO)], ["计划交了。"]])
+    rt = runtime(tmp_path, model)
+    sid = rt.create(str(root), "read_only").id
+    await propose(rt, sid)
+    with pytest.raises(RuntimeError_, match="只读模式"):
+        rt.decide_plan(sid, True)
+    rt.set_mode(sid, "ask")
+    assert rt.decide_plan(sid, True)["approved"] is True
+    await rt.shutdown()

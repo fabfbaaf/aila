@@ -447,6 +447,7 @@ export function endText(end: EndItem): string {
   const words: Record<string, string> = {
     done: '做完了',
     max_steps: '步数到上限了，说「继续」接着做',
+    denied: '她要做的事连着被权限挡下，先停下了：换个权限模式（比如「先问再改」），或者说清楚接下来怎么做',
     rejected: '停下来了，等你说接下来怎么做',
     timeout: '一直没等到你的回答，先停下了',
     interrupted: '被打断了，说「继续」接着做',
