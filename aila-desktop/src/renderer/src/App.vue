@@ -33,6 +33,8 @@ import { targetFps } from './scene/frameBudget'
 import { clipboardMessage, fileMessage, fileTask, mentionsClipboard, type DropInfo } from '../../shared/drop'
 
 const stageEl = ref<HTMLDivElement>()
+/** 出场（shared/entrance.ts）：地址带 #enter 时先不露面，主进程说冒出来再出来；各段的缩放动画在下面的样式里 */
+const entrancePhase = ref<'' | 'waiting' | 'emerge' | 'crouch' | 'jump' | 'land'>(location.hash === '#enter' ? 'waiting' : '')
 const fileInput = ref<HTMLInputElement>()
 const chatInput = ref<InstanceType<typeof ChatInput>>()
 const bubbleText = ref('')
@@ -926,6 +928,13 @@ onMounted(async () => {
       }),
       bridge.onChatStop(() => conversation.interrupt())
     )
+    subscriptions.push(
+      bridge.onEntrance(({ phase, first }) => {
+        entrancePhase.value = phase
+        behavior.entrance(phase, first)
+        if (phase === 'land') setTimeout(() => entrancePhase.value === 'land' && (entrancePhase.value = ''), 600)
+      })
+    )
     // 叫她去的：到了点点头；自己闲逛到的：偶尔伸个懒腰
     subscriptions.push(
       bridge.onArrived((target) => {
@@ -964,7 +973,12 @@ onMounted(async () => {
   if (last) await useModel(last, true)
   else await loadBuiltin()
 
-  setTimeout(() => behavior.greet(), 600)
+  // 报到：要出场的话等落地再打招呼（Behavior.entrance），不出场就像以前一样直接打招呼
+  const entering = (await bridge?.characterReady?.().catch(() => false)) ?? false
+  if (!entering) {
+    if (entrancePhase.value === 'waiting') entrancePhase.value = ''
+    setTimeout(() => behavior.greet(), 600)
+  }
   setTimeout(() => {
     if (usingPlaceholder) behavior.say(lines.noModel, 4000)
   }, 4800)
@@ -989,6 +1003,7 @@ onBeforeUnmount(() => {
     <div
       ref="stageEl"
       class="stage"
+      :class="entrancePhase"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
@@ -1029,6 +1044,69 @@ body,
   position: relative;
   width: 100%;
   height: 100%;
+  transform-origin: 50% 100%; /* 从脚底缩放：蹲下、落地时脚不离地 */
+}
+
+/* 出场：等着 → 从卡片里冒出来 → 蹲一下 → 空中拉长 → 落地压扁再弹回来 */
+.stage.waiting {
+  opacity: 0;
+}
+
+.stage.emerge {
+  animation: emerge 0.65s cubic-bezier(0.2, 1.35, 0.4, 1) both;
+}
+
+.stage.crouch {
+  transform: scale(1.05, 0.9);
+  transition: transform 0.2s ease-out;
+}
+
+.stage.jump {
+  animation: hop 1.05s ease-in-out both;
+}
+
+.stage.land {
+  animation: land 0.55s ease-out both;
+}
+
+@keyframes emerge {
+  from {
+    opacity: 0;
+    transform: translateY(16%) scale(0.35);
+  }
+  45% {
+    opacity: 1;
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes hop {
+  0% {
+    transform: scale(1.05, 0.9);
+  }
+  14% {
+    transform: scale(0.94, 1.08);
+  }
+  70% {
+    transform: scale(0.98, 1.03);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes land {
+  0% {
+    transform: scale(1.1, 0.86);
+  }
+  45% {
+    transform: scale(0.97, 1.04);
+  }
+  100% {
+    transform: none;
+  }
 }
 
 .root.grab {

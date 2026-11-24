@@ -28,6 +28,9 @@ export const EN3: Record<string, string> = {
   '别的程序全屏（游戏、视频、F11 的浏览器）或者在放幻灯片时，她先藏起来，退出全屏再回来。关掉的话她留着，但不主动说话。':
     "When another program goes full screen (games, videos, a browser in F11) or a slideshow is running, she hides and comes back afterwards. When off she stays but doesn't speak up.",
   没事时走走: 'Wander when idle',
+  出场动画: 'Entrance animation',
+  '打开艾拉时，屏幕中间先出来一张「艾拉」卡片，她从里面跳到右下角和你打招呼。下次打开生效。':
+    'When Aila starts, an "Aila" card appears in the middle of the screen and she jumps out of it to the bottom right to say hi. Takes effect next time you open her.',
   '隔一阵自己在屏幕上挪几步，偶尔伸个懒腰。你在打字、全屏、和她说话、离开电脑的时候不动。也可以直接叫她「去右上角」「往左一点」。':
     'Every now and then she takes a few steps on the screen and sometimes stretches. She stays still while you type, during full screen, while you talk to her, or when you\'re away. You can also just tell her "go to the top right" or "move left a bit".',
   免打扰: 'Do not disturb',

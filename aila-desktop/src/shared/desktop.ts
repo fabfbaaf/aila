@@ -32,6 +32,8 @@ export interface DesktopPrefs {
   diary: boolean
   /** 没事时自己在屏幕上走两步（你在打字、全屏、和她说话时不动） */
   wander: boolean
+  /** 打开艾拉时的出场：先出来一张「艾拉」卡片，她从里面跳出来，落到右下角打招呼 */
+  entrance: boolean
   /** 每天看一次 GitHub 上有没有新版本（装好的版本才查） */
   checkUpdates: boolean
   /** 每周五晚上写这周的回顾（作品页「回顾」里看；会花一点钱，一周一次） */
@@ -49,6 +51,7 @@ export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
   worksBudget: 0.5,
   diary: true,
   wander: false,
+  entrance: true,
   checkUpdates: true,
   weeklyReview: true
 }
@@ -108,6 +111,7 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
     worksBudget: pick('worksBudget', WORKS_BUDGET_CHOICES),
     diary: bool('diary'),
     wander: bool('wander'),
+    entrance: bool('entrance'),
     checkUpdates: bool('checkUpdates'),
     weeklyReview: bool('weeklyReview')
   }

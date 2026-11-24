@@ -39,6 +39,7 @@ export const EN8: Record<string, string> = {
     'Starts from your user folder and works through commands and scripts. No automatic permissions; dangerous commands and protected locations always ask. Bulk operations are planned first, and moves or renames can\'t be reverted with "Undo this round".',
   '她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。': 'She only reads and writes inside this folder; dangerous commands like deleting or pushing always ask you first, in every mode.',
   '正在开任务…': 'Starting task…',
+  '在哪个项目里做？点一下就开始': 'Which project? Click one to start',
   开电脑任务: 'Start computer task',
   '等你同意：{action}': 'Waiting for your OK: {action}',
   等你同意一个操作: 'Waiting for your OK on an action',

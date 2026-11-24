@@ -112,6 +112,8 @@ export const EN5: Record<string, string> = {
   '……你回来了。': "...You're back.",
   '……（小小地打了个哈欠）': '...(a small yawn)',
   '……我的样子还没做好。右键可以加载 VRM 模型。': "...My look isn't ready yet. Right-click to load a VRM model.",
+  '……你好，我是艾拉。以后就在这里陪你写代码啦。有事双击我，或者按 Alt+Shift+A。':
+    "...Hi, I'm Aila. I'll be right here coding with you from now on. Double-click me or press Alt+Shift+A whenever you need me.",
   '……换好了。这样可以吗？': '...All changed. Is this OK?',
   '对不起……这个模型我打不开。': "Sorry... I can't open this model.",
   '（在听……）': '(listening…)',

@@ -277,6 +277,31 @@ export class Behavior {
     this.say(greeting(new Date().getHours()), 3500)
   }
 
+  /**
+   * 出场的各段（主进程挪窗口、页面做缩放，这里配表情和姿态）：
+   * 冒出来时有点惊讶又开心；起跳前低头弯一下腰；空中举手；落地点下头再挥手，然后打招呼（第一次见面是自我介绍）
+   */
+  entrance(phase: 'emerge' | 'crouch' | 'jump' | 'land', first = false): void {
+    this.lookAtUser()
+    this.markActive()
+    if (phase === 'emerge') {
+      this.play([
+        { dur: 0.3, expr: { surprised: 0.5 }, pose: { headPitch: -0.06 } },
+        { dur: 0.5, expr: { happy: 0.45 } }
+      ])
+    } else if (phase === 'crouch') {
+      this.play([{ dur: 0.25, expr: { happy: 0.35 }, pose: { headPitch: 0.2, bodyLean: -0.12 } }])
+    } else if (phase === 'jump') {
+      this.play([
+        { dur: 0.35, expr: { happy: 0.65 }, pose: { armsUp: 1, headPitch: -0.14 } },
+        { dur: 0.75, expr: { happy: 0.6 }, pose: { armsUp: 0.55, headPitch: -0.04 } }
+      ])
+    } else {
+      this.play([{ dur: 0.2, expr: { happy: 0.4 }, pose: { headPitch: 0.18, bodyLean: -0.1 } }, ...GESTURES.wave])
+      setTimeout(() => this.say(first ? lines.firstMeet : greeting(new Date().getHours()), first ? 6000 : 3500), 350)
+    }
+  }
+
   /** 播放一段自定义反应（加载模型成功等场景） */
   react(kind: 'happy' | 'sad'): void {
     this.lookAtUser()

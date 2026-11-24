@@ -38,6 +38,8 @@ export const EN6: Record<string, string> = {
   项目: 'Projects',
   资料: 'Docs',
   记忆: 'Memory',
+  '她回答问题、写代码前会先翻这里的文档': 'She looks through these documents before answering or writing code',
+  '她记得的事和经历：聊天、开任务时挑相关的几条用上': 'What she remembers and has been through: she brings up the relevant bits when chatting or starting a task',
   左上角: 'Top left',
   正上方: 'Top',
   右上角: 'Top right',
