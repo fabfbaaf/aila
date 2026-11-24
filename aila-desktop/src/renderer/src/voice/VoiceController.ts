@@ -2,6 +2,7 @@ import type { ListenMode, VoiceEvent, VoiceSwitches } from '../../../shared/voic
 import type { Behavior } from '../behavior/Behavior'
 import type { Conversation } from '../chat/Conversation'
 import { lines, pick } from '../persona/lines'
+import { t } from '../i18n'
 import { isEcho } from './echo'
 import { Microphone } from './Microphone'
 import type { Speaker } from './Speaker'
@@ -174,7 +175,7 @@ export class VoiceController {
           this.bargeIn = true
         } else if (this.session !== 'idle') {
           this.behavior.setListening(true)
-          if (!this.conversation.busy) this.onBubble(lines.listening, null)
+          if (!this.conversation.busy) this.onBubble(t(lines.listening), null)
         }
         break
 
@@ -245,7 +246,7 @@ export class VoiceController {
     this.session = 'awaiting'
     this.setMode('listen')
     this.behavior.setListening(true)
-    if (showBubble) this.onBubble(lines.listening, null)
+    if (showBubble) this.onBubble(t(lines.listening), null)
     clearTimeout(this.timer)
     this.timer = setTimeout(() => {
       if (this.conversation.busy) this.await(ms, false)

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Ctrl+K 的搜索框：条目和排序在 palette.ts，这里只管显示、上下键选、回车执行 */
+import { t } from '../i18n'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { StoredMemory, StoredMessage } from '../../../shared/cloud'
 import { bridge } from '../platform/bridge'
@@ -12,10 +13,11 @@ const active = ref(0)
 const input = ref<HTMLInputElement | null>(null)
 const messages = ref<StoredMessage[]>([])
 const memories = ref<StoredMemory[]>([])
-const STATIC = staticItems()
+// 固定条目按现在的语言生成（英文界面时也能用英文搜）
+const STATIC = computed(() => staticItems(t))
 
 const items = computed<PaletteItem[]>(() => [
-  ...searchStatic(STATIC, query.value),
+  ...searchStatic(STATIC.value, query.value),
   ...historyItems(messages.value, query.value),
   ...memoryItems(memories.value, query.value)
 ])
@@ -67,13 +69,13 @@ defineExpose({ open })
 
 <template>
   <div class="veil" @mousedown.self="emit('close')">
-    <div class="palette" role="dialog" aria-label="快捷跳转">
+    <div class="palette" role="dialog" :aria-label="t('快捷跳转')">
       <input
         ref="input"
         v-model="query"
-        placeholder="去哪一页、做什么，或者搜聊过的话、她记得的事……"
+        :placeholder="t('去哪一页、做什么，或者搜聊过的话、她记得的事……')"
         spellcheck="false"
-        aria-label="搜索"
+        :aria-label="t('搜索')"
         @keydown="onKey"
       />
       <ul v-if="items.length">
@@ -85,13 +87,13 @@ defineExpose({ open })
           @mousemove="active = i"
           @click="run(it)"
         >
-          <span class="group">{{ it.group }}</span>
+          <span class="group">{{ t(it.group) }}</span>
           <span class="title">{{ it.title }}</span>
-          <span class="hint">{{ it.hint }}</span>
+          <span class="hint">{{ t(it.hint) }}</span>
         </li>
       </ul>
-      <div v-else class="none">没有对得上的。换个说法试试。</div>
-      <div class="foot">↑↓ 选　Enter 打开　Esc 关掉</div>
+      <div v-else class="none">{{ t('没有对得上的。换个说法试试。') }}</div>
+      <div class="foot">{{ t('↑↓ 选　Enter 打开　Esc 关掉') }}</div>
     </div>
   </div>
 </template>

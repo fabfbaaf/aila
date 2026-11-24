@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from './i18n'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Vector3 } from 'three'
 import SpeechBubble from './components/SpeechBubble.vue'
@@ -40,6 +41,7 @@ const bubbleFullText = ref('')
 const bubbleExpanded = ref(false)
 const overAvatar = ref(false)
 const chatOpen = ref(false)
+const avatarTop = ref('50%')
 /** 她在等用户确认的操作（气泡里显示「好 / 不要」） */
 const convAsk = ref<ConfirmAsk | null>(null)
 /** 屏幕上看到的报错，在问用户要不要帮忙 */
@@ -74,54 +76,54 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
   if (dropAsk.value && !convAsk.value) {
     const d = dropAsk.value
     return {
-      tag: d.kind === 'dir' ? '文件夹' : '文件',
+      tag: d.kind === 'dir' ? t('文件夹') : t('文件'),
       detail: d.rel ?? d.name,
       buttons: [
-        ...(d.kind === 'text' ? [{ label: '讲讲它', value: 'chat', primary: true }] : []),
-        ...(d.project ? [{ label: '交给任务页', value: 'task', primary: d.kind === 'dir' }] : []),
-        { label: '算了', value: 'no' }
+        ...(d.kind === 'text' ? [{ label: t('讲讲它'), value: 'chat', primary: true }] : []),
+        ...(d.project ? [{ label: t('交给任务页'), value: 'task', primary: d.kind === 'dir' }] : []),
+        { label: t('算了'), value: 'no' }
       ]
     }
   }
   if (workAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
     return {
-      tag: '作品',
+      tag: t('作品'),
       detail: workAsk.value.title,
       buttons: [
-        { label: '看看', value: 'see', primary: true },
-        { label: '待会儿', value: 'later' }
+        { label: t('看看'), value: 'see', primary: true },
+        { label: t('待会儿'), value: 'later' }
       ]
     }
   }
   if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
     return {
-      tag: '今天',
+      tag: t('今天'),
       detail: '',
       buttons: briefingAsk.value.detail
         ? [
-            { label: '好', value: 'ok', primary: true },
-            { label: '看看任务', value: 'tasks' }
+            { label: t('好'), value: 'ok', primary: true },
+            { label: t('看看任务'), value: 'tasks' }
           ]
-        : [{ label: '好', value: 'ok', primary: true }]
+        : [{ label: t('好'), value: 'ok', primary: true }]
     }
   }
   if (agentAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
     return {
-      tag: '任务',
+      tag: t('任务'),
       detail: agentAsk.value.action,
       buttons: [
-        { label: '去看看', value: 'open', primary: true },
-        { label: '等会儿', value: 'later' }
+        { label: t('去看看'), value: 'open', primary: true },
+        { label: t('等会儿'), value: 'later' }
       ]
     }
   }
   if (reminderAsk.value && !convAsk.value) {
     return {
-      tag: '提醒',
+      tag: t('提醒'),
       detail: reminderAsk.value.reminder.text,
       buttons: [
-        { label: '知道了', value: 'ok', primary: true },
-        { label: '10 分钟后再提醒', value: 'snooze' }
+        { label: t('知道了'), value: 'ok', primary: true },
+        { label: t('10 分钟后再提醒'), value: 'snooze' }
       ]
     }
   }
@@ -131,8 +133,8 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
       tag: a.skill,
       detail: a.detail,
       buttons: [
-        { label: '好', value: 'yes', primary: true },
-        { label: '不要', value: 'no' }
+        { label: t('好'), value: 'yes', primary: true },
+        { label: t('不要'), value: 'no' }
       ]
     }
   }
@@ -141,17 +143,17 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
     return {
       tag: f.app,
       detail: f.summary,
-      note: `点「好」才把这 ${f.snippet.split('\n').length} 行报错发给大模型（已打码）`,
+      note: t('点「好」才把这 {n} 行报错发给大模型（已打码）', { n: f.snippet.split('\n').length }),
       buttons: [
-        { label: '好', value: 'yes', primary: true },
+        { label: t('好'), value: 'yes', primary: true },
         ...(screenLocated.value
           ? [
-              { label: '交给她修', value: 'task' },
-              { label: '在星图里看', value: 'map' }
+              { label: t('交给她修'), value: 'task' },
+              { label: t('在星图里看'), value: 'map' }
             ]
           : []),
-        { label: '不用', value: 'no' },
-        { label: '一小时内别提醒', value: 'mute' }
+        { label: t('不用'), value: 'no' },
+        { label: t('一小时内别提醒'), value: 'mute' }
       ]
     }
   }
@@ -578,7 +580,7 @@ function onCharacterEvent(ev: CharacterEvent): void {
       break
     case 'knowledge-added':
       behavior.react('happy')
-      behavior.say(ev.names.length === 1 ? `……《${ev.names[0]}》我读完了。` : `……${ev.names.length} 份资料我都读完了。`, 3500)
+      behavior.say(ev.names.length === 1 ? t('……《{name}》我读完了。', { name: ev.names[0] }) : t('……{n} 份资料我都读完了。', { n: ev.names.length }), 3500)
       break
     case 'settings-saved':
       behavior.gesture('nod')
@@ -604,6 +606,12 @@ function onCharacterEvent(ev: CharacterEvent): void {
       makingWork = ev.on
       behavior.setWorking(ev.on || agentWorking)
       if (ev.on && !conversation.chatting && !desk.value?.presence.quiet) behavior.say(pick(lines.workMaking), 2600)
+      break
+    case 'review':
+      if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
+        behavior.gesture('nod')
+        conversation.announce(pick(lines.weeklyReview))
+      }
       break
     case 'late-night':
       if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
@@ -856,6 +864,9 @@ onMounted(async () => {
     if (pendingReminders.length && free) showReminder(pendingReminders.shift()!)
   }
   stage.maxFps = frameLimit
+  stage.onAvatarFramed = (top) => {
+    avatarTop.value = `${top}px`
+  }
   stage.setAvatar(new PlaceholderAvatar())
   stage.start()
   if (import.meta.env.DEV) {
@@ -898,7 +909,7 @@ onMounted(async () => {
         if (convAsk.value?.id === id) conversation.answer(true)
       }),
       bridge.onDesktopStatus(applyDesktop),
-      bridge.onClipboardAsk(() => void sendWithClipboard('帮我看看剪贴板里的这段报错')),
+      bridge.onClipboardAsk(() => void sendWithClipboard(t('帮我看看剪贴板里的这段报错'))),
       // 扩展包：装卸、开关以后重新拿动作和台词；扩展页点了「试一下」就做那个动作
       bridge.onExtChanged(() => void loadCompanion()),
       bridge.onExtPlay((name) => behavior.gesture(name))
@@ -982,18 +993,20 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
     ></div>
-    <SpeechBubble
-      :text="bubbleText"
-      :visible="bubbleVisible"
-      :ask="bubbleAsk"
-      :full-text="bubbleFullText"
-      :expanded="bubbleExpanded"
-      @answer="onAnswer"
-      @toggle-full-text="toggleBubbleFullText"
-    />
+    <div class="dialogue" :style="{ '--avatar-top': avatarTop }">
+      <SpeechBubble
+        :text="bubbleText"
+        :visible="bubbleVisible"
+        :ask="bubbleAsk"
+        :full-text="bubbleFullText"
+        :expanded="bubbleExpanded"
+        @answer="onAnswer"
+        @toggle-full-text="toggleBubbleFullText"
+      />
+      <ChatInput v-if="chatOpen" ref="chatInput" @send="onSend" @close="closeChat" />
+    </div>
     <!-- 开着「留意屏幕上的报错」时一直显示：她在看 -->
-    <div v-if="watching" class="watching" title="正在留意屏幕上的报错（只看写代码的窗口）">● 正在看屏幕</div>
-    <ChatInput v-if="chatOpen" ref="chatInput" @send="onSend" @close="closeChat" />
+    <div v-if="watching" class="watching" :title="t('正在留意屏幕上的报错（只看写代码的窗口）')">{{ t('● 正在看屏幕') }}</div>
     <input ref="fileInput" type="file" accept=".vrm" hidden @change="onFile" />
   </div>
 </template>
@@ -1020,6 +1033,17 @@ body,
 
 .root.grab {
   cursor: grab;
+}
+
+.dialogue {
+  position: absolute;
+  inset: 10px 10px calc(100% - max(20px, var(--avatar-top)) + 12px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
 }
 
 .watching {

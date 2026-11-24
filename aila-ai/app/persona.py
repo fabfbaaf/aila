@@ -110,8 +110,17 @@ STYLES = {
 }
 
 
-def persona_addendum(style: str = "gentle", call: str = "", catchphrase: str = "") -> str:
-    """设置里的性格 → 接在系统提示词后面的几句；都是默认值时是空串（系统提示词和以前一字不差）"""
+ENGLISH = (
+    "\n\nThe user chose the English interface. Always reply in natural, casual English "
+    "(same personality, same tags like [happy] [nod] [say]...[/say] [go-topright]), "
+    "unless the user clearly writes to you in another language."
+)
+
+
+def persona_addendum(style: str = "gentle", call: str = "", catchphrase: str = "", language: str = "zh") -> str:
+    """设置里的性格 → 接在系统提示词后面的几句；都是默认值时是空串（系统提示词和以前一字不差）。
+    language=en：最后加一段让她用英文回答（界面换成英文时）"""
+    english = ENGLISH if language == "en" else ""
     lines = []
     if STYLES.get(style):
         lines.append(f"- 说话风格（用户选的）：{STYLES[style]}")
@@ -121,8 +130,9 @@ def persona_addendum(style: str = "gentle", call: str = "", catchphrase: str = "
     catchphrase = "".join(ch for ch in catchphrase if ch.isprintable())[:12].strip()
     if catchphrase:
         lines.append(f"- 口头禅（用户选的）：偶尔在句尾带一句「{catchphrase}」，十句里最多一两句。")
-    return "\n\n用户调过你的性格（以这里为准，和上面冲突时听这里的）：\n" + "\n".join(lines) if lines else ""
+    tuned = "\n\n用户调过你的性格（以这里为准，和上面冲突时听这里的）：\n" + "\n".join(lines) if lines else ""
+    return tuned + english
 
 
-def system_prompt(style: str = "gentle", call: str = "", catchphrase: str = "") -> str:
-    return SYSTEM_PROMPT + persona_addendum(style, call, catchphrase)
+def system_prompt(style: str = "gentle", call: str = "", catchphrase: str = "", language: str = "zh") -> str:
+    return SYSTEM_PROMPT + persona_addendum(style, call, catchphrase, language)

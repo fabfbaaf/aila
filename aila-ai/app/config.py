@@ -43,6 +43,8 @@ class Settings:
     persona_style: str = "gentle"
     persona_call: str = ""
     persona_catchphrase: str = ""
+    # 界面语言（桌面端设置里选的）：en 时她用英文回答
+    language: str = "zh"
 
     @property
     def mock(self) -> bool:
@@ -81,4 +83,5 @@ def load_settings() -> Settings:
         persona_style=os.getenv("AILA_PERSONA_STYLE", "gentle").strip().lower(),
         persona_call=os.getenv("AILA_PERSONA_CALL", "").strip()[:12],
         persona_catchphrase=os.getenv("AILA_PERSONA_CATCHPHRASE", "").strip()[:12],
+        language="en" if os.getenv("AILA_LANGUAGE", "zh").strip().lower() == "en" else "zh",
     )

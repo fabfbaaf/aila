@@ -29,6 +29,7 @@ from .runtime.mock import MockCoderModel
 from .runtime.runner import Runtime
 from .code import CodeProjects
 from .diary import Diary
+from .review import Reviews
 from .extensions import ExtensionStore
 from .persona import persona_addendum
 from .studio import Studio
@@ -102,7 +103,7 @@ def get_runtime() -> Runtime:
     runtime = Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
                       computer_inventory=settings.computer_inventory, extensions=get_extensions(),
-                      memory_store=lambda: get_memory_store())
+                      memory_store=lambda: get_memory_store(), language=lambda: settings.language)
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     return runtime
 
@@ -217,7 +218,7 @@ def get_code_projects() -> CodeProjects:
 
 def _persona() -> str:
     """设置里调的性格（每次现读：改了设置马上生效）"""
-    return persona_addendum(settings.persona_style, settings.persona_call, settings.persona_catchphrase)
+    return persona_addendum(settings.persona_style, settings.persona_call, settings.persona_catchphrase, settings.language)
 
 
 @lru_cache
@@ -230,6 +231,11 @@ def get_studio() -> Studio:
 def get_diary() -> Diary:
     """她的日记（data/diary），一天一篇"""
     return Diary(settings.data_dir, lambda: get_model(), _persona)
+
+
+def get_reviews() -> Reviews:
+    """每周回顾（data/reviews），一周一份。每次现取：测试会换数据目录"""
+    return Reviews(settings.data_dir, lambda: get_model(), lambda: get_memory_store(), _persona, lambda: settings.language)
 
 
 @lru_cache

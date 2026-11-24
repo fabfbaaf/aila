@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** 设置页：剩下的几个分区（资料库、记忆、代码库各自成了一页），左边一列切换 */
+import { t } from '../i18n'
 import { computed, type Component } from 'vue'
 import type { SettingsSection } from '../../../shared/settings'
 import { SETTINGS_TABS, type ShellRoute } from '../../../shared/shell'
@@ -34,18 +35,18 @@ const view = computed(() => VIEWS[props.section] ?? ModelSection)
 <template>
   <div class="settings-scope settings-page">
     <nav class="side">
-      <div class="title">设置</div>
+      <div class="title">{{ t('设置') }}</div>
       <button
         v-for="s in SETTINGS_TABS"
         :key="s.id"
         :class="{ active: s.id === section }"
         @click="emit('go', { page: 'settings', section: s.id })"
       >
-        {{ s.name }}
+        {{ t(s.name) }}
       </button>
     </nav>
     <div class="content">
-      <div v-if="!bridge && section !== 'agent'" class="empty">设置只在桌面版里能用（npm run dev）。</div>
+      <div v-if="!bridge && section !== 'agent'" class="empty">{{ t('设置只在桌面版里能用（npm run dev）。') }}</div>
       <KeepAlive v-else>
         <component :is="view" :key="section" />
       </KeepAlive>

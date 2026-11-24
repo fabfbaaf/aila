@@ -41,6 +41,7 @@ def read() -> dict[str, Any]:
         "computer": {"inventory": s.computer_inventory},
         "persona": {"style": s.persona_style if s.persona_style in STYLES else "gentle", "call": s.persona_call,
                     "catchphrase": s.persona_catchphrase},
+        "language": s.language,
         "voice": {
             "enabled": s.voice,
             "ttsEngine": s.tts_engine,
@@ -74,6 +75,7 @@ class SettingsUpdate(BaseModel):
     personaStyle: Literal["gentle", "lively", "calm", "teasing"] | None = None
     personaCall: str | None = Field(default=None, max_length=12)
     personaCatchphrase: str | None = Field(default=None, max_length=12)
+    language: Literal["zh", "en"] | None = None
     searchProvider: Literal["bocha", "tavily", "none"] | None = None
     searchApiKey: str | None = Field(default=None, max_length=300)
     ttsEngine: Literal["melo", "kokoro", "matcha"] | None = None
@@ -109,7 +111,7 @@ ENV_NAMES = {
     "llmBaseUrl": "LLM_BASE_URL", "llmModel": "LLM_MODEL", "llmApiKey": "LLM_API_KEY",
     "coderModel": "AILA_CODER_MODEL", "coderFastModel": "AILA_CODER_FAST_MODEL",
     "computerInventory": "AILA_COMPUTER_INVENTORY",
-    "personaStyle": "AILA_PERSONA_STYLE", "personaCall": "AILA_PERSONA_CALL", "personaCatchphrase": "AILA_PERSONA_CATCHPHRASE",
+    "personaStyle": "AILA_PERSONA_STYLE", "personaCall": "AILA_PERSONA_CALL", "personaCatchphrase": "AILA_PERSONA_CATCHPHRASE", "language": "AILA_LANGUAGE",
     "searchProvider": "SEARCH_PROVIDER", "searchApiKey": "SEARCH_API_KEY",
     "ttsEngine": "AILA_TTS_ENGINE", "ttsSpeaker": "AILA_TTS_SPEAKER", "ttsSpeed": "AILA_TTS_SPEED",
     "wakeThreshold": "AILA_WAKE_THRESHOLD", "endSilence": "AILA_END_SILENCE", "asrLanguage": "AILA_ASR_LANGUAGE",

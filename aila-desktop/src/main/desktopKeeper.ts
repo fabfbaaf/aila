@@ -27,6 +27,8 @@ import { dailyReport, due, isStudioSession, morningBriefing, workday, type Brief
 import type { StartWorkBody } from './studio'
 import { decidePresence, FocusWatch } from './presence'
 import { ReminderBook, SitTimer } from './reminders'
+import { reviewDue, type ReviewEntry } from '../shared/review'
+import { reviewBody, type ReviewBody } from './weekReview'
 
 /** 最长隔多久重新排一次闹钟（电脑睡眠后 setTimeout 会不准） */
 const MAX_TIMER_MS = 60 * 60 * 1000
@@ -63,6 +65,8 @@ export interface LifeHooks {
   start: (body: StartWorkBody) => Promise<AiResult<Work>>
   seen: (id: string) => Promise<void>
   writeDiary: (day: string, facts: string[]) => Promise<boolean>
+  /** 写这周的回顾（app/review.py） */
+  writeReview: (body: ReviewBody) => Promise<AiResult<ReviewEntry>>
 }
 
 /** 本地日期（YYYY-MM-DD），不按 5 点切 */
@@ -353,6 +357,16 @@ export class DesktopKeeper {
       }
     }
 
+    // 每周回顾：周五晚上、周末写这周的（不用你在电脑前）；写好了她说一声
+    if (this.prefs.weeklyReview && reviewDue(this.life.review, now)) {
+      const r = await this.reviewNow(false)
+      if (r.ok && r.data) {
+        this.life.review = r.data.week
+        this.saveLife()
+        if (canTalk && idle < AWAY_SECONDS) this.o.characterEvent({ kind: 'review', week: r.data.week })
+      }
+    }
+
     // 深夜你还在用电脑：说一次早点睡
     if (canTalk && idle < 60 && lateNight(now) && this.life.lateNight !== day) {
       this.life.lateNight = day
@@ -381,6 +395,16 @@ export class DesktopKeeper {
     const got = await this.o.gather()
     const occasion = occasionOf(new Date(), this.life.firstSeen)
     return l.start({ hints: got ? workHints(got, occasion) : undefined, idea, budget: this.prefs.worksBudget })
+  }
+
+  /** 写这周的回顾。force：这周写过了也重写（作品页里点「重写」） */
+  async reviewNow(force: boolean): Promise<AiResult<ReviewEntry>> {
+    const l = this.o.life
+    if (!l) return { ok: false, error: '还没准备好' }
+    const got = await this.o.gather()
+    if (!got) return { ok: false, error: 'AI 服务没开，过会儿再试。' }
+    const body = reviewBody({ sessions: got.sessions, messages: got.messages, memories: got.memories, reminders: this.book.list(), now: new Date() })
+    return l.writeReview({ ...body, force })
   }
 
   /** 每天见面要用：她自己的作品、今天是什么日子 */

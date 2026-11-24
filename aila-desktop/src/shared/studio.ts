@@ -53,6 +53,8 @@ export interface LifeState {
   lateNight?: string
   /** 哪个特别的日子已经为它做过作品了 */
   occasionWork?: string
+  /** 哪一周写过回顾（2026-W48） */
+  review?: string
 }
 
 const DAY_MS = 86_400_000

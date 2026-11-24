@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'ele
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
 import type { UpdateInfo } from '../shared/update'
+import type { Lang, LangPref } from '../shared/i18n'
 import type {
   AccountStatus,
   AuthForm,
@@ -30,6 +31,7 @@ import type {
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
+import type { ReviewEntry } from '../shared/review'
 import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
@@ -145,6 +147,10 @@ const api = {
   updateCheck: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:check'),
   updateLast: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:last'),
   updateOpen: (url: string): void => ipcRenderer.send('update:open', url),
+  // 界面语言
+  languageGet: (): Promise<{ pref: LangPref; lang: Lang }> => ipcRenderer.invoke('lang:get'),
+  languageSet: (pref: LangPref): Promise<{ pref: LangPref; lang: Lang } | null> => ipcRenderer.invoke('lang:set', pref),
+  onLanguage: (cb: (lang: Lang) => void): Unsubscribe => listen('lang:changed', cb),
   sayToAila: (text: string): void => ipcRenderer.send('chat:say', text),
   // 主窗口的对话页：看她正在说的回复，回答她的确认，让她停下
   onChatLive: (cb: (r: LiveReply) => void): Unsubscribe => listen('chat:live', cb),
@@ -252,6 +258,8 @@ const api = {
   studioNow: (idea?: { title: string; idea: string; kind: 'web' | 'script' }): Promise<AiResult<Work>> =>
     ipcRenderer.invoke('studio:now', idea ?? null),
   studioDiary: (): Promise<AiResult<DiaryEntry[]>> => ipcRenderer.invoke('studio:diary'),
+  studioReviews: (): Promise<AiResult<ReviewEntry[]>> => ipcRenderer.invoke('studio:reviews'),
+  studioReviewNow: (force = false): Promise<AiResult<ReviewEntry>> => ipcRenderer.invoke('studio:review-now', force),
   studioKnown: (): Promise<{ firstSeen?: string; days: number } | null> => ipcRenderer.invoke('studio:known'),
   studioShow: (id?: string): void => ipcRenderer.send('studio:show', id),
 

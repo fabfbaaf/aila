@@ -139,7 +139,7 @@ async def chat(
     # 扩展包带的动作：系统提示词里列出来（装卸扩展时才变，平时前缀不变），标签解析也认
     motions = deps.get_extensions().motions()
     messages = build_messages(req.messages, s.max_history, await memory_context(req, embedder, store),
-                              system_prompt(s.persona_style, s.persona_call, s.persona_catchphrase) + motions_prompt(motions))
+                              system_prompt(s.persona_style, s.persona_call, s.persona_catchphrase, s.language) + motions_prompt(motions))
     # 滑出对话窗口的那段：后台写成摘要存进记忆库（以后每次带上最新的一份）
     start = window_start(len(req.messages), s.max_history)
     if start:

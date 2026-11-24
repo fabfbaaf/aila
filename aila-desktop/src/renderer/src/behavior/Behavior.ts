@@ -3,6 +3,7 @@ import type { BuiltinGesture, Emotion, Gesture } from '../../../shared/chat'
 import type { MotionPhase } from '../../../shared/extensions'
 import { emptyExpressions, VOWELS, type Expressions, type Mouth, type PoseState } from '../avatar/types'
 import { greeting, lines, pick } from '../persona/lines'
+import { t } from '../i18n'
 
 type Offsets = Pick<PoseState, 'headPitch' | 'headYaw' | 'headRoll' | 'bodyLean' | 'bodySway' | 'armRaise' | 'forearmSwing' | 'armsUp'>
 
@@ -287,7 +288,7 @@ export class Behavior {
   }
 
   say(text: string, ms = 2800): void {
-    this.onSay(text, ms)
+    this.onSay(t(text), ms) // 固定台词：英文界面时换成英文
   }
 
   update(dt: number): void {

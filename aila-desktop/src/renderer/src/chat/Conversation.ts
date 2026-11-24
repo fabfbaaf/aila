@@ -6,6 +6,7 @@ import type { Behavior } from '../behavior/Behavior'
 import { lines } from '../persona/lines'
 import { sentenceCut, speakableLength } from '../voice/sentences'
 import { confirmIntent } from './confirmIntent'
+import { t } from '../i18n'
 import type { Spot } from '../../../shared/move'
 import type { ChatStream, ChatTransport } from './transport'
 
@@ -234,7 +235,7 @@ export class Conversation {
   announce(text: string): void {
     this.begin(true)
     this.receiving = true
-    this.onEvent({ type: 'text', text })
+    this.onEvent({ type: 'text', text: t(text) }) // 固定台词：英文界面时换成英文（中文原文是键，不认识的原样）
     this.onEvent({ type: 'done' })
   }
 
@@ -518,7 +519,7 @@ export class Conversation {
           this.queueGestures(false)
           // 单独念固定提示，也让它在气泡里有自己的一行；不记进对话。
           if (this.hasSummary) this.queueText('\n', false)
-          this.queueText(lines.chatMore, false)
+          this.queueText(t(lines.chatMore), false)
         }
         break
       case 'move':

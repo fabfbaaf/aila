@@ -86,8 +86,30 @@ const PLACE_RE = new RegExp(`^${POLITE}${VERB}?(?:屏幕|桌面)?(?:的)?(.+?)${
 const NUDGE_RE = new RegExp(`^${POLITE}(?:再)?(?:往|向|朝)(左|右|上|下)(?:边|面)?(?:一点|一点点|点儿?|些|一些)?(?:挪挪|挪一挪|挪一下|挪|走走|走|移一下|移|靠|去|一下)*(?:一点|点儿?|些)?${TAIL}$`, 'u')
 const HOME_RE = new RegExp(`^${POLITE}(?:回(?:去|来|原位|原来的地方|老地方|你的位置)|回到原位|回到原来的地方)${TAIL}$`, 'u')
 
+// 英文界面时也认英文的说法（同样只认「整句就是这个意思」）
+const EN_PLACE: Record<string, Spot> = {
+  'top left': 'topleft', 'upper left': 'topleft', 'top right': 'topright', 'upper right': 'topright',
+  'bottom left': 'bottomleft', 'lower left': 'bottomleft', 'bottom right': 'bottomright', 'lower right': 'bottomright',
+  top: 'top', bottom: 'bottom', left: 'left', right: 'right', center: 'center', centre: 'center', middle: 'center'
+}
+const EN_GO = /^(?:please |aila,? |hey aila,? )*(?:go|move|walk|run|head|sit|stay|get)(?: over)? to (?:the )?([a-z ]+?)(?: (?:corner|side|edge))?(?: of the screen)?(?: please)?$/
+const EN_NUDGE = /^(?:please |aila,? )*(?:move|go|scoot|shift|step)(?: a (?:bit|little))?(?: to the)? (left|right|up|down)(?: a (?:bit|little))?(?: please)?$/
+
+function parseEnglish(text: string): MoveTarget | null {
+  const s = text.toLowerCase().replace(/[.!?~]+$/, '').replace(/\s+/g, ' ').trim()
+  if (!/^[a-z ,']+$/.test(s) || s.length > 60) return null
+  if (/^(?:please |aila,? )*(?:go|come|get) back(?: home| to your (?:spot|place))?(?: please)?$|^go home$/.test(s)) return 'bottomright'
+  // 「move to the left」是去左边；「move left a bit」才是挪一步：先认去哪儿
+  const m = EN_GO.exec(s)
+  if (m && EN_PLACE[m[1].trim()]) return EN_PLACE[m[1].trim()]
+  const n = EN_NUDGE.exec(s)
+  return n ? ({ left: 'nudge-left', right: 'nudge-right', up: 'nudge-up', down: 'nudge-down' } as const)[n[1] as 'left' | 'right' | 'up' | 'down'] : null
+}
+
 /** 整句话就是让她走到某处时返回去哪；不是就返回 null（照常当聊天） */
 export function parseMove(text: string): MoveTarget | null {
+  const en = parseEnglish(text)
+  if (en) return en
   const t = tidy(text)
   if (!t || t.length > 20) return null
   if (HOME_RE.test(t)) return 'bottomright'
