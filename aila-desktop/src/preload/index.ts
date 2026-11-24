@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
+import type { UpdateInfo } from '../shared/update'
 import type {
   AccountStatus,
   AuthForm,
@@ -140,6 +141,10 @@ const api = {
   workbenchTakeFocus: (): Promise<WorkbenchFocus | null> => ipcRenderer.invoke('workbench:take-focus'),
   onWorkbenchFocus: (cb: (focus: WorkbenchFocus) => void): Unsubscribe => listen('workbench:focus', cb),
   /** 星图里点「问她」：让桌面上的她说（主进程只认星图窗口发来的） */
+  // 检查更新（只给主窗口）
+  updateCheck: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:check'),
+  updateLast: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:last'),
+  updateOpen: (url: string): void => ipcRenderer.send('update:open', url),
   sayToAila: (text: string): void => ipcRenderer.send('chat:say', text),
   // 主窗口的对话页：看她正在说的回复，回答她的确认，让她停下
   onChatLive: (cb: (r: LiveReply) => void): Unsubscribe => listen('chat:live', cb),

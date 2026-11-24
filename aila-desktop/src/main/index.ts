@@ -7,6 +7,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  Notification,
   powerMonitor,
   safeStorage,
   screen,
@@ -58,6 +59,7 @@ import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionNam
 import { droppedPathOk, openExtensionPage } from './extensions'
 import { loadModelFile } from './modelFiles'
 import { modelKind, type LoadedModel } from '../shared/model'
+import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
@@ -187,6 +189,44 @@ interface Settings {
   briefing?: BriefingState
   /** 她的一天：第一次见面的日子、下一件作品什么时候做、哪天写过日记…… */
   life?: LifeState
+  /** 检查更新：上次什么时候查的、哪个新版本已经提醒过（同一版只提醒一次） */
+  update?: { lastCheck?: string; notified?: string }
+}
+
+// ---------- 检查更新（shared/update.ts） ----------
+
+let lastUpdate: UpdateInfo | null = null
+
+/** 查 GitHub 上最新的发布。manual：你点了「检查更新」（自动检查有新版时只用系统通知提醒一次） */
+async function checkForUpdate(manual: boolean): Promise<UpdateInfo> {
+  const current = app.getVersion()
+  try {
+    const res = await fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'aila-desktop' },
+      signal: AbortSignal.timeout(8000)
+    })
+    if (res.status === 404) {
+      lastUpdate = { ...parseRelease({}, current), error: '还没有发布过版本。' }
+    } else if (!res.ok) {
+      throw new Error(`GitHub 返回 ${res.status}`)
+    } else {
+      lastUpdate = parseRelease(await res.json(), current)
+    }
+  } catch (err) {
+    const why = err instanceof Error && err.name === 'TimeoutError' ? '连 GitHub 超时了' : '连不上 GitHub'
+    return { ...parseRelease({}, current), error: `${why}，过会儿再试。` }
+  }
+  const s = loadSettings()
+  const state = { ...s.update, lastCheck: lastUpdate.checkedAt }
+  if (!manual && lastUpdate.newer && state.notified !== lastUpdate.latest && Notification.isSupported()) {
+    state.notified = lastUpdate.latest
+    const page = lastUpdate.page
+    const n = new Notification({ title: `艾拉有新版本 ${lastUpdate.latest}`, body: '点这里打开下载页。在 设置 → 运行状态 里也能看。' })
+    n.on('click', () => void shell.openExternal(page))
+    n.show()
+  }
+  saveSettings({ ...loadSettings(), update: state })
+  return lastUpdate
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -663,6 +703,12 @@ function registerIpc(): void {
     if (!fromMainWindow(e)) return
     account?.deleteMemory(String(id))
     characterEvent({ kind: 'forget-one' })
+  })
+  // 检查更新、打开下载页：只认主窗口；打开的地址只能是这个仓库在 GitHub 上的
+  ipcMain.handle('update:check', (e) => (fromMainWindow(e) ? checkForUpdate(true) : null))
+  ipcMain.handle('update:last', (e) => (fromMainWindow(e) ? (lastUpdate ?? { ...parseRelease({}, app.getVersion()), checkedAt: '' }) : null))
+  ipcMain.on('update:open', (e, url: unknown) => {
+    if (fromMainWindow(e) && isReleaseUrl(url)) void shell.openExternal(url)
   })
   // 你自己加、改一条记忆：只认主窗口，内容检查过（shared/cloud.ts）
   ipcMain.handle('memory:edit', (e, raw: unknown) => {
@@ -1211,6 +1257,10 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   desktop.start()
+  // 自动检查更新：装好的版本才查，开着开关，一天最多一次；启动一分钟后再查，不和启动抢网络
+  setTimeout(() => {
+    if (app.isPackaged && desktop?.prefs.checkUpdates && dueForCheck(loadSettings().update?.lastCheck)) void checkForUpdate(false)
+  }, 60_000)
   // 设置里关了「桌面上显示她」：打开艾拉就是打开主窗口（不然只剩托盘图标，像是没打开）
   if (!desktop.prefs.showCharacter) openMain({ page: 'tasks' })
   if (!globalShortcut.register(CHAT_SHORTCUT, openChat)) {
