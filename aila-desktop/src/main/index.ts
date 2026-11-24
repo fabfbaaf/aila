@@ -41,7 +41,7 @@ import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import WebSocket from 'ws'
 import { AI_SERVICE_URL, answerConfirm, cleanLive, streamChat, type ChatMessage, type LiveReply } from '../shared/chat'
-import type { AuthForm, MemoryOp, StoredMessage } from '../shared/cloud'
+import { cleanMemoryEdit, type AuthForm, type MemoryOp, type StoredMessage } from '../shared/cloud'
 import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
@@ -656,6 +656,14 @@ function registerIpc(): void {
     if (!fromMainWindow(e)) return
     account?.deleteMemory(String(id))
     characterEvent({ kind: 'forget-one' })
+  })
+  // 你自己加、改一条记忆：只认主窗口，内容检查过（shared/cloud.ts）
+  ipcMain.handle('memory:edit', (e, raw: unknown) => {
+    if (!fromMainWindow(e)) return MAIN_ONLY
+    const op = cleanMemoryEdit(raw)
+    if (typeof op === 'string') return { ok: false, error: op }
+    if (!account?.editMemory(op)) return { ok: false, error: '这条记忆已经不在了（可能在别的设备上删了）。' }
+    return { ok: true }
   })
   // 经历（对话摘要、编程任务做了什么）：只在本机的 AI 服务里，只给主窗口看、只让主窗口删
   ipcMain.handle('memory:episodes', (e) => (fromMainWindow(e) ? listEpisodes(AI_URL) : []))

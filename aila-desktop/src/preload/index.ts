@@ -10,6 +10,7 @@ import type {
   RemoteChanges,
   SkillInfo,
   MemoryEpisode,
+  MemoryKind,
   StoredMemory,
   StoredMessage
 } from '../shared/cloud'
@@ -113,6 +114,9 @@ const api = {
   memoryList: (): Promise<StoredMemory[]> => ipcRenderer.invoke('memory:list'),
   memoryDelete: (id: string): void => ipcRenderer.send('memory:delete', id),
   memoryForgetAll: (): Promise<number> => ipcRenderer.invoke('memory:forget-all'),
+  /** 自己加一条（op: 'add'）或改一条（op: 'update', id） */
+  memoryEdit: (edit: { op: 'add' | 'update'; id?: string; content: string; kind: MemoryKind; expiresAt?: string | null }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('memory:edit', edit),
   memoryEpisodes: (): Promise<MemoryEpisode[]> => ipcRenderer.invoke('memory:episodes'),
   /** id 不给就是全部删 */
   memoryForgetEpisode: (id?: string): Promise<boolean> => ipcRenderer.invoke('memory:forget-episode', id),

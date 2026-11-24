@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref } from 'vue'
-import type { MemoryEpisode, MemoryKind, StoredMemory } from '../../../../shared/cloud'
+import { MEMORY_MAX, type MemoryEpisode, type MemoryKind, type StoredMemory } from '../../../../shared/cloud'
 import { bridge } from '../../platform/bridge'
 import { store } from '../store'
 
@@ -26,6 +26,63 @@ function until(m: StoredMemory): string {
 
 function forget(id: string): void {
   api.memoryDelete(id)
+}
+
+// ---------- 自己加、改 ----------
+
+interface Draft {
+  content: string
+  kind: MemoryKind
+  /** 日程：到哪天（YYYY-MM-DD） */
+  until: string
+}
+
+const adding = ref<Draft>({ content: '', kind: 'profile', until: '' })
+const addMsg = ref('')
+const editingId = ref('')
+const editing = ref<Draft>({ content: '', kind: 'other', until: '' })
+const editMsg = ref('')
+
+/** 日程的日期按那天的最后一刻算过期 */
+function expiresOf(d: Draft): string | null {
+  return d.kind === 'event' && d.until ? new Date(`${d.until}T23:59:59`).toISOString() : null
+}
+
+async function add(): Promise<void> {
+  const r = await api.memoryEdit({ op: 'add', content: adding.value.content, kind: adding.value.kind, expiresAt: expiresOf(adding.value) })
+  if (!r.ok) {
+    addMsg.value = r.error ?? '没存上。'
+    return
+  }
+  addMsg.value = '记下了。'
+  adding.value = { content: '', kind: adding.value.kind, until: '' }
+}
+
+function startEdit(m: StoredMemory): void {
+  editingId.value = m.id
+  editMsg.value = ''
+  const until = m.expiresAt ? new Date(m.expiresAt) : null
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  editing.value = {
+    content: m.content,
+    kind: m.kind,
+    until: until ? `${until.getFullYear()}-${pad(until.getMonth() + 1)}-${pad(until.getDate())}` : ''
+  }
+}
+
+async function saveEdit(): Promise<void> {
+  const r = await api.memoryEdit({
+    op: 'update',
+    id: editingId.value,
+    content: editing.value.content,
+    kind: editing.value.kind,
+    expiresAt: expiresOf(editing.value)
+  })
+  if (!r.ok) {
+    editMsg.value = r.error ?? '没存上。'
+    return
+  }
+  editingId.value = ''
 }
 
 // 经历：较早聊天的摘要、编程任务每一轮做了什么（只在这台电脑的 AI 服务里）
@@ -79,17 +136,55 @@ async function forgetAll(): Promise<void> {
     登录后在你的几台电脑之间同步，在一台上删掉，别的也会删掉。
   </p>
 
+  <div class="card add">
+    <h3>告诉她一件事</h3>
+    <div class="row">
+      <input
+        v-model="adding.content"
+        :maxlength="MEMORY_MAX"
+        placeholder="比如：我在杭州工作 / 我不喝咖啡 / 周五要交周报"
+        aria-label="要她记住的事"
+        @keydown.enter="add"
+      />
+      <select v-model="adding.kind" aria-label="哪一类">
+        <option v-for="g in GROUPS" :key="g.kind" :value="g.kind">{{ g.name }}</option>
+      </select>
+      <input v-if="adding.kind === 'event'" v-model="adding.until" type="date" aria-label="到哪天" title="过了这天就不再提" />
+      <button class="btn" :disabled="!adding.content.trim()" @click="add">记下</button>
+    </div>
+    <p v-if="addMsg" class="hint">{{ addMsg }}</p>
+  </div>
+
   <div v-if="!store.memories.length" class="card empty">
-    她还没记住什么。聊天时说到你自己的事（比如「我养了一只猫」），她会慢慢记住。
+    她还没记住什么。聊天时说到你自己的事（比如「我养了一只猫」），她会慢慢记住；也可以在上面直接告诉她。
   </div>
 
   <div v-for="g in groups" :key="g.kind" class="card">
     <h3>{{ g.name }} <span class="count">{{ g.items.length }}</span></h3>
     <table class="list">
       <tr v-for="m in g.items" :key="m.id">
-        <td>{{ m.content }}</td>
-        <td class="meta">{{ until(m) }}</td>
-        <td class="del"><button class="x" title="让她忘掉这件事" @click="forget(m.id)">×</button></td>
+        <template v-if="editingId === m.id">
+          <td colspan="3">
+            <div class="row">
+              <input v-model="editing.content" :maxlength="MEMORY_MAX" aria-label="改成" @keydown.enter="saveEdit" @keydown.esc="editingId = ''" />
+              <select v-model="editing.kind" aria-label="哪一类">
+                <option v-for="k in GROUPS" :key="k.kind" :value="k.kind">{{ k.name }}</option>
+              </select>
+              <input v-if="editing.kind === 'event'" v-model="editing.until" type="date" aria-label="到哪天" />
+              <button class="btn" @click="saveEdit">保存</button>
+              <button class="link" @click="editingId = ''">算了</button>
+            </div>
+            <p v-if="editMsg" class="hint">{{ editMsg }}</p>
+          </td>
+        </template>
+        <template v-else>
+          <td>{{ m.content }}</td>
+          <td class="meta">{{ until(m) }}</td>
+          <td class="del">
+            <button class="x" title="改一下" @click="startEdit(m)">✎</button>
+            <button class="x" title="让她忘掉这件事" @click="forget(m.id)">×</button>
+          </td>
+        </template>
       </tr>
     </table>
   </div>
@@ -140,6 +235,25 @@ async function forgetAll(): Promise<void> {
 
 .del {
   width: 1%;
+  white-space: nowrap;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.row input:not([type='date']) {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .sub {
