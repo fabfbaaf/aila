@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t, dateText } from '../../i18n'
 import { computed, onActivated, ref } from 'vue'
 import { DEFAULT_SERVER_URL, type AccountStatus, type AuthForm } from '../../../../shared/cloud'
 import { bridge } from '../../platform/bridge'
@@ -27,7 +28,7 @@ async function submit(): Promise<void> {
   if (busy.value) return
   error.value = ''
   if (!email.value.trim() || !password.value) {
-    error.value = '请填写邮箱和密码'
+    error.value = t('请填写邮箱和密码')
     return
   }
   busy.value = true
@@ -41,7 +42,7 @@ async function submit(): Promise<void> {
   busy.value = false
   password.value = '' // 密码不留在界面里
   if (res.ok) await loadDetails()
-  else error.value = res.error ?? '没有成功'
+  else error.value = res.error ?? t('没有成功')
 }
 
 async function logout(): Promise<void> {
@@ -63,88 +64,88 @@ async function loadDetails(): Promise<void> {
 
 function since(iso: string): string {
   const d = new Date(iso)
-  return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return dateText(d, true)
 }
 
 onActivated(loadDetails)
 </script>
 
 <template>
-  <h2>账号与同步</h2>
-  <p class="lead">登录后，聊天记录、她记得的事和部分设置会在你的几台电脑之间同步。不登录也能用，只是都留在这台电脑上。</p>
+  <h2>{{ t('账号与同步') }}</h2>
+  <p class="lead">{{ t('登录后，聊天记录、她记得的事和部分设置会在你的几台电脑之间同步。不登录也能用，只是都留在这台电脑上。') }}</p>
 
   <template v-if="signedIn && store.account">
     <div class="card">
       <h3>{{ store.account.displayName }}</h3>
       <div class="row">
-        <span class="label">邮箱</span>
+        <span class="label">{{ t('邮箱') }}</span>
         <span>{{ store.account.email }}</span>
       </div>
       <div class="row">
-        <span class="label">同步状态</span>
+        <span class="label">{{ t('同步状态') }}</span>
         <span>
-          <span class="tag" :class="store.account.status === 'online' ? 'good' : 'warn'">{{ STATUS[store.account.status] }}</span>
-          <span v-if="store.account.pending" class="hint" style="display: inline">还有 {{ store.account.pending }} 条没传上去</span>
+          <span class="tag" :class="store.account.status === 'online' ? 'good' : 'warn'">{{ t(STATUS[store.account.status] ?? '') }}</span>
+          <span v-if="store.account.pending" class="hint" style="display: inline">{{ t('还有 {n} 条没传上去', { n: store.account.pending }) }}</span>
         </span>
       </div>
       <div class="row">
-        <span class="label">服务器</span>
+        <span class="label">{{ t('服务器') }}</span>
         <span class="hint" style="margin: 0">{{ store.account.serverUrl }}</span>
       </div>
     </div>
 
     <div v-if="details?.devices?.length" class="card">
-      <h3>登录着的电脑</h3>
+      <h3>{{ t('登录着的电脑') }}</h3>
       <table class="list">
         <tr v-for="d in details.devices" :key="d.deviceId">
-          <td>{{ d.deviceName }}<span v-if="d.deviceId === store.account.currentDeviceId" class="tag good" style="margin-left: 6px">这台</span></td>
-          <td class="hint">最近活动 {{ since(d.lastActiveAt) }}</td>
+          <td>{{ d.deviceName }}<span v-if="d.deviceId === store.account.currentDeviceId" class="tag good" style="margin-left: 6px">{{ t('这台') }}</span></td>
+          <td class="hint">{{ t('最近活动 {when}', { when: since(d.lastActiveAt) }) }}</td>
         </tr>
       </table>
     </div>
 
     <div class="actions">
       <button class="btn" :class="{ danger: confirmLogout }" :disabled="busy" @click="logout">
-        {{ confirmLogout ? '退出后这台电脑上的聊天记录和记忆会清空（云端的还在），确定吗？' : '退出登录' }}
+        {{ confirmLogout ? t('退出后这台电脑上的聊天记录和记忆会清空（云端的还在），确定吗？') : t('退出登录') }}
       </button>
-      <button v-if="confirmLogout" class="link" @click="confirmLogout = false">算了</button>
+      <button v-if="confirmLogout" class="link" @click="confirmLogout = false">{{ t('算了') }}</button>
     </div>
   </template>
 
   <div v-else class="card">
     <div class="tabs">
-      <button :class="{ on: mode === 'login' }" @click="mode = 'login'">登录</button>
-      <button :class="{ on: mode === 'register' }" @click="mode = 'register'">注册</button>
+      <button :class="{ on: mode === 'login' }" @click="mode = 'login'">{{ t('登录') }}</button>
+      <button :class="{ on: mode === 'register' }" @click="mode = 'register'">{{ t('注册') }}</button>
     </div>
     <div class="row">
-      <span class="label">邮箱</span>
+      <span class="label">{{ t('邮箱') }}</span>
       <input v-model="email" type="email" autocomplete="username" spellcheck="false" @keydown.enter="submit" />
     </div>
     <div class="row">
-      <span class="label">密码</span>
+      <span class="label">{{ t('密码') }}</span>
       <input
         v-model="password"
         type="password"
-        :placeholder="mode === 'register' ? '至少 8 位' : ''"
+        :placeholder="mode === 'register' ? t('至少 8 位') : ''"
         :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
         @keydown.enter="submit"
       />
     </div>
     <div v-if="mode === 'register'" class="row">
-      <span class="label">她怎么称呼你</span>
-      <input v-model="displayName" type="text" maxlength="50" placeholder="可以不填" />
+      <span class="label">{{ t('她怎么称呼你') }}</span>
+      <input v-model="displayName" type="text" maxlength="50" :placeholder="t('可以不填')" />
     </div>
     <div class="row">
-      <span class="label">同步服务器</span>
+      <span class="label">{{ t('同步服务器') }}</span>
       <div>
         <input v-model="serverUrl" type="text" spellcheck="false" />
-        <span class="hint">自己部署的 aila-server 地址。本机调试：在 aila-server 目录运行 mvnw spring-boot:test-run</span>
+        <span class="hint">{{ t('自己部署的 aila-server 地址。本机调试：在 aila-server 目录运行 mvnw spring-boot:test-run') }}</span>
       </div>
     </div>
     <p v-if="error" class="msg error">{{ error }}</p>
     <div class="actions">
       <button class="btn primary" :disabled="busy" @click="submit">
-        {{ busy ? '请稍等…' : mode === 'login' ? '登录' : '注册并登录' }}
+        {{ busy ? t('请稍等…') : mode === 'login' ? t('登录') : t('注册并登录') }}
       </button>
     </div>
   </div>

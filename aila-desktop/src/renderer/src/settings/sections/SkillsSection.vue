@@ -4,6 +4,7 @@
  * embedded：嵌在设置的「技能和扩展」页里（不单独成页，标题换小一号）。
  * 外部工具（MCP）的加、删、开关在同一页的 McpCard 里，这里不再重复。
  */
+import { t } from '../../i18n'
 import { computed, onActivated, onMounted, ref } from 'vue'
 import type { SkillInfo } from '../../../../shared/cloud'
 import type { ScreenStatus } from '../../../../shared/settings'
@@ -33,9 +34,10 @@ const funnel = computed(() => {
   if (!s || !s.ticks) return ''
   const pct = (n: number): string => `${Math.round((100 * n) / s.ticks)}%`
   return (
-    `上次一共看了 ${s.ticks} 次：${s.other_app} 次前台不是写代码的程序（${pct(s.other_app)}，没截图），` +
-    `${s.unchanged + s.unsettled} 次画面没变或还在变（${pct(s.unchanged + s.unsettled)}），` +
-    `识别文字 ${s.ocr} 次（${pct(s.ocr)}，平均 ${s.ocr_avg_ms} 毫秒），认出报错 ${s.errors} 次，问了你 ${s.asked} 次。`
+    t('上次一共看了 {ticks} 次：{other} 次前台不是写代码的程序（{otherPct}，没截图），{same} 次画面没变或还在变（{samePct}），识别文字 {ocr} 次（{ocrPct}，平均 {ms} 毫秒），认出报错 {errors} 次，问了你 {asked} 次。', {
+      ticks: s.ticks, other: s.other_app, otherPct: pct(s.other_app), same: s.unchanged + s.unsettled,
+      samePct: pct(s.unchanged + s.unsettled), ocr: s.ocr, ocrPct: pct(s.ocr), ms: s.ocr_avg_ms, errors: s.errors, asked: s.asked
+    })
   )
 })
 
@@ -45,7 +47,7 @@ function toggle(s: SkillRow, on: boolean): void {
 }
 
 function unavailable(s: SkillRow): string {
-  return s.id === 'knowledge' ? '资料库里还没有文件' : '暂时用不了'
+  return s.id === 'knowledge' ? t('资料库里还没有文件') : t('暂时用不了')
 }
 
 onMounted(load)
@@ -54,17 +56,17 @@ onActivated(load)
 
 <template>
   <template v-if="embedded">
-    <h3 class="section-title">对话里的技能包</h3>
-    <p class="hint section-lead">和她聊天时能用的工具按技能包分组，可以单独开关；扩展带的工具服务也会出现在这里。登录后开关跟着账号同步。</p>
+    <h3 class="section-title">{{ t('对话里的技能包') }}</h3>
+    <p class="hint section-lead">{{ t('和她聊天时能用的工具按技能包分组，可以单独开关；扩展带的工具服务也会出现在这里。登录后开关跟着账号同步。') }}</p>
   </template>
   <template v-else>
-    <h2>技能包</h2>
-    <p class="lead">她能用的工具按技能包分组，可以单独开关。关掉后她就不会再用那一类工具。登录后开关跟着账号同步。</p>
+    <h2>{{ t('技能包') }}</h2>
+    <p class="lead">{{ t('她能用的工具按技能包分组，可以单独开关。关掉后她就不会再用那一类工具。登录后开关跟着账号同步。') }}</p>
   </template>
 
   <div v-if="loaded && !skills" class="offline">
-    连不上 AI 服务，请先启动 aila-ai。
-    <button class="link" @click="load">重试</button>
+    {{ t('连不上 AI 服务，请先启动 aila-ai。') }}
+    <button class="link" @click="load">{{ t('重试') }}</button>
   </div>
 
   <div v-for="s in skills ?? []" :key="s.id" class="card skill">
@@ -76,8 +78,8 @@ onActivated(load)
       <Toggle :model-value="s.enabled" @update:model-value="(v) => toggle(s, v)" />
     </div>
     <div v-if="s.tools?.length" class="tools">
-      <span v-for="t in s.tools" :key="t.name" class="tag" :class="{ warn: t.risk !== 'read' }">
-        {{ t.name }}{{ t.risk === 'mixed' ? ' · 有时要你确认' : t.risk !== 'read' ? ' · 要你确认' : '' }}
+      <span v-for="tool in s.tools" :key="tool.name" class="tag" :class="{ warn: tool.risk !== 'read' }">
+        {{ tool.name }}{{ tool.risk === 'mixed' ? t(' · 有时要你确认') : tool.risk !== 'read' ? t(' · 要你确认') : '' }}
       </span>
     </div>
   </div>
@@ -85,19 +87,18 @@ onActivated(load)
   <div class="card skill">
     <div class="top">
       <div>
-        <h3>留意屏幕上的报错</h3>
-        <span class="hint">开着时她每 2 秒看一眼前台窗口，看到报错先问你要不要帮忙。每台电脑单独开关，默认关闭。</span>
+        <h3>{{ t('留意屏幕上的报错') }}</h3>
+        <span class="hint">{{ t('开着时她每 2 秒看一眼前台窗口，看到报错先问你要不要帮忙。每台电脑单独开关，默认关闭。') }}</span>
       </div>
       <Toggle :model-value="store.voice.watch" @update:model-value="(v) => api.voiceSet('watch', v)" />
     </div>
-    <p v-if="screen && !screen.available" class="hint">这台电脑上用不了（现在只支持 Windows）。</p>
+    <p v-if="screen && !screen.available" class="hint">{{ t('这台电脑上用不了（现在只支持 Windows）。') }}</p>
     <p class="hint">
-      只看写代码的程序，别的窗口连截图都不截：
+      {{ t('只看写代码的程序，别的窗口连截图都不截：') }}
       <span v-for="a in screen?.apps ?? []" :key="a" class="tag">{{ a.replace(/\.exe$/, '') }}</span>
     </p>
     <p class="hint">
-      截图和识别出的文字只在内存里，不存硬盘、不上传；同一个错误只问一次；你点「好」才把报错附近的几行（密钥会打码）交给大模型。
-      开着时她脚边会显示「正在看屏幕」。
+      {{ t('截图和识别出的文字只在内存里，不存硬盘、不上传；同一个错误只问一次；你点「好」才把报错附近的几行（密钥会打码）交给大模型。开着时她脚边会显示「正在看屏幕」。') }}
     </p>
     <p v-if="funnel" class="hint">{{ funnel }}</p>
   </div>

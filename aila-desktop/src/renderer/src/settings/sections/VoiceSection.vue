@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../../i18n'
 import { computed, onActivated, onUnmounted, ref } from 'vue'
 import { describeDownload, IDLE_DOWNLOAD, type ModelDownloadState } from '../../../../shared/models'
 import type { AiSettings, AiSettingsUpdate } from '../../../../shared/settings'
@@ -24,7 +25,7 @@ const SAMPLE = '……你好，我是艾拉。今天也请多指教。'
 async function load(): Promise<void> {
   const res = await api.aiSettings()
   if (!res.ok || !res.data) {
-    offline.value = res.error ?? '读不到设置'
+    offline.value = res.error ?? t('读不到设置')
     return
   }
   offline.value = ''
@@ -61,16 +62,16 @@ async function save(): Promise<void> {
   busy.value = false
   if (res.ok && res.data) {
     fill(res.data)
-    msg.value = { ok: true, text: '已保存。换了声音要等几秒重新加载' }
+    msg.value = { ok: true, text: t('已保存。换了声音要等几秒重新加载') }
   } else {
-    msg.value = { ok: false, text: res.error ?? '没有保存成功' }
+    msg.value = { ok: false, text: res.error ?? t('没有保存成功') }
   }
 }
 
 /** 用现在保存的设置念一句给你听（新设置要先保存，加载好之后再试） */
 async function listen(): Promise<void> {
   try {
-    const wav = await api.synthesize(SAMPLE)
+    const wav = await api.synthesize(t(SAMPLE))
     if (!wav) return
     const ctx = new AudioContext()
     const source = ctx.createBufferSource()
@@ -79,7 +80,7 @@ async function listen(): Promise<void> {
     source.onended = () => void ctx.close()
     source.start()
   } catch {
-    msg.value = { ok: false, text: '试听失败：语音合成还没准备好（刚换了声音的话等几秒再试）' }
+    msg.value = { ok: false, text: t('试听失败：语音合成还没准备好（刚换了声音的话等几秒再试）') }
   }
 }
 
@@ -98,7 +99,7 @@ onUnmounted(() => stopModels?.())
 
 async function startDownload(): Promise<void> {
   const res = await api.modelsDownload()
-  if (!res.ok) download.value = { ...IDLE_DOWNLOAD, error: res.error ?? '没开始下载' }
+  if (!res.ok) download.value = { ...IDLE_DOWNLOAD, error: res.error ?? t('没开始下载') }
 }
 
 onActivated(async () => {
@@ -109,109 +110,108 @@ onActivated(async () => {
 </script>
 
 <template>
-  <h2>语音</h2>
-  <p class="lead">她什么时候听、怎么说话。声音和识别都在这台电脑上处理，不会上传。</p>
+  <h2>{{ t('语音') }}</h2>
+  <p class="lead">{{ t('她什么时候听、怎么说话。声音和识别都在这台电脑上处理，不会上传。') }}</p>
 
   <div class="card">
-    <h3>开关</h3>
+    <h3>{{ t('开关') }}</h3>
     <div class="row">
-      <span class="label">语音唤醒</span>
+      <span class="label">{{ t('语音唤醒') }}</span>
       <div>
         <Toggle :model-value="store.voice.wake" @update:model-value="(v) => api.voiceSet('wake', v)" />
-        <span class="hint">打开后麦克风一直开着，等你说「你好艾拉」。每台电脑单独决定。</span>
+        <span class="hint">{{ t('打开后麦克风一直开着，等你说「你好艾拉」。每台电脑单独决定。') }}</span>
       </div>
     </div>
     <div class="row">
-      <span class="label">出声说话</span>
+      <span class="label">{{ t('出声说话') }}</span>
       <div>
         <Toggle :model-value="store.voice.speak" @update:model-value="(v) => api.voiceSet('speak', v)" />
-        <span class="hint">关掉后她只打字。登录后会跟着账号同步。</span>
+        <span class="hint">{{ t('关掉后她只打字。登录后会跟着账号同步。') }}</span>
       </div>
     </div>
   </div>
 
   <div v-if="offline" class="offline">
-    {{ offline }}（声音和识别的设置要 AI 服务开着才能改）
-    <button class="link" @click="load">重试</button>
+    {{ offline }}{{ t('（声音和识别的设置要 AI 服务开着才能改）') }}
+    <button class="link" @click="load">{{ t('重试') }}</button>
   </div>
 
   <template v-else-if="settings">
     <div v-if="showDownload" class="card">
-      <h3>语音模型</h3>
+      <h3>{{ t('语音模型') }}</h3>
       <div class="row">
-        <span class="label">{{ missing.length ? '还没下载' : '下载' }}</span>
+        <span class="label">{{ missing.length ? t('还没下载') : t('下载') }}</span>
         <div>
           <span class="hint">
-            唤醒、听写、说话都要语音模型，约 460MB，从 sherpa-onnx 的 GitHub 发布页下载，放在这台电脑上。
-            下载好以后 AI 服务会自动重启一次。
+            {{ t('唤醒、听写、说话都要语音模型，约 460MB，从 sherpa-onnx 的 GitHub 发布页下载，放在这台电脑上。下载好以后 AI 服务会自动重启一次。') }}
           </span>
           <div v-if="download.running && !download.finished" class="bar"><div :style="{ width: `${percent}%` }"></div></div>
           <div v-if="describeDownload(download)" class="hint" :class="{ error: !!download.error }">{{ describeDownload(download) }}</div>
           <button v-if="missing.length && !download.running" class="btn" @click="startDownload">
-            {{ download.error ? '再试一次' : '下载语音模型' }}
+            {{ download.error ? t('再试一次') : t('下载语音模型') }}
           </button>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h3>她的声音</h3>
+      <h3>{{ t('她的声音') }}</h3>
       <div class="row">
-        <span class="label">语音引擎</span>
+        <span class="label">{{ t('语音引擎') }}</span>
         <div>
           <select v-model="engine">
             <option v-for="e in settings.voice.ttsEngines" :key="e.id" :value="e.id" :disabled="!e.installed">
-              {{ e.name }}{{ e.installed ? '' : '（模型没下载）' }}
+              {{ e.name }}{{ e.installed ? '' : t('（模型没下载）') }}
             </option>
           </select>
         </div>
       </div>
       <div v-if="engine === 'kokoro'" class="row">
-        <span class="label">音色编号</span>
+        <span class="label">{{ t('音色编号') }}</span>
         <div>
           <input v-model.number="speaker" type="number" min="0" max="102" style="width: 100px" />
-          <span class="hint">Kokoro 有 103 种音色，3–57 号大多是中文女声。</span>
+          <span class="hint">{{ t('Kokoro 有 103 种音色，3–57 号大多是中文女声。') }}</span>
         </div>
       </div>
       <div class="row">
-        <span class="label">语速</span>
+        <span class="label">{{ t('语速') }}</span>
         <div>
           <input v-model.number="speed" type="range" min="0.7" max="1.5" step="0.05" />
-          <span class="value">{{ speed.toFixed(2) }} 倍</span>
+          <span class="value">{{ t('{n} 倍', { n: speed.toFixed(2) }) }}</span>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h3>听你说话</h3>
+      <h3>{{ t('听你说话') }}</h3>
       <div class="row">
-        <span class="label">唤醒灵敏度</span>
+        <span class="label">{{ t('唤醒灵敏度') }}</span>
         <div>
           <input v-model.number="wake" type="range" min="0.1" max="0.5" step="0.01" />
           <span class="value">{{ wake.toFixed(2) }}</span>
-          <span class="hint">越小越容易被叫醒，也越容易误唤醒；叫了几次都没反应就往小调。</span>
+          <span class="hint">{{ t('越小越容易被叫醒，也越容易误唤醒；叫了几次都没反应就往小调。') }}</span>
         </div>
       </div>
       <div class="row">
-        <span class="label">停顿多久算说完</span>
+        <span class="label">{{ t('停顿多久算说完') }}</span>
         <div>
           <input v-model.number="silence" type="range" min="0.25" max="1" step="0.05" />
-          <span class="value">{{ silence.toFixed(2) }} 秒</span>
-          <span class="hint">太短会把一句话切断，太长她反应慢。说话习惯慢的话调大一点。</span>
+          <span class="value">{{ t('{n} 秒', { n: silence.toFixed(2) }) }}</span>
+          <span class="hint">{{ t('太短会把一句话切断，太长她反应慢。说话习惯慢的话调大一点。') }}</span>
         </div>
       </div>
       <div class="row">
-        <span class="label">识别语种</span>
+        <span class="label">{{ t('识别语种') }}</span>
         <select v-model="language">
-          <option value="zh">中文（中英混着说也能认，短句更准）</option>
-          <option value="auto">自动判断（经常说别的语言时用）</option>
+          <option value="zh">{{ t('中文（中英混着说也能认，短句更准）') }}</option>
+          <option value="auto">{{ t('自动判断（经常说别的语言时用）') }}</option>
         </select>
       </div>
     </div>
 
     <div class="actions">
-      <button class="btn primary" :disabled="busy || !dirty" @click="save">保存</button>
-      <button class="btn" @click="listen">试听</button>
+      <button class="btn primary" :disabled="busy || !dirty" @click="save">{{ t('保存') }}</button>
+      <button class="btn" @click="listen">{{ t('试听') }}</button>
       <span v-if="msg" class="msg" :class="msg.ok ? 'ok' : 'error'">{{ msg.text }}</span>
     </div>
   </template>

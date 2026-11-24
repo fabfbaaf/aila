@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { computed, nextTick, ref, watch } from 'vue'
 import { diffLines, type BubbleAsk } from './bubble'
 
@@ -47,9 +48,9 @@ watch(
       </div>
       <div v-if="fullText && !ask" class="read-reply" data-interactive>
         <button type="button" :aria-expanded="expanded" aria-controls="bubble-full-reply" @click="emit('toggleFullText')">
-          {{ expanded ? '收起全文' : '看全文' }}
+          {{ expanded ? t('收起全文') : t('看全文') }}
         </button>
-        <div v-show="expanded" id="bubble-full-reply" class="full-reply" role="region" aria-label="回复全文" tabindex="0">{{ fullText }}</div>
+        <div v-show="expanded" id="bubble-full-reply" class="full-reply" role="region" :aria-label="t('回复全文')" tabindex="0">{{ fullText }}</div>
       </div>
     </div>
   </Transition>
@@ -57,11 +58,12 @@ watch(
 
 <style scoped>
 .bubble {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 250px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
+  max-width: min(278px, 100%);
   padding: 9px 14px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.95);
@@ -79,15 +81,18 @@ watch(
   overflow: hidden;
 }
 
-.ask {
+.ask,
+.read-reply {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   margin-top: 6px;
   pointer-events: auto;
 }
 
-.read-reply {
-  margin-top: 6px;
-  text-align: right;
-  pointer-events: auto;
+.read-reply > button {
+  align-self: flex-end;
+  flex-shrink: 0;
 }
 
 .read-reply :focus-visible {
@@ -163,6 +168,7 @@ watch(
 
 .buttons {
   display: flex;
+  flex-shrink: 0;
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
@@ -211,6 +217,6 @@ button:hover {
 .bubble-enter-from,
 .bubble-leave-to {
   opacity: 0;
-  transform: translate(-50%, 6px);
+  transform: translateY(6px);
 }
 </style>

@@ -59,6 +59,7 @@ import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionNam
 import { droppedPathOk, openExtensionPage } from './extensions'
 import { loadModelFile } from './modelFiles'
 import { modelKind, type LoadedModel } from '../shared/model'
+import { isLangPref, resolveLang, translate, type Lang, type LangPref, type Params } from '../shared/i18n'
 import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
@@ -98,7 +99,10 @@ const serviceKeeper = createServiceKeeper({
     broadcast('service:state', state)
     const up = state.phase === 'ready' || state.phase === 'external'
     // AI 服务刚起来：把记忆推过去一次（它重启、换了数据目录也能对上）
-    if (up && servicePhase !== 'ready' && servicePhase !== 'external' && account) pushFacts(account.memories.list())
+    if (up && servicePhase !== 'ready' && servicePhase !== 'external') {
+      if (account) pushFacts(account.memories.list())
+      pushLanguage()
+    }
     servicePhase = state.phase
   }
 })
@@ -191,6 +195,23 @@ interface Settings {
   life?: LifeState
   /** 检查更新：上次什么时候查的、哪个新版本已经提醒过（同一版只提醒一次） */
   update?: { lastCheck?: string; notified?: string }
+  /** 界面语言：auto 跟着系统 */
+  language?: LangPref
+}
+
+// ---------- 界面语言（shared/i18n.ts） ----------
+
+/** 现在用哪种语言（菜单、通知用；页面那边由 lang:changed 通知） */
+let uiLang: Lang = 'zh'
+const tm = (zh: string, params?: Params): string => translate(uiLang, zh, params)
+
+function applyLanguage(): void {
+  uiLang = resolveLang(loadSettings().language, app.getLocale())
+}
+
+/** 告诉 AI 服务（她用哪种语言回答）；服务没开也没关系，服务起来时会再推一次 */
+function pushLanguage(): void {
+  void putAiSettings(AI_URL, { language: uiLang }).catch(() => undefined)
 }
 
 // ---------- 检查更新（shared/update.ts） ----------
@@ -206,22 +227,22 @@ async function checkForUpdate(manual: boolean): Promise<UpdateInfo> {
       signal: AbortSignal.timeout(8000)
     })
     if (res.status === 404) {
-      lastUpdate = { ...parseRelease({}, current), error: '还没有发布过版本。' }
+      lastUpdate = { ...parseRelease({}, current), error: tm('还没有发布过版本。') }
     } else if (!res.ok) {
       throw new Error(`GitHub 返回 ${res.status}`)
     } else {
       lastUpdate = parseRelease(await res.json(), current)
     }
   } catch (err) {
-    const why = err instanceof Error && err.name === 'TimeoutError' ? '连 GitHub 超时了' : '连不上 GitHub'
-    return { ...parseRelease({}, current), error: `${why}，过会儿再试。` }
+    const why = err instanceof Error && err.name === 'TimeoutError' ? tm('连 GitHub 超时了') : tm('连不上 GitHub')
+    return { ...parseRelease({}, current), error: tm('{why}，过会儿再试。', { why }) }
   }
   const s = loadSettings()
   const state = { ...s.update, lastCheck: lastUpdate.checkedAt }
   if (!manual && lastUpdate.newer && state.notified !== lastUpdate.latest && Notification.isSupported()) {
     state.notified = lastUpdate.latest
     const page = lastUpdate.page
-    const n = new Notification({ title: `艾拉有新版本 ${lastUpdate.latest}`, body: '点这里打开下载页。在 设置 → 运行状态 里也能看。' })
+    const n = new Notification({ title: tm('艾拉有新版本 {v}', { v: lastUpdate.latest }), body: tm('点这里打开下载页。在 设置 → 运行状态 里也能看。') })
     n.on('click', () => void shell.openExternal(page))
     n.show()
   }
@@ -315,7 +336,7 @@ function openMain(route: ShellRoute = { page: 'tasks' }): void {
     height: 820,
     minWidth: 900,
     minHeight: 560,
-    title: '艾拉',
+    title: tm('艾拉'),
     backgroundColor: '#0f1117',
     autoHideMenuBar: true,
     show: false,
@@ -401,23 +422,23 @@ function snapToEdges(): void {
 async function chooseModel(parent: BrowserWindow | null = win): Promise<void> {
   if (!win || !parent) return
   const result = await dialog.showOpenDialog(parent, {
-    title: '选择形象：VRM 模型，或者 Live2D 模型的 .model3.json',
+    title: tm('选择形象：VRM 模型，或者 Live2D 模型的 .model3.json'),
     filters: [
-      { name: 'VRM 或 Live2D 模型', extensions: ['vrm', 'json'] },
-      { name: 'VRM 模型', extensions: ['vrm'] },
-      { name: 'Live2D 模型（.model3.json）', extensions: ['json'] }
+      { name: tm('VRM 或 Live2D 模型'), extensions: ['vrm', 'json'] },
+      { name: tm('VRM 模型'), extensions: ['vrm'] },
+      { name: tm('Live2D 模型（.model3.json）'), extensions: ['json'] }
     ],
     properties: ['openFile']
   })
   if (result.canceled || result.filePaths.length === 0) return
   const path = result.filePaths[0]
   if (!modelKind(path)) {
-    await dialog.showMessageBox(parent, { type: 'info', message: '要选 .vrm 文件，或者 Live2D 模型文件夹里的 .model3.json。' })
+    await dialog.showMessageBox(parent, { type: 'info', message: tm('要选 .vrm 文件，或者 Live2D 模型文件夹里的 .model3.json。') })
     return
   }
   const model = loadModelFile(path)
   if (!model) {
-    await dialog.showMessageBox(parent, { type: 'info', message: '这个模型读不了（文件太多、太大，或者打不开）。' })
+    await dialog.showMessageBox(parent, { type: 'info', message: tm('这个模型读不了（文件太多、太大，或者打不开）。') })
     return
   }
   saveSettings({ ...loadSettings(), modelPath: path })
@@ -694,7 +715,7 @@ function registerIpc(): void {
   ipcMain.handle('account:status', () => account?.status())
   ipcMain.handle('account:details', (e) => (fromMainWindow(e) ? account?.details() : undefined))
   ipcMain.handle('account:auth', (e, form: AuthForm) =>
-    !fromMainWindow(e) ? MAIN_ONLY : account ? account.authenticate(form) : { ok: false, error: '还没准备好' }
+    !fromMainWindow(e) ? MAIN_ONLY : account ? account.authenticate(form) : { ok: false, error: tm('还没准备好') }
   )
   ipcMain.handle('account:logout', (e) => (fromMainWindow(e) ? account?.logout() : undefined))
 
@@ -715,7 +736,7 @@ function registerIpc(): void {
     if (!fromMainWindow(e)) return MAIN_ONLY
     const op = cleanMemoryEdit(raw)
     if (typeof op === 'string') return { ok: false, error: op }
-    if (!account?.editMemory(op)) return { ok: false, error: '这条记忆已经不在了（可能在别的设备上删了）。' }
+    if (!account?.editMemory(op)) return { ok: false, error: tm('这条记忆已经不在了（可能在别的设备上删了）。') }
     return { ok: true }
   })
   // 经历（对话摘要、编程任务做了什么）：只在本机的 AI 服务里，只给主窗口看、只让主窗口删
@@ -737,8 +758,8 @@ function registerIpc(): void {
     const parent = BrowserWindow.fromWebContents(e.sender)
     if (!parent) return null
     const picked = await dialog.showOpenDialog(parent, {
-      title: '添加资料（只保存在这台电脑上）',
-      filters: [{ name: '文档', extensions: ['txt', 'md', 'markdown', 'pdf', 'docx', 'html', 'htm'] }],
+      title: tm('添加资料（只保存在这台电脑上）'),
+      filters: [{ name: tm('文档'), extensions: ['txt', 'md', 'markdown', 'pdf', 'docx', 'html', 'htm'] }],
       properties: ['openFile', 'multiSelections']
     })
     if (picked.canceled || picked.filePaths.length === 0) return null
@@ -756,7 +777,7 @@ function registerIpc(): void {
     const parent = BrowserWindow.fromWebContents(e.sender)
     if (!parent) return null
     const picked = await dialog.showOpenDialog(parent, {
-      title: '选一个项目文件夹（代码只在这台电脑上建索引）',
+      title: tm('选一个项目文件夹（代码只在这台电脑上建索引）'),
       properties: ['openDirectory']
     })
     if (picked.canceled || picked.filePaths.length === 0) return null
@@ -809,9 +830,9 @@ function registerIpc(): void {
   const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
   registerServiceIpc(ipcMain, serviceKeeper, fromAgent)
   ipcMain.handle('models:status', (e) => fromAgent(e) ? modelDownloader.status() : null)
-  ipcMain.handle('models:download', (e) => fromAgent(e) ? modelDownloader.start() : { ok: false, error: '只有主窗口能用' })
+  ipcMain.handle('models:download', (e) => fromAgent(e) ? modelDownloader.start() : { ok: false, error: tm('只有主窗口能用') })
   const sidOk = (sid: unknown): sid is string => typeof sid === 'string' && /^[\w-]{1,64}$/.test(sid)
-  const notAllowed = { ok: false, error: '只有主窗口能用' }
+  const notAllowed = { ok: false, error: tm('只有主窗口能用') }
   ipcMain.handle('agent:list', (e, q: unknown) =>
     fromAgent(e) ? agentRelay.list(typeof q === 'string' ? q.slice(0, 200) : '') : notAllowed
   )
@@ -830,7 +851,7 @@ function registerIpc(): void {
   ipcMain.handle('agent:rename', (e, sid: unknown, title: unknown) => {
     if (!fromAgent(e) || !sidOk(sid)) return notAllowed
     if (typeof title !== 'string' || !title.trim() || Array.from(title).length > 100) {
-      return { ok: false, error: '标题要有 1–100 个字。' }
+      return { ok: false, error: tm('标题要有 1–100 个字。') }
     }
     return agentRelay.rename(sid, title)
   })
@@ -845,7 +866,7 @@ function registerIpc(): void {
   ipcMain.handle('agent:memory', (e, cwd: unknown) => (fromAgent(e) && cwdOk(cwd) ? agentRelay.memory(cwd) : notAllowed))
   ipcMain.handle('agent:memory-add', (e, cwd: unknown, text: unknown) => {
     if (!fromAgent(e) || !cwdOk(cwd)) return notAllowed
-    if (typeof text !== 'string' || !text.trim() || text.length > 2000) return { ok: false, error: '要记的话不能是空的，也别太长。' }
+    if (typeof text !== 'string' || !text.trim() || text.length > 2000) return { ok: false, error: tm('要记的话不能是空的，也别太长。') }
     return agentRelay.addMemory(cwd, text)
   })
   ipcMain.handle('agent:memory-forget', (e, cwd: unknown, id: unknown) =>
@@ -899,8 +920,8 @@ function registerIpc(): void {
     const parent = BrowserWindow.fromWebContents(e.sender)
     if (!parent) return notAllowed
     const picked = await dialog.showOpenDialog(parent, kind === 'zip'
-      ? { title: '选一个扩展包（.zip）', filters: [{ name: '扩展包', extensions: ['zip'] }], properties: ['openFile'] }
-      : { title: '选一个扩展文件夹（里面有 aila-extension.json）', properties: ['openDirectory'] })
+      ? { title: tm('选一个扩展包（.zip）'), filters: [{ name: tm('扩展包'), extensions: ['zip'] }], properties: ['openFile'] }
+      : { title: tm('选一个扩展文件夹（里面有 aila-extension.json）'), properties: ['openDirectory'] })
     if (picked.canceled || picked.filePaths.length === 0) return { ok: true, data: null }
     return agentRelay.extInspect(picked.filePaths[0])
   })
@@ -912,7 +933,7 @@ function registerIpc(): void {
   // 拖进设置页的 zip 或文件夹：预加载脚本从拖放的文件里取的路径，这里再核对是个存在的文件夹或 .zip
   ipcMain.handle('ext:dropped', (e, path: unknown) => {
     if (!fromAgent(e)) return notAllowed
-    if (!droppedPathOk(path)) return { ok: false, error: '拖进来的要是一个文件夹或者 .zip' }
+    if (!droppedPathOk(path)) return { ok: false, error: tm('拖进来的要是一个文件夹或者 .zip') }
     return agentRelay.extInspect(path)
   })
   ipcMain.handle('ext:install', async (e, token: unknown) =>
@@ -937,9 +958,9 @@ function registerIpc(): void {
     if (!fromAgent(e) || !validExtensionId(id) || !validPageName(name)) return notAllowed
     const res = await agentRelay.extCompanion()
     const file = findAvatar(res.data, id, name)
-    if (!file) return { ok: false, error: '没找到这个形象（扩展可能停用或者卸载了）' }
+    if (!file) return { ok: false, error: tm('没找到这个形象（扩展可能停用或者卸载了）') }
     const data = readModel(file)
-    if (!data || !win) return { ok: false, error: '形象文件读不了' }
+    if (!data || !win) return { ok: false, error: tm('形象文件读不了') }
     saveSettings({ ...loadSettings(), modelPath: file })
     win.webContents.send('model:loaded', data)
     broadcast('model:path', file)
@@ -966,7 +987,7 @@ function registerIpc(): void {
     if (!fromAgent(e)) return notAllowed
     if (typeof project !== 'string' || !project.trim() || project.length > 1000 ||
         typeof command !== 'string' || !command.trim() || command.length > 20000) {
-      return { ok: false, error: '项目路径和命令要是非空文字，路径最多 1000 字，命令最多 20000 字。' }
+      return { ok: false, error: tm('项目路径和命令要是非空文字，路径最多 1000 字，命令最多 20000 字。') }
     }
     return forgetAgentRule(AI_URL, project, command)
   })
@@ -977,7 +998,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('agent:pick-folder', async (e) => {
     if (!fromAgent(e) || !mainWin) return null
-    const res = await dialog.showOpenDialog(mainWin, { title: '选一个项目文件夹', properties: ['openDirectory'] })
+    const res = await dialog.showOpenDialog(mainWin, { title: tm('选一个项目文件夹'), properties: ['openDirectory'] })
     return res.canceled ? null : (res.filePaths[0] ?? null)
   })
   ipcMain.handle('agent:take-focus', (e) => {
@@ -1025,6 +1046,17 @@ function registerIpc(): void {
   // 设置（主窗口里的页面）
   ipcMain.on('settings:open', (_e, section?: SettingsSection) => openSettings(section))
   ipcMain.handle('ai:settings', () => getAiSettings(AI_URL))
+  // 界面语言：谁都能读；只有主窗口能改，改了通知所有窗口、重画托盘菜单、告诉 AI 服务
+  ipcMain.handle('lang:get', () => ({ pref: loadSettings().language ?? 'auto', lang: uiLang }))
+  ipcMain.handle('lang:set', (e, pref: unknown) => {
+    if (!fromMainWindow(e) || !isLangPref(pref)) return null
+    saveSettings({ ...loadSettings(), language: pref })
+    applyLanguage()
+    broadcast('lang:changed', uiLang)
+    updateTray()
+    pushLanguage()
+    return { pref, lang: uiLang }
+  })
   ipcMain.handle('ai:settings:put', async (e, update: AiSettingsUpdate) => {
     if (!fromMainWindow(e)) return MAIN_ONLY // 能改大模型地址和密钥：只认主窗口
     const res = await putAiSettings(AI_URL, update)
@@ -1086,7 +1118,7 @@ function registerIpc(): void {
   const fromCharacter = (e: { sender: Electron.WebContents }): boolean => !!win && e.sender === win.webContents
   // 她的作品、日记：看、删、打开、现在就做一件只认主窗口；气泡里点「看看」从角色窗口来，只是打开作品页
   const workOk = (id: unknown): id is string => typeof id === 'string' && WORK_ID.test(id)
-  const nope = { ok: false, error: '只有主窗口能用' }
+  const nope = { ok: false, error: tm('只有主窗口能用') }
   ipcMain.handle('studio:list', (e) => (fromMain(e) ? studio.works(AI_URL) : nope))
   ipcMain.handle('studio:get', (e, id: unknown) => (fromMain(e) && workOk(id) ? studio.work(AI_URL, id) : nope))
   ipcMain.handle('studio:delete', (e, id: unknown) => (fromMain(e) && workOk(id) ? studio.remove(AI_URL, id) : nope))
@@ -1132,47 +1164,47 @@ function registerIpc(): void {
     const skills = await listSkills(AI_URL, account?.skillOverrides() ?? {})
     const skillItems: MenuItemConstructorOptions[] = skills
       ? skills.map((s) => ({
-          label: s.available ? s.name : `${s.name}（${s.id === 'knowledge' ? '还没有资料' : '暂不可用'}）`,
+          label: s.available ? s.name : tm('{name}（{why}）', { name: s.name, why: s.id === 'knowledge' ? tm('还没有资料') : tm('暂不可用') }),
           type: 'checkbox',
           checked: s.enabled,
           toolTip: s.description,
           click: () => account?.setSkill(s.id, !s.enabled)
         }))
-      : [{ label: '（AI 服务没开）', enabled: false }]
+      : [{ label: tm('（AI 服务没开）'), enabled: false }]
     if (!win) return
     Menu.buildFromTemplate([
-      { label: '和她说话', accelerator: CHAT_SHORTCUT, click: openChat },
-      { label: '听我说', accelerator: LISTEN_SHORTCUT, click: () => voiceMenu('listen') },
+      { label: tm('和她说话'), accelerator: CHAT_SHORTCUT, click: openChat },
+      { label: tm('听我说'), accelerator: LISTEN_SHORTCUT, click: () => voiceMenu('listen') },
       { type: 'separator' },
-      { label: '语音唤醒「你好艾拉」', type: 'checkbox', checked: voice.wake, click: () => voiceMenu('toggle-wake') },
-      { label: '出声说话', type: 'checkbox', checked: voice.speak, click: () => voiceMenu('toggle-speak') },
+      { label: tm('语音唤醒「你好艾拉」'), type: 'checkbox', checked: voice.wake, click: () => voiceMenu('toggle-wake') },
+      { label: tm('出声说话'), type: 'checkbox', checked: voice.speak, click: () => voiceMenu('toggle-speak') },
       {
-        label: '留意屏幕上的报错',
+        label: tm('留意屏幕上的报错'),
         type: 'checkbox',
         checked: voice.watch,
-        toolTip: '只看写代码的窗口（编辑器、终端），看到报错先问你',
+        toolTip: tm('只看写代码的窗口（编辑器、终端），看到报错先问你'),
         click: () => voiceMenu('toggle-watch')
       },
       { type: 'separator' },
-      { label: '技能包', submenu: skillItems },
-      { label: '导入扩展…', click: () => openSettings('extensions') },
-      { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
-      { label: '项目和地图…', click: () => openMain({ page: 'projects', tab: 'map' }) },
-      { label: '资料库…', click: () => openMain({ page: 'knowledge' }) },
-      { label: '她记得的事…', click: () => openMain({ page: 'memory' }) },
+      { label: tm('技能包'), submenu: skillItems },
+      { label: tm('导入扩展…'), click: () => openSettings('extensions') },
+      { label: tm('打开艾拉'), click: () => openMain({ page: 'tasks' }) },
+      { label: tm('项目和地图…'), click: () => openMain({ page: 'projects', tab: 'map' }) },
+      { label: tm('资料库…'), click: () => openMain({ page: 'knowledge' }) },
+      { label: tm('她记得的事…'), click: () => openMain({ page: 'memory' }) },
       { type: 'separator' },
-      { label: '今天做了什么', click: () => void desktop?.reportNow() },
-      { label: '看看剪贴板里的报错', click: () => win?.webContents.send('clipboard:ask') },
-      { label: '提醒…', click: () => openSettings('desktop') },
-      { label: '免打扰（先藏起来）', accelerator: HIDE_SHORTCUT, click: () => toggleDnd(true) },
-      { label: '设置…', click: () => openSettings('model') },
-      { label: '回到右下角', click: resetPosition },
+      { label: tm('今天做了什么'), click: () => void desktop?.reportNow() },
+      { label: tm('看看剪贴板里的报错'), click: () => win?.webContents.send('clipboard:ask') },
+      { label: tm('提醒…'), click: () => openSettings('desktop') },
+      { label: tm('免打扰（先藏起来）'), accelerator: HIDE_SHORTCUT, click: () => toggleDnd(true) },
+      { label: tm('设置…'), click: () => openSettings('model') },
+      { label: tm('回到右下角'), click: resetPosition },
       // 也可以直接对她说「去右上角」「往左一点」
-      { label: '去哪儿', submenu: SPOTS.map((s) => ({ label: SPOT_NAMES[s], click: () => walkTo(s) })) },
+      { label: tm('去哪儿'), submenu: SPOTS.map((s) => ({ label: tm(SPOT_NAMES[s]), click: () => walkTo(s) })) },
       { type: 'separator' },
-      { label: '开发者工具', click: () => win?.webContents.openDevTools({ mode: 'detach' }) },
+      { label: tm('开发者工具'), click: () => win?.webContents.openDevTools({ mode: 'detach' }) },
       { type: 'separator' },
-      { label: '退出', click: () => app.quit() }
+      { label: tm('退出'), click: () => app.quit() }
     ]).popup({ window: win })
   })
 
@@ -1191,18 +1223,18 @@ function updateTray(): void {
   if (!tray) return
   const dnd = desktop?.dnd ?? false
   const shown = desktop?.prefs.showCharacter ?? true
-  tray.setToolTip(!shown ? '艾拉（不在桌面上）' : dnd ? '艾拉（免打扰中）' : '艾拉')
+  tray.setToolTip(!shown ? tm('艾拉（不在桌面上）') : dnd ? tm('艾拉（免打扰中）') : tm('艾拉'))
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: '打开艾拉', click: () => openMain({ page: 'tasks' }) },
+      { label: tm('打开艾拉'), click: () => openMain({ page: 'tasks' }) },
       // 不显示她的时候也能说话：临时叫出来，对话框关了再藏回去
-      { label: '和她说话', accelerator: CHAT_SHORTCUT, click: openChat },
-      { label: '桌面上显示她', type: 'checkbox', checked: shown, click: () => setShowCharacter(!shown) },
-      { label: '免打扰（藏起来）', type: 'checkbox', checked: dnd, enabled: shown, accelerator: HIDE_SHORTCUT, click: () => toggleDnd() },
-      { label: '让她回到右下角', enabled: shown, click: resetPosition },
-      { label: '导入扩展…', click: () => openSettings('extensions') },
+      { label: tm('和她说话'), accelerator: CHAT_SHORTCUT, click: openChat },
+      { label: tm('桌面上显示她'), type: 'checkbox', checked: shown, click: () => setShowCharacter(!shown) },
+      { label: tm('免打扰（藏起来）'), type: 'checkbox', checked: dnd, enabled: shown, accelerator: HIDE_SHORTCUT, click: () => toggleDnd() },
+      { label: tm('让她回到右下角'), enabled: shown, click: resetPosition },
+      { label: tm('导入扩展…'), click: () => openSettings('extensions') },
       { type: 'separator' },
-      { label: '退出', click: () => app.quit() }
+      { label: tm('退出'), click: () => app.quit() }
     ])
   )
 }
@@ -1222,6 +1254,7 @@ app.whenReady().then(() => {
   // Windows 上系统通知（提醒）要有应用 ID；开发时用 electron.exe 的路径
   if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'com.aila.desktop' : process.execPath)
   restrictPermissions()
+  applyLanguage() // 界面语言：菜单、托盘要用，先定下来
   account = createAccount() // 加密存储要在 ready 之后才能用
   account.start()
   registerIpc()

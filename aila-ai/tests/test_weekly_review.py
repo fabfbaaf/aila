@@ -89,3 +89,8 @@ def test_routes(tmp_path: Path) -> None:
     finally:
         app.dependency_overrides.clear()
         time.sleep(0)
+
+
+def test_english_review() -> None:
+    text = plain_review(["- 下周约好的：Mon standup"], english=True)
+    assert text.startswith("## Done this week") and "## Next week" in text and "- Mon standup" in text

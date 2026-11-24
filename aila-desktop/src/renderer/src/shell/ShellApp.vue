@@ -7,6 +7,7 @@
  * 页面和地址的对应规则在 shared/shell.ts，主进程也用同一份。
  * 界面风格（颜色、字体、图标）在 theme/：tokens.css、icons.ts。
  */
+import { t } from '../i18n'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import { PAGES, parseHash, toHash, type ShellRoute } from '../../../shared/shell'
 import { bridge } from '../platform/bridge'
@@ -55,7 +56,7 @@ function go(next: ShellRoute): void {
   route.value = next
   history.replaceState(null, '', `#${toHash(next)}`)
   const name = PAGES.find((p) => p.id === next.page)?.name
-  document.title = name && next.page !== 'tasks' ? `艾拉 · ${name}` : '艾拉'
+  document.title = name && next.page !== 'tasks' ? t('艾拉 · {page}', { page: t(name) }) : t('艾拉')
 }
 
 // ---------- Ctrl+K 快捷跳转（palette.ts） ----------
@@ -112,22 +113,22 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="shell">
-    <nav class="rail" aria-label="页面">
-      <div class="brand" title="艾拉">
-        <span>艾</span><i aria-hidden="true"></i>
+    <nav class="rail" :aria-label="t('页面')">
+      <div class="brand" :title="t('艾拉')">
+        <span>{{ t('艾') }}</span><i aria-hidden="true"></i>
       </div>
       <button
         v-for="p in PAGES"
         :key="p.id"
         class="ic"
         :class="{ on: route.page === p.id, end: p.id === 'settings' }"
-        :title="`${p.name}（Ctrl+${p.key}；Ctrl+K 快捷跳转）`"
+        :title="t('{page}（Ctrl+{key}；Ctrl+K 快捷跳转）', { page: t(p.name), key: p.key })"
         :aria-current="route.page === p.id ? 'page' : undefined"
         @click="go(p.id === 'projects' ? { page: 'projects', tab: route.tab ?? 'list' } : { page: p.id })"
       >
         <Icon :name="p.id" :size="20" />
-        <b v-if="p.id === 'tasks' && waiting" class="badge" :title="`${waiting} 个任务在等你`">{{ waiting }}</b>
-        <span>{{ p.name }}</span>
+        <b v-if="p.id === 'tasks' && waiting" class="badge" :title="t('{n} 个任务在等你', { n: waiting })">{{ waiting }}</b>
+        <span>{{ t(p.name) }}</span>
       </button>
     </nav>
     <main class="page">

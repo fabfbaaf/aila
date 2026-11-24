@@ -22,6 +22,17 @@ describe('认走动的指令', () => {
     expect(parseMove('向下移一下')).toBe('nudge-down')
   })
 
+  it('英文的说法也认', () => {
+    expect(parseMove('Go to the top right corner.')).toBe('topright')
+    expect(parseMove('please move to the left')).toBe('left')
+    expect(parseMove('head to the middle of the screen')).toBe('center')
+    expect(parseMove('Move left a bit')).toBe('nudge-left')
+    expect(parseMove('scoot a little to the right')).toBe('nudge-right')
+    expect(parseMove('go back')).toBe('bottomright')
+    expect(parseMove('the button in the top right is broken')).toBeNull()
+    expect(parseMove('go to the moon')).toBeNull()
+  })
+
   it('只是提到位置的话不算', () => {
     expect(parseMove('我右下角有个按钮点不了')).toBeNull()
     expect(parseMove('上')).toBeNull() // 一个字太含糊

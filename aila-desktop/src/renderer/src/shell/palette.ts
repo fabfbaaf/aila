@@ -24,30 +24,31 @@ export interface PaletteItem {
   act: PaletteAct
 }
 
-export function staticItems(): PaletteItem[] {
+/** tr：把中文原文换成现在的语言（页面里传 t；测试里不传就是中文） */
+export function staticItems(tr: (zh: string) => string = (s) => s): PaletteItem[] {
   const pages: PaletteItem[] = PAGES.map((p) => ({
     id: `page:${p.id}`,
     group: '页面',
-    title: p.name,
+    title: tr(p.name),
     hint: `Ctrl+${p.key}`,
     act: { kind: 'go', route: p.id === 'projects' ? { page: 'projects', tab: 'list' } : { page: p.id } }
   }))
   const extra: PaletteItem[] = [
-    { id: 'page:map', group: '页面', title: '地图', hint: '项目的代码星图', act: { kind: 'go', route: { page: 'projects', tab: 'map' } } }
+    { id: 'page:map', group: '页面', title: tr('地图'), hint: '项目的代码星图', act: { kind: 'go', route: { page: 'projects', tab: 'map' } } }
   ]
   const settings: PaletteItem[] = SETTINGS_TABS.map((t) => ({
     id: `settings:${t.id}`,
     group: '设置',
-    title: `设置 · ${t.name}`,
+    title: `${tr('设置')} · ${tr(t.name)}`,
     hint: '',
     act: { kind: 'go', route: { page: 'settings', section: t.id } }
   }))
   const actions: PaletteItem[] = [
-    { id: 'act:new-task', group: '动作', title: '开新任务', hint: '编程或电脑任务', act: { kind: 'new-task' } },
-    { id: 'act:chat', group: '动作', title: '在这里和她聊', hint: '对话页', act: { kind: 'go', route: { page: 'chat' } } },
-    { id: 'act:open-chat', group: '动作', title: '在桌面上和她说话', hint: 'Alt+Shift+A', act: { kind: 'open-chat' } },
-    { id: 'act:import', group: '动作', title: '导入扩展、技能包', hint: '技能和扩展', act: { kind: 'go', route: { page: 'settings', section: 'extensions' } } },
-    { id: 'act:model', group: '动作', title: '填大模型密钥', hint: '设置 · 对话', act: { kind: 'go', route: { page: 'settings', section: 'model' } } }
+    { id: 'act:new-task', group: '动作', title: tr('开新任务'), hint: '编程或电脑任务', act: { kind: 'new-task' } },
+    { id: 'act:chat', group: '动作', title: tr('在这里和她聊'), hint: '对话页', act: { kind: 'go', route: { page: 'chat' } } },
+    { id: 'act:open-chat', group: '动作', title: tr('在桌面上和她说话'), hint: 'Alt+Shift+A', act: { kind: 'open-chat' } },
+    { id: 'act:import', group: '动作', title: tr('导入扩展、技能包'), hint: '技能和扩展', act: { kind: 'go', route: { page: 'settings', section: 'extensions' } } },
+    { id: 'act:model', group: '动作', title: tr('填大模型密钥'), hint: '设置 · 对话', act: { kind: 'go', route: { page: 'settings', section: 'model' } } }
   ]
   return [...actions, ...pages, ...extra, ...settings]
 }
@@ -93,7 +94,7 @@ export function searchStatic(items: PaletteItem[], query: string): PaletteItem[]
     const all = `${title} ${item.hint.toLowerCase()}`
     if (!words.every((w) => all.includes(w))) continue
     const q = words.join(' ')
-    const score = title.startsWith(q) || title.replace('设置 · ', '').startsWith(q) ? 3 : words.every((w) => title.includes(w)) ? 2 : 1
+    const score = title.startsWith(q) || title.replace(/^[^·]+ · /, '').startsWith(q) ? 3 : words.every((w) => title.includes(w)) ? 2 : 1
     scored.push([item, score])
   }
   return scored.sort((a, b) => b[1] - a[1]).map(([i]) => i)

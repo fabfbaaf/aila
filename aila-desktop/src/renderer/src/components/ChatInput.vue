@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const emit = defineEmits<{ send: [text: string]; close: [] }>()
@@ -43,21 +44,20 @@ onBeforeUnmount(() => window.removeEventListener('blur', onWindowBlur))
       ref="input"
       v-model="text"
       maxlength="500"
-      placeholder="和艾拉说点什么…"
+      :placeholder="t('和艾拉说点什么…')"
       spellcheck="false"
       @keydown="onKeydown"
     />
-    <span class="hint">Enter 发送 · Esc 收起</span>
+    <span class="hint">{{ t('Enter 发送 · Esc 收起') }}</span>
   </div>
 </template>
 
 <style scoped>
 .chat-input {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  width: 256px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: min(272px, 100%);
+  pointer-events: auto;
   padding: 6px 8px 4px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.94);

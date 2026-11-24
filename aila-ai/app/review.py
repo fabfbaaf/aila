@@ -46,6 +46,15 @@ REVIEW_PROMPT = """你是「艾拉」，住在用户电脑桌面上的 AI 伙伴
 只输出一个 JSON 对象：{"markdown": "回顾正文"}"""
 
 
+ENGLISH_REVIEW = """
+
+The user chose the English interface: write the whole review in English, with exactly these headings:
+## Done this week
+## Not finished
+## Next week
+Output only a JSON object: {"markdown": "..."}"""
+
+
 class ReviewError(Exception):
     """写不了：日期不对"""
 
@@ -62,12 +71,13 @@ class WeekMaterial:
 
 class Reviews:
     def __init__(self, data_dir: Path, model: Callable[[], ChatModel], store: Callable[[], MemoryStore | None],
-                 persona: Callable[[], str] = lambda: "") -> None:
+                 persona: Callable[[], str] = lambda: "", language: Callable[[], str] = lambda: "zh") -> None:
         self.root = data_dir / "reviews"
         self.root.mkdir(parents=True, exist_ok=True)
         self._model = model
         self._store = store
         self._persona = persona
+        self._language = language  # 界面语言：en 时整份用英文写
 
     def entries(self, limit: int = 30) -> list[dict[str, Any]]:
         out = []
@@ -126,27 +136,34 @@ class Reviews:
         return list(reversed(got))[:MAX_ITEMS]
 
     async def _compose(self, m: WeekMaterial, material: list[str]) -> str:
+        english = self._language() == "en"
         complete = getattr(self._model(), "complete", None)
         if complete is not None and material:
             try:
                 raw = await asyncio.wait_for(complete([
-                    {"role": "system", "content": REVIEW_PROMPT + self._persona()},
+                    {"role": "system", "content": REVIEW_PROMPT + self._persona() + (ENGLISH_REVIEW if english else "")},
                     {"role": "user", "content": f"<这一周 从=\"{m.start}\" 到=\"{m.end}\">\n" + "\n".join(material) + "\n</这一周>"},
                 ]), 60)
                 text = str(json.loads(raw).get("markdown", "")).strip()
-                if 40 <= len(text) <= 2000 and "##" in text:
+                if 40 <= len(text) <= 3000 and "##" in text:
                     return text
             except Exception:  # noqa: BLE001  写不成就用朴素的
                 pass
-        return plain_review(material)
+        return plain_review(material, english)
 
 
-def plain_review(material: list[str]) -> str:
-    """没有大模型时：把材料分成三段列出来"""
+def plain_review(material: list[str], english: bool = False) -> str:
+    """没有大模型时：把材料分成三段列出来（材料本身是中文拼的，英文时只换标题和套话）"""
     done = [x for x in material if ("编程任务" in x and "做完了" in x) or x.startswith("- 任务里的一轮") or x.startswith("- 聊过的")]
     todo = [x for x in material if "还没做完" in x]
     later = [x.replace("- 下周约好的：", "- ") for x in material if x.startswith("- 下周约好的")]
     chats = [x for x in material if x.startswith("- 这周聊了")]
+    if english:
+        parts = ["## Done this week", *(done + chats or ["- Not much this week"]),
+                 "", "## Not finished", *(todo or ["- All done"]),
+                 "", "## Next week", *(later or ["- Nothing planned yet"]),
+                 "", "Nice work this week. Have a good weekend."]
+        return "\n".join(parts)
     parts = ["## 这周做了什么", *(done + chats or ["- 这周没怎么找我"]),
              "", "## 还没做完", *(todo or ["- 都做完了"]),
              "", "## 下周", *(later or ["- 还没有安排"]),

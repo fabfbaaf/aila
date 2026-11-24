@@ -8,6 +8,7 @@
  * - 桌面上的气泡只放短的、念出来的那部分；这里显示全文，按 Markdown 排（agent/markdown.ts：先转义再插固定标签，回复里的 HTML 不会执行）
  * - 她问「要不要……」时这里也有按钮，回答交回给她，只认她正在问的那一个
  */
+import { t, lang, dateText } from '../i18n'
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { LiveReply } from '../../../shared/chat'
 import type { StoredMessage } from '../../../shared/cloud'
@@ -74,6 +75,17 @@ function answer(approved: boolean): void {
   if (ask) bridge?.chatAnswer(ask.id, approved)
 }
 
+const WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/** 每天的标题：中文用 historyView 排好的；英文自己排（Today、Yesterday、Mon, Nov 23） */
+function dayTitle(g: { key: string; label: string }): string {
+  if (lang.value !== 'en' || g.label === '今天' || g.label === '昨天') return t(g.label)
+  const [y, m, d] = g.key.split('-').map(Number)
+  const day = new Date(y, m - 1, d)
+  const year = y === new Date().getFullYear() ? '' : `, ${y}`
+  return `${WEEKDAYS_EN[day.getDay()]}, ${dateText(day)}${year}`
+}
+
 // Ctrl+K 里点了一段聊过的话：搜框里填上它
 watch(
   chatQueryRequest,
@@ -111,20 +123,20 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
 <template>
   <div class="history">
     <header class="bar">
-      <b>对话</b>
-      <input v-model="query" type="search" placeholder="搜聊过的话……" spellcheck="false" aria-label="搜对话记录" />
-      <span class="count">{{ query ? `找到 ${groups.reduce((n, g) => n + g.items.length, 0)} 条` : `${total} 条` }}</span>
-      <button class="ghost" title="在桌面上打开对话框（Alt+Shift+A）" @click="bridge?.openChat()">在桌面上说</button>
+      <b>{{ t('对话') }}</b>
+      <input v-model="query" type="search" :placeholder="t('搜聊过的话……')" spellcheck="false" :aria-label="t('搜对话记录')" />
+      <span class="count">{{ query ? t('找到 {n} 条', { n: groups.reduce((n, g) => n + g.items.length, 0) }) : t('{n} 条', { n: total }) }}</span>
+      <button class="ghost" :title="t('在桌面上打开对话框（Alt+Shift+A）')" @click="bridge?.openChat()">{{ t('在桌面上说') }}</button>
     </header>
 
     <div ref="scroller" class="scroll">
-      <div v-if="!bridge" class="empty">对话只在桌面版里能用（npm run dev）。</div>
-      <div v-else-if="!total && !showLive" class="empty">还没聊过。在下面打字，或者双击桌面上的她、按 <kbd>Alt+Shift+A</kbd>。</div>
-      <div v-else-if="query && !groups.length" class="empty">没有含「{{ query }}」的话。</div>
+      <div v-if="!bridge" class="empty">{{ t('对话只在桌面版里能用（npm run dev）。') }}</div>
+      <div v-else-if="!total && !showLive" class="empty">{{ t('还没聊过。在下面打字，或者双击桌面上的她、按') }} <kbd>Alt+Shift+A</kbd>。</div>
+      <div v-else-if="query && !groups.length" class="empty">{{ t('没有含「{q}」的话。', { q: query }) }}</div>
       <section v-for="g in groups" :key="g.key" class="day">
-        <h3>{{ g.label }}</h3>
+        <h3>{{ dayTitle(g) }}</h3>
         <div v-for="m in g.items" :key="m.id" class="msg" :class="m.role">
-          <span class="who">{{ m.role === 'user' ? '你' : '她' }}</span>
+          <span class="who">{{ m.role === 'user' ? t('你') : t('她') }}</span>
           <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown 先整段转义，只插固定标签 -->
           <div v-if="m.role === 'assistant'" class="text md" v-html="renderMarkdown(cleanText(m.content))" />
           <span v-else class="text plain">{{ m.content }}</span>
@@ -133,24 +145,24 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
       </section>
 
       <div v-if="showLive && live" class="msg assistant live">
-        <span class="who">她</span>
+        <span class="who">{{ t('她') }}</span>
         <div class="text">
           <!-- eslint-disable-next-line vue/no-v-html -- 同上 -->
           <div v-if="live.text" class="md" v-html="renderMarkdown(cleanText(live.text))" />
           <div v-if="live.status" class="status">{{ live.status }}</div>
-          <div v-else-if="live.phase === 'waiting'" class="status">在想……</div>
+          <div v-else-if="live.phase === 'waiting'" class="status">{{ t('在想……') }}</div>
           <div v-if="live.ask" class="ask">
-            <div class="ask-head">要我{{ live.ask.action }}吗？<span class="skill">{{ live.ask.skill }}</span></div>
+            <div class="ask-head">{{ t('要我{action}吗？', { action: live.ask.action }) }}<span class="skill">{{ live.ask.skill }}</span></div>
             <pre class="ask-detail">{{ live.ask.detail }}</pre>
             <div class="ask-btns">
-              <button class="primary" @click="answer(true)">好</button>
-              <button class="ghost" @click="answer(false)">不要</button>
+              <button class="primary" @click="answer(true)">{{ t('好') }}</button>
+              <button class="ghost" @click="answer(false)">{{ t('不要') }}</button>
             </div>
           </div>
         </div>
         <span class="time" />
       </div>
-      <div v-if="live?.phase === 'error' && !query" class="error">没说完：{{ live.error || '出错了' }}。可以再说一次。</div>
+      <div v-if="live?.phase === 'error' && !query" class="error">{{ t('没说完：{why}。可以再说一次。', { why: live.error || t('出错了') }) }}</div>
     </div>
 
     <footer v-if="bridge" class="composer">
@@ -158,12 +170,12 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
         ref="input"
         v-model="draft"
         rows="1"
-        placeholder="和她说点什么……（Enter 发送，Shift+Enter 换行）"
-        aria-label="和她说的话"
+        :placeholder="t('和她说点什么……（Enter 发送，Shift+Enter 换行）')"
+        :aria-label="t('和她说的话')"
         @keydown="onKey"
       />
-      <button v-if="replying" class="ghost" title="让她别说了" @click="bridge?.chatStop()">停下</button>
-      <button class="primary" :disabled="!draft.trim()" @click="send">发送</button>
+      <button v-if="replying" class="ghost" :title="t('让她别说了')" @click="bridge?.chatStop()">{{ t('停下') }}</button>
+      <button class="primary" :disabled="!draft.trim()" @click="send">{{ t('发送') }}</button>
     </footer>
   </div>
 </template>

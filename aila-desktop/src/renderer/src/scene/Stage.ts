@@ -78,6 +78,9 @@ export class Stage {
   /** 每帧在行为更新之前调用（对话的打字节奏挂在这里） */
   onStep: (dt: number) => void = () => {}
 
+  /** 镜头重新构图时，更新角色头顶在画布上的位置 */
+  onAvatarFramed: (top: number) => void = () => {}
+
   /** 推进一帧（也用于调试时手动逐帧检查） */
   step(dt: number): void {
     this.onStep(dt)
@@ -135,16 +138,17 @@ export class Stage {
     )
   }
 
-  /** 镜头构图：角色占画面下方约 75%，上方留给对话气泡 */
+  /** 镜头构图：角色占画面下方约一半，上方留给对话气泡 */
   private frame(): void {
     if (!this.avatar) return
     const headTop = this.avatar.getHeadWorldPosition(this.tmp).y + 0.14
-    const visible = headTop / 0.75
+    const visible = headTop / 0.4875
     const dist = visible / 2 / Math.tan((this.camera.fov * Math.PI) / 360)
-    const centerY = visible / 2 - 0.06 // 往下多留一点，脚不贴窗口底边
+    const centerY = visible / 2 - 0.08 // 往下多留一点，脚不贴窗口底边
     this.camera.position.set(0, centerY, dist)
     this.camera.lookAt(0, centerY, 0)
     this.camera.updateMatrixWorld()
+    this.onAvatarFramed(this.toScreen(this.tmp.set(0, headTop, 0)).y)
   }
 
   private resize = (): void => {

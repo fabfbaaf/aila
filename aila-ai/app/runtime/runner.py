@@ -84,7 +84,10 @@ class Runtime:
         computer_inventory: bool = True,
         extensions: ExtensionStore | None = None,
         memory_store: "Callable[[], MemoryStore] | None" = None,
+        language: Callable[[], str] = lambda: "zh",
     ) -> None:
+        # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
+        self.language = language
         self.store = SessionStore(data_dir / "sessions")
         # 记忆库（和对话共用）：会话开头回想关于你的事和这个项目最近几次，每轮做完记一条经历；用到时现取
         self.memory_store = memory_store
@@ -147,7 +150,7 @@ class Runtime:
         model = self.model_factory()
         # 启用的扩展带的本事：开会话时定下来（只放名字和简介），之后装卸扩展不改这个会话的开头，前缀缓存不断
         skills = self.extensions.skills()
-        skill_note = skills_context(skills)
+        skill_note = skills_context(skills) + (ENGLISH_NOTE if self.language() == "en" else "")
         skill_meta = {"skills": [s.name for s in skills]} if skills else {}
         if kind == "computer":
             session = self.store.create(root, mode, model.name,
@@ -712,6 +715,8 @@ class Runtime:
 PLAN_DENY_HINT = ("这一轮只出方案、不动手：不要换别的办法去改，把要改的地方写进计划，用 propose_plan 交上来，"
                   "用户批准以后才会一阶段一阶段去做。")
 REVIEW_DENY_HINT = "这一轮只是审查改动、不动手：把发现的问题和建议写下来就好。"
+
+ENGLISH_NOTE = "\n\nThe user chose the English interface: reply and explain in English (keep code comments in the project's existing language)."
 
 _STOP_WHY = {
     "interrupted": "你打断了",
