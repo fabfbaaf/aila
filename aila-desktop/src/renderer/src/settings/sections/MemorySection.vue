@@ -141,6 +141,7 @@ async function forgetAll(): Promise<void> {
     <div class="row">
       <input
         v-model="adding.content"
+        type="text"
         :maxlength="MEMORY_MAX"
         placeholder="比如：我在杭州工作 / 我不喝咖啡 / 周五要交周报"
         aria-label="要她记住的事"
@@ -166,7 +167,7 @@ async function forgetAll(): Promise<void> {
         <template v-if="editingId === m.id">
           <td colspan="3">
             <div class="row">
-              <input v-model="editing.content" :maxlength="MEMORY_MAX" aria-label="改成" @keydown.enter="saveEdit" @keydown.esc="editingId = ''" />
+              <input v-model="editing.content" type="text" :maxlength="MEMORY_MAX" aria-label="改成" @keydown.enter="saveEdit" @keydown.esc="editingId = ''" />
               <select v-model="editing.kind" aria-label="哪一类">
                 <option v-for="k in GROUPS" :key="k.kind" :value="k.kind">{{ k.name }}</option>
               </select>
@@ -248,6 +249,11 @@ async function forgetAll(): Promise<void> {
 .row input:not([type='date']) {
   flex: 1 1 260px;
   min-width: 0;
+}
+
+.row select {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .hint {

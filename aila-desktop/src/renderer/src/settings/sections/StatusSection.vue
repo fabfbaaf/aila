@@ -128,24 +128,32 @@ onDeactivated(() => { ++activation; unsubscribe?.(); clearInterval(logTimer) })
     <h3>版本和更新</h3>
     <div class="row">
       <span class="label">现在的版本</span>
-      <span>{{ update?.current ?? '…' }}</span>
-      <button class="btn" :disabled="checking" @click="checkUpdate">{{ checking ? '在查……' : '检查更新' }}</button>
-    </div>
-    <template v-if="update?.checkedAt">
-      <p v-if="update.error" class="offline" role="alert">{{ update.error }}</p>
-      <div v-else-if="update.newer" class="row">
-        <span class="label">新版本</span>
-        <span class="tag good">{{ update.latest }}</span>
-        <button class="btn primary" @click="api.updateOpen(update.installer || update.page)">下载</button>
-        <button class="link" @click="api.updateOpen(update.page)">看看改了什么</button>
+      <div class="inline">
+        <span>{{ update?.current ?? '…' }}</span>
+        <button class="btn" :disabled="checking" @click="checkUpdate">{{ checking ? '在查……' : '检查更新' }}</button>
+        <template v-if="update?.checkedAt && !checking">
+          <span v-if="update.error" :class="update.error.startsWith('还没有') ? 'hint' : 'warn-text'" role="status">{{ update.error }}</span>
+          <span v-else-if="!update.newer" class="hint">已经是最新的了。</span>
+        </template>
       </div>
-      <p v-else class="hint">已经是最新的了（GitHub 上最新是 {{ update.latest || update.current }}）。</p>
-      <pre v-if="update.newer && update.notes" class="notes">{{ update.notes }}</pre>
-    </template>
+    </div>
+    <div v-if="update?.newer" class="row">
+      <span class="label">新版本</span>
+      <div>
+        <div class="inline">
+          <span class="tag good">{{ update.latest }}</span>
+          <button class="btn primary" @click="api.updateOpen(update.installer || update.page)">下载</button>
+          <button class="link" @click="api.updateOpen(update.page)">看看改了什么</button>
+        </div>
+        <pre v-if="update.notes" class="notes">{{ update.notes }}</pre>
+      </div>
+    </div>
     <div class="row">
       <span class="label">自动检查</span>
-      <Toggle :model-value="checkAuto" @update:model-value="setAuto" />
-      <span class="hint">每天看一次 GitHub 上有没有新版本，有的话用系统通知提醒一次。只发一个不带你任何信息的请求；没有签名证书，所以下载、安装要你自己点。</span>
+      <div>
+        <Toggle :model-value="checkAuto" @update:model-value="setAuto" />
+        <span class="hint">每天看一次 GitHub 上有没有新版本，有的话用系统通知提醒一次。只发一个不带你任何信息的请求；没有签名证书，所以下载、安装要你自己点。</span>
+      </div>
     </div>
   </div>
 
@@ -233,6 +241,18 @@ onDeactivated(() => { ++activation; unsubscribe?.(); clearInterval(logTimer) })
 .service-logs { min-width: 0; margin-top: 16px; }
 .service-logs pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 Consolas, monospace; padding: 12px; background: var(--bg); border: 1px solid var(--field-line); border-radius: 8px; }
 .service-logs pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.warn-text {
+  color: var(--warn, #fbbf24);
+  font-size: 13px;
+}
 
 .notes {
   max-height: 180px;
