@@ -60,7 +60,7 @@ const recentSteps = computed(() => props.steps.slice(-24))
         <i v-for="s in segments" :key="s.key" :style="{ flex: `${Math.max(s.tokens, 1)} 1 0`, background: s.color }"></i>
       </div>
       <p class="line">
-        {{ t('下一步输入') }}{{ ledger.estimated ? t('约') : '' }} <b>{{ compact(ledger.prompt) }}</b> / {{ compact(ledger.window) }}（{{ used.toFixed(0) }}%）
+        {{ t('下一步输入') }}{{ ledger.estimated ? t('约') : '' }} <b>{{ compact(ledger.prompt) }}</b> / {{ compact(ledger.window) }}{{ t('（{pct}%）', { pct: used.toFixed(0) }) }}
       </p>
       <p class="dim small">{{ t('到 {pct}% 会压缩；开头固定的 {fixed} 每一步都一样，命中缓存', { pct: Math.round(ledger.compact_at * 100), fixed: compact(fixedTokens) }) }}</p>
       <ul class="parts">

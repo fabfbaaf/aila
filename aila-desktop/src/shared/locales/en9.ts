@@ -23,6 +23,7 @@ export const EN9: Record<string, string> = {
   '还没有做过事。给她一个任务，这里会按时间画出每一步。': "Nothing done yet. Give her a task and each step will be drawn here over time.",
   '正在做 · ': 'Running · ',
   '输入 {p}（命中缓存 {pct}%）': 'Input {p} ({pct}% cache hit)',
+  '（{pct}%）': ' ({pct}%)',
   '命中 {pct}%': '{pct}% hit',
   '最慢：': 'Slowest: ',
   '还有 {n} 轮更早的': '{n} earlier rounds',

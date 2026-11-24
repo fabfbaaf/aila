@@ -21,6 +21,7 @@ from ..memory import Memory, Turn, extract
 from ..memory.episodes import Line, chat_context
 from ..memory.store import EPISODE, MemoryStore
 from ..persona import system_prompt
+from ..i18n import localize_event
 from ..sse import with_heartbeat
 from ..tags import Event
 from ..tools import SkillRegistry
@@ -104,7 +105,7 @@ async def memory_context(req: ChatRequest, embedder: Any, store: MemoryStore | N
 
 
 def sse(event: Event) -> str:
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+    return f"data: {json.dumps(localize_event(event), ensure_ascii=False)}\n\n"  # 英文界面时给人看的字段换成英文
 
 
 @router.get("/health")

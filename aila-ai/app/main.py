@@ -13,7 +13,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exception_handlers import http_exception_handler
+
+from .i18n import localize
 
 from . import deps
 from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
@@ -47,6 +50,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="艾拉 AI 服务", version="0.4.0", lifespan=lifespan)
 app.add_middleware(LocalOnly)  # 浏览器里别的网页不能调用这些接口
+
+
+@app.exception_handler(HTTPException)
+async def localized_http_error(request, exc: HTTPException):  # noqa: ANN001, ANN201
+    """错误说明发给桌面端之前，英文界面时换成英文（app/i18n.py）；别的和 FastAPI 默认的一样"""
+    detail = localize(exc.detail) if isinstance(exc.detail, str) else exc.detail
+    return await http_exception_handler(request, HTTPException(exc.status_code, detail, exc.headers))
 app.include_router(chat.router)
 app.include_router(voice.router)
 app.include_router(knowledge.router)
