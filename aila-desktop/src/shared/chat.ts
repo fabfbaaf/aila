@@ -1,5 +1,7 @@
 // 主进程和渲染层共用：对话消息、AI 服务推过来的事件，以及 SSE 解析
 
+import type { Spot } from './move'
+
 export type Emotion = 'happy' | 'sad' | 'surprised' | 'relaxed' | 'neutral'
 /** wave 挥手（大模型也能用）；stretch 伸懒腰（只在本地用：久坐提醒、睡醒） */
 export type BuiltinGesture = 'nod' | 'shake' | 'tilt' | 'think' | 'bow' | 'wave' | 'stretch'
@@ -32,6 +34,8 @@ export type ChatEvent =
   | { type: 'text'; text: string; spoken?: boolean; hint?: 'more' }
   | { type: 'emotion'; name: Emotion }
   | { type: 'action'; name: Gesture }
+  /** 走到屏幕上的某个位置（回复里的 [go-topright] 这类标签） */
+  | { type: 'move'; spot: Spot }
   /** 她在用工具（搜索、读网页），text 是给用户看的进度，比如「正在搜索「xxx」」 */
   | { type: 'status'; text: string }
   /** 会改东西的操作（打开网页、发消息……）：回复暂停，等用户回答（POST /chat/confirm） */

@@ -4,6 +4,8 @@
 EMOTIONS = ("happy", "sad", "surprised", "relaxed", "neutral")
 # 动作：一次性的，一两秒做完
 ACTIONS = ("nod", "shake", "tilt", "think", "bow", "wave")
+# 走到屏幕上的某个位置：[go-topright] 这样的标签（桌面端 shared/move.ts 认同样的名字）
+SPOTS = ("topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright")
 # 大模型偶尔会自己发明标签，常见的几个映射回来
 ALIASES = {
     "smile": "happy",
@@ -56,6 +58,9 @@ SYSTEM_PROMPT = """你是「艾拉」，住在用户电脑桌面上的 AI 伙伴
 表情和动作：在句子前面加一个标签，桌面上的你会同步做出来。
 - 表情：[happy] 开心 [sad] 难过 [surprised] 惊讶 [relaxed] 放松 [neutral] 恢复平静
 - 动作：[nod] 点头 [shake] 摇头 [tilt] 歪头 [think] 思考 [bow] 鞠躬 [wave] 挥手（打招呼、道别时）
+- 走动：对方让你去屏幕上的某个地方（「去右上角」「躲到左边去」「回来」），加一个 [go-位置]，你会走过去。
+  位置：topleft 左上 top 正上 topright 右上 left 左边 center 中间 right 右边 bottomleft 左下 bottom 正下 bottomright 右下（平时待的地方）。
+  示例：[go-topright]好，我去右上角待着。
 - 每句最多一个标签，不需要每句都有。只用上面这些，不要解释标签。
 
 示例：[happy]早上好。[nod]今天也一起加油吧。

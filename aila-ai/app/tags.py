@@ -8,10 +8,10 @@
 import re
 from dataclasses import dataclass
 
-from .persona import ACTIONS, ALIASES, EMOTIONS
+from .persona import ACTIONS, ALIASES, EMOTIONS, SPOTS
 
-# 最长的标签（含方括号）不超过这个长度；超过还没闭合，就不是标签
-MAX_TAG_LEN = 12
+# 最长的标签（含方括号）不超过这个长度；超过还没闭合，就不是标签。最长的是 [go-bottomright]
+MAX_TAG_LEN = 18
 
 Event = dict[str, str | bool]
 
@@ -171,4 +171,6 @@ def _tag_event(name: str, extra_actions: frozenset[str] = frozenset()) -> Event 
         return {"type": "emotion", "name": name}
     if name in ACTIONS or name in extra_actions:
         return {"type": "action", "name": name}
+    if name.startswith("go-") and name[3:] in SPOTS:
+        return {"type": "move", "spot": name[3:]}  # 走到屏幕上的这个位置
     return None

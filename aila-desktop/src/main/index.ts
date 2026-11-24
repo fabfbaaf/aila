@@ -57,6 +57,7 @@ import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionNam
 import { droppedPathOk, openExtensionPage } from './extensions'
 import { loadModelFile } from './modelFiles'
 import { modelKind, type LoadedModel } from '../shared/model'
+import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
@@ -383,6 +384,41 @@ async function chooseModel(parent: BrowserWindow | null = win): Promise<void> {
   broadcast('model:path', path)
 }
 
+// ---------- 她自己走到屏幕上的某个位置（「去右上角」「往左一点」，算法在 shared/move.ts） ----------
+
+let walking: ReturnType<typeof setInterval> | null = null
+
+function stopWalk(): void {
+  if (walking) clearInterval(walking)
+  walking = null
+}
+
+/** 在她现在所在的那块屏幕上走过去；你拖她、她被藏起来都会停下 */
+function walkTo(target: MoveTarget): void {
+  if (!win || !win.isVisible()) return
+  stopWalk()
+  const b = win.getBounds()
+  const from = { x: b.x, y: b.y }
+  const to = targetPosition(target, b, screen.getDisplayMatching(b).workArea)
+  if (from.x === to.x && from.y === to.y) {
+    win.webContents.send('character:arrived')
+    return
+  }
+  const ms = walkDuration(from, to)
+  const start = Date.now()
+  win.webContents.send('character:walking', Math.sign(to.x - from.x))
+  walking = setInterval(() => {
+    if (!win || win.isDestroyed() || !win.isVisible()) return stopWalk()
+    const t = (Date.now() - start) / ms
+    const p = walkPoint(from, to, t)
+    win.setPosition(p.x, p.y)
+    if (t >= 1) {
+      stopWalk()
+      win.webContents.send('character:arrived')
+    }
+  }, 16)
+}
+
 function resetPosition(): void {
   if (!win) return
   const { workArea } = screen.getPrimaryDisplay()
@@ -557,6 +593,7 @@ function registerIpc(): void {
 
   ipcMain.on('win:drag-start', () => {
     if (!win) return
+    stopWalk() // 走到一半被你拎起来了
     const c = screen.getCursorScreenPoint()
     const [winX, winY] = win.getPosition()
     drag = { cursorX: c.x, cursorY: c.y, winX, winY }
@@ -930,6 +967,11 @@ function registerIpc(): void {
     broadcast('model:path', null)
   })
   ipcMain.on('win:reset-position', resetPosition)
+  // 让她走到某处：只认角色窗口（对话就在她那里），目标只认名单里的
+  ipcMain.on('character:move', (e, target: unknown) => {
+    if (!win || e.sender !== win.webContents || !isMoveTarget(target)) return
+    walkTo(target)
+  })
   ipcMain.on('ai:reveal', async (_e, key: string) => {
     // 路径从 AI 服务的设置里取，渲染层只能说「哪一个」，不能指定任意路径
     const res = await getAiSettings(AI_URL)
@@ -1043,6 +1085,8 @@ function registerIpc(): void {
       { label: '免打扰（先藏起来）', accelerator: HIDE_SHORTCUT, click: () => toggleDnd(true) },
       { label: '设置…', click: () => openSettings('model') },
       { label: '回到右下角', click: resetPosition },
+      // 也可以直接对她说「去右上角」「往左一点」
+      { label: '去哪儿', submenu: SPOTS.map((s) => ({ label: SPOT_NAMES[s], click: () => walkTo(s) })) },
       { type: 'separator' },
       { label: '开发者工具', click: () => win?.webContents.openDevTools({ mode: 'detach' }) },
       { type: 'separator' },

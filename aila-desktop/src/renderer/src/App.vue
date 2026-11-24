@@ -10,6 +10,7 @@ import { cleanMotions } from '../../shared/extensions'
 import type { AgentProgress } from '../../shared/agent'
 import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
+import { parseMove } from '../../shared/move'
 import { ScreenWatch, helpRequest, type ScreenFinding } from './screen/ScreenWatch'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
@@ -553,8 +554,15 @@ function onSend(text: string): void {
     }
     clearScreenAsk() // 说起别的事了：这次就不问了
   }
+  walkIfAsked(text)
   if (mentionsClipboard(text)) void sendWithClipboard(text)
   else conversation.send(text)
+}
+
+/** 整句就是「去右上角」「往左一点」：当场就走，不等她回话（这句话照样发给她，她会接一句） */
+function walkIfAsked(text: string): void {
+  const target = parseMove(text)
+  if (target) bridge?.moveTo(target)
 }
 
 // ---------- 设置窗口里做的事，她在桌面上有点反应 ----------
@@ -896,7 +904,11 @@ onMounted(async () => {
     )
     void loadCompanion()
     // 说出来的话提到剪贴板，也先带上剪贴板的内容
+    // 回复里的 [go-topright]：说得随意的（「躲开点」）由大模型决定去哪
+    conversation.onMove = (spot) => bridge?.moveTo(spot)
+    subscriptions.push(bridge.onArrived(() => behavior.gesture('nod')))
     voiceControl.onHeard = (text) => {
+      walkIfAsked(text)
       if (!mentionsClipboard(text)) return false
       void sendWithClipboard(text)
       return true

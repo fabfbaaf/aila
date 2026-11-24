@@ -300,3 +300,19 @@ describe('trimHistory', () => {
     expect(trimHistory([...h, 51])[0]).toBe(22)
   })
 })
+
+describe('Conversation 里让她走动', () => {
+  it('回复里的 [go-topright]：收到就走，原话记进历史', async () => {
+    const { conv, transport, saved, talk } = setup()
+    const moves: string[] = []
+    conv.onMove = (spot) => moves.push(spot)
+    conv.send('你挡着我了')
+    transport.push({ type: 'move', spot: 'topright' })
+    expect(moves).toEqual(['topright'])
+    transport.push({ type: 'text', text: '好，我去右上角。', spoken: true })
+    transport.push({ type: 'done' })
+    await Promise.resolve()
+    talk()
+    expect(saved.at(-1)?.content).toBe('[go-topright]好，我去右上角。')
+  })
+})
