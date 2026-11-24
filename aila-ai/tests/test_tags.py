@@ -34,6 +34,16 @@ def test_emotion_and_action() -> None:
     ]
 
 
+def test_move_tags() -> None:
+    # 走到屏幕上的某个位置：最长的 [go-bottomright] 拆成几块也认；不认识的位置原样留着
+    assert run("[go-bottom", "right]好，我回去了。") == [
+        {"type": "move", "spot": "bottomright"},
+        {"type": "text", "text": "好，我回去了。", "spoken": True},
+    ]
+    assert run("[go-topleft]嗯。")[0] == {"type": "move", "spot": "topleft"}
+    assert run("[go-moon]去不了。") == [{"type": "text", "text": "[go-moon]去不了。", "spoken": True}]
+
+
 def test_tag_split_across_chunks() -> None:
     assert run("好的。[ha", "pp", "y]谢谢。") == [
         {"type": "text", "text": "好的。", "spoken": True},

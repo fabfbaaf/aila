@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage } from '../shared/chat'
+import type { MoveTarget } from '../shared/move'
 import type {
   AccountStatus,
   AuthForm,
@@ -282,6 +283,11 @@ const api = {
   onModelBuiltin: (cb: () => void): Unsubscribe => listen('model:builtin', cb),
   onModelPath: (cb: (path: string | null) => void): Unsubscribe => listen('model:path', cb),
   resetPosition: (): void => ipcRenderer.send('win:reset-position'),
+  /** 让她走到屏幕上的某个位置（shared/move.ts 的名字） */
+  moveTo: (target: MoveTarget): void => ipcRenderer.send('character:move', target),
+  /** 开始走：往右是 1，往左是 -1，竖着走是 0 */
+  onWalking: (cb: (dir: number) => void): Unsubscribe => listen('character:walking', cb),
+  onArrived: (cb: () => void): Unsubscribe => listen('character:arrived', cb),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),
 

@@ -6,6 +6,7 @@ import type { Behavior } from '../behavior/Behavior'
 import { lines } from '../persona/lines'
 import { sentenceCut, speakableLength } from '../voice/sentences'
 import { confirmIntent } from './confirmIntent'
+import type { Spot } from '../../../shared/move'
 import type { ChatStream, ChatTransport } from './transport'
 
 type Item =
@@ -87,6 +88,8 @@ export class Conversation {
   onCommit: (m: StoredMessage) => void = () => {}
   /** 开始 / 结束等用户确认（界面显示或收起「好 / 不要」） */
   onAsk: (ask: ConfirmAsk | null) => void = () => {}
+  /** 回复里让她走到屏幕上的某个位置（[go-topright]）：收到就走，不等这句念完 */
+  onMove: (spot: Spot) => void = () => {}
 
   /** 对话记录：带 id 和时间，方便本地保存、多设备合并 */
   private history: StoredMessage[] = []
@@ -507,6 +510,10 @@ export class Conversation {
           if (this.hasSummary) this.queueText('\n', false)
           this.queueText(lines.chatMore, false)
         }
+        break
+      case 'move':
+        this.transcript += `[go-${ev.spot}]` // 记进历史，下一轮大模型看到的是它自己说的原话
+        this.onMove(ev.spot)
         break
       case 'emotion':
       case 'action':
