@@ -34,6 +34,8 @@ export interface DesktopPrefs {
   wander: boolean
   /** 每天看一次 GitHub 上有没有新版本（装好的版本才查） */
   checkUpdates: boolean
+  /** 每周五晚上写这周的回顾（作品页「回顾」里看；会花一点钱，一周一次） */
+  weeklyReview: boolean
 }
 
 export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
@@ -47,7 +49,8 @@ export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
   worksBudget: 0.5,
   diary: true,
   wander: false,
-  checkUpdates: true
+  checkUpdates: true,
+  weeklyReview: true
 }
 
 export const SIT_BREAK_CHOICES = [0, 30, 45, 60, 90] as const
@@ -105,6 +108,7 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
     worksBudget: pick('worksBudget', WORKS_BUDGET_CHOICES),
     diary: bool('diary'),
     wander: bool('wander'),
-    checkUpdates: bool('checkUpdates')
+    checkUpdates: bool('checkUpdates'),
+    weeklyReview: bool('weeklyReview')
   }
 }

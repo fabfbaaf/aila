@@ -1,5 +1,6 @@
 // 作品页的数据从哪来：桌面版经主进程（只认主窗口）转到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import type { DiaryEntry, Work, WorkDetail } from '../../../shared/studio'
+import type { ReviewEntry } from '../../../shared/review'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 
@@ -14,6 +15,10 @@ export interface StudioSource {
   /** 现在就让她做一件；可以给个点子 */
   now(idea?: { title: string; idea: string; kind: 'web' | 'script' }): Promise<Work>
   diary(): Promise<DiaryEntry[]>
+  /** 每周回顾 */
+  reviews(): Promise<ReviewEntry[]>
+  /** 现在写这周的回顾（桌面版才有：材料在桌面端）；force 重写 */
+  reviewNow?(force: boolean): Promise<ReviewEntry>
   /** 认识第几天（桌面版才有） */
   known(): Promise<{ firstSeen?: string; days: number } | null>
   /** 看她做这件作品的过程：打开任务页里那个会话 */
@@ -34,6 +39,8 @@ function desktop(api: NonNullable<typeof bridge>): StudioSource {
     reveal: async (id) => void unwrap(await api.studioReveal(id)),
     now: async (idea) => unwrap(await api.studioNow(idea)),
     diary: async () => unwrap(await api.studioDiary()),
+    reviews: async () => unwrap(await api.studioReviews()),
+    reviewNow: async (force) => unwrap(await api.studioReviewNow(force)),
     known: () => api.studioKnown(),
     openSession: (sid) => api.openAgent(sid)
   }
@@ -57,6 +64,7 @@ function web(): StudioSource {
     open: async (id, entry) => void window.open(`/ai/studio/works/${enc(id)}/raw/${enc(entry)}`, '_blank', 'noopener'),
     now: (idea) => call('POST', '/studio/works', idea ? { idea: { ...idea, why: '' } } : {}),
     diary: () => call('GET', '/studio/diary'),
+    reviews: () => call('GET', '/studio/reviews'),
     known: async () => null
   }
 }

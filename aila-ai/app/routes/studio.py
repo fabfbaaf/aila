@@ -8,6 +8,8 @@
   DELETE /studio/works/{id}               删掉（正在做的先打断）
   GET    /studio/diary                    她的日记（最新的在前）
   POST   /studio/diary                    写今天的日记 {day, facts}（桌面端晚上送来材料）
+  GET    /studio/reviews                  每周回顾（最新的在前）
+  POST   /studio/reviews                  写这周的回顾 {week, start, end, tasks, chats, upcoming, force?}（见 app/review.py）
 """
 
 import asyncio
@@ -19,8 +21,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from ..deps import get_diary, get_studio
+from ..deps import get_diary, get_reviews, get_studio
 from ..diary import Diary, DiaryError
+from ..review import ReviewError, Reviews, WeekMaterial
 from ..studio import DEFAULT_BUDGET, Hints, Studio, StudioError
 
 router = APIRouter(prefix="/studio")
@@ -121,4 +124,35 @@ async def write_diary(req: DiaryIn, diary: Diary = Depends(get_diary), studio: S
     try:
         return await diary.write(req.day, req.facts, works)
     except DiaryError as err:
+        raise HTTPException(409, str(err)) from err
+
+
+class ReviewTask(BaseModel):
+    title: str = Field(max_length=200)
+    project: str = Field(default="", max_length=1000)
+    done: bool = False
+
+
+class ReviewIn(BaseModel):
+    week: str = Field(max_length=10)
+    start: str = Field(max_length=10)
+    end: str = Field(max_length=10)
+    tasks: list[ReviewTask] = Field(default_factory=list, max_length=200)
+    chats: int = Field(default=0, ge=0, le=100_000)
+    upcoming: list[str] = Field(default_factory=list, max_length=50)
+    force: bool = False  # 已经写过这周的也重写
+
+
+@router.get("/reviews")
+async def list_reviews(reviews: Reviews = Depends(get_reviews)) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(reviews.entries)
+
+
+@router.post("/reviews", status_code=201)
+async def write_review(req: ReviewIn, reviews: Reviews = Depends(get_reviews)) -> dict[str, Any]:
+    material = WeekMaterial(req.week, req.start, req.end, [t.model_dump() for t in req.tasks], req.chats,
+                            [u[:200] for u in req.upcoming])
+    try:
+        return await reviews.write(material, req.force)
+    except ReviewError as err:
         raise HTTPException(409, str(err)) from err

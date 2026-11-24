@@ -605,6 +605,12 @@ function onCharacterEvent(ev: CharacterEvent): void {
       behavior.setWorking(ev.on || agentWorking)
       if (ev.on && !conversation.chatting && !desk.value?.presence.quiet) behavior.say(pick(lines.workMaking), 2600)
       break
+    case 'review':
+      if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
+        behavior.gesture('nod')
+        conversation.announce(pick(lines.weeklyReview))
+      }
+      break
     case 'late-night':
       if (!conversation.chatting && !convAsk.value && !screenAsk.value) {
         behavior.gesture('stretch')

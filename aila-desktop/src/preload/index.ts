@@ -30,6 +30,7 @@ import type {
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
+import type { ReviewEntry } from '../shared/review'
 import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
@@ -252,6 +253,8 @@ const api = {
   studioNow: (idea?: { title: string; idea: string; kind: 'web' | 'script' }): Promise<AiResult<Work>> =>
     ipcRenderer.invoke('studio:now', idea ?? null),
   studioDiary: (): Promise<AiResult<DiaryEntry[]>> => ipcRenderer.invoke('studio:diary'),
+  studioReviews: (): Promise<AiResult<ReviewEntry[]>> => ipcRenderer.invoke('studio:reviews'),
+  studioReviewNow: (force = false): Promise<AiResult<ReviewEntry>> => ipcRenderer.invoke('studio:review-now', force),
   studioKnown: (): Promise<{ firstSeen?: string; days: number } | null> => ipcRenderer.invoke('studio:known'),
   studioShow: (id?: string): void => ipcRenderer.send('studio:show', id),
 

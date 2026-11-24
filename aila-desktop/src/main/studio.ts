@@ -9,6 +9,8 @@
 import { BrowserWindow, session, shell } from 'electron'
 import type { AiResult } from '../shared/settings'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
+import type { ReviewEntry } from '../shared/review'
+import type { ReviewBody } from './weekReview'
 import { attempt, json } from './ai'
 
 const enc = encodeURIComponent
@@ -40,7 +42,9 @@ export const studio = {
   remove: (aiUrl: string, id: string) => call<{ ok: boolean }>(aiUrl, 'DELETE', `/studio/works/${enc(id)}`, undefined, 30_000),
   diary: (aiUrl: string) => call<DiaryEntry[]>(aiUrl, 'GET', '/studio/diary'),
   writeDiary: (aiUrl: string, day: string, facts: string[]) =>
-    call<DiaryEntry>(aiUrl, 'POST', '/studio/diary', { day, facts }, 60_000)
+    call<DiaryEntry>(aiUrl, 'POST', '/studio/diary', { day, facts }, 60_000),
+  reviews: (aiUrl: string) => call<ReviewEntry[]>(aiUrl, 'GET', '/studio/reviews'),
+  writeReview: (aiUrl: string, body: ReviewBody) => call<ReviewEntry>(aiUrl, 'POST', '/studio/reviews', body, 90_000)
 }
 
 /** 作品 id 的样子（和 AI 服务、shared/shell.ts 一样） */

@@ -100,6 +100,8 @@ export type CharacterEvent =
   | { kind: 'work-making'; on: boolean; title: string }
   /** 深夜你还在用电脑：提醒一次早点睡 */
   | { kind: 'late-night' }
+  /** 这周的回顾写好了（作品页「回顾」） */
+  | { kind: 'review'; week: string }
 
 /** 她的说话风格：温柔（默认）、元气、冷静、爱吐槽 */
 export type PersonaStyle = 'gentle' | 'lively' | 'calm' | 'teasing'

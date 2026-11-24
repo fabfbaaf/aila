@@ -29,6 +29,7 @@ from .runtime.mock import MockCoderModel
 from .runtime.runner import Runtime
 from .code import CodeProjects
 from .diary import Diary
+from .review import Reviews
 from .extensions import ExtensionStore
 from .persona import persona_addendum
 from .studio import Studio
@@ -230,6 +231,11 @@ def get_studio() -> Studio:
 def get_diary() -> Diary:
     """她的日记（data/diary），一天一篇"""
     return Diary(settings.data_dir, lambda: get_model(), _persona)
+
+
+def get_reviews() -> Reviews:
+    """每周回顾（data/reviews），一周一份。每次现取：测试会换数据目录"""
+    return Reviews(settings.data_dir, lambda: get_model(), lambda: get_memory_store(), _persona)
 
 
 @lru_cache

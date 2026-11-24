@@ -1102,6 +1102,9 @@ function registerIpc(): void {
     )
   })
   ipcMain.handle('studio:diary', (e) => (fromMain(e) ? studio.diary(AI_URL) : nope))
+  ipcMain.handle('studio:reviews', (e) => (fromMain(e) ? studio.reviews(AI_URL) : nope))
+  // 作品页里「现在写这周的」「重写」
+  ipcMain.handle('studio:review-now', (e, force: unknown) => (fromMain(e) && desktop ? desktop.reviewNow(force === true) : nope))
   ipcMain.handle('studio:known', (e) => (fromMain(e) && desktop ? desktop.knownSince() : null))
   ipcMain.on('studio:show', (e, id: unknown) => {
     if (fromCharacter(e)) openMain({ page: 'studio', ...(workOk(id) ? { work: id } : {}) })
@@ -1250,7 +1253,8 @@ app.whenReady().then(() => {
       },
       start: (body) => studio.start(AI_URL, body),
       seen: async (id) => void (await studio.seen(AI_URL, id)),
-      writeDiary: async (day, facts) => (await studio.writeDiary(AI_URL, day, facts)).ok
+      writeDiary: async (day, facts) => (await studio.writeDiary(AI_URL, day, facts)).ok,
+      writeReview: (body) => studio.writeReview(AI_URL, body)
     }
   })
   void serviceKeeper.start()

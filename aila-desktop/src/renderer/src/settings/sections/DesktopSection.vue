@@ -165,6 +165,13 @@ onActivated(load)
           <span class="hint">每天晚上十点以后她写一篇日记：今天一起做了什么、她自己做了什么。只写真的发生的事，在「作品」页的「日记」里看。</span>
         </div>
       </div>
+      <div class="row">
+        <span class="label">每周回顾</span>
+        <div>
+          <Toggle :model-value="status.prefs.weeklyReview" @update:model-value="(v) => set({ weeklyReview: v })" />
+          <span class="hint">每周五晚上六点以后写一份这周的回顾：做了什么、还没做完、下周约好的事，改两句就能当周报。材料是这周的编程任务、聊天摘要和提醒，只写真的发生的事。一周一次大模型请求。在「作品」页的「回顾」里看。</span>
+        </div>
+      </div>
     </div>
 
     <div class="card">
