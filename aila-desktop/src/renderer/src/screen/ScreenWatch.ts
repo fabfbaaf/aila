@@ -1,3 +1,4 @@
+import { t } from '../i18n'
 /**
  * 「留意屏幕上的报错」：连本地 AI 服务的 /screen，开着时 AI 服务每 2 秒看一眼前台窗口
  * （只看写代码的程序），认出报错就推过来。截图和识别都在 AI 服务那边、只在内存里。
@@ -207,5 +208,5 @@ function saveEnabled(on: boolean): void {
 /** 用户同意后发给大模型的那句话 */
 export function helpRequest(f: ScreenFinding): string {
   const where = f.title ? `${f.app}「${f.title}」` : f.app
-  return `我这边报错了，帮我看看是怎么回事、怎么改：\n${f.snippet}\n（在 ${where} 里看到的）`
+  return t('我这边报错了，帮我看看是怎么回事、怎么改：') + `\n${f.snippet}\n` + t('（在 {where} 里看到的）', { where })
 }

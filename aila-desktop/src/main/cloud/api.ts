@@ -1,4 +1,5 @@
 import type { DeviceInfo, StoredMemory, StoredMessage } from '../../shared/cloud'
+import { tm } from '../lang'
 
 export interface TokenResponse {
   accessToken: string
@@ -126,7 +127,7 @@ export class CloudApi {
 
   /** 有效的访问令牌（快过期时先刷新） */
   async accessToken(): Promise<string> {
-    if (!this.session) throw new ApiError(401, 'SIGNED_OUT', '还没有登录')
+    if (!this.session) throw new ApiError(401, 'SIGNED_OUT', tm('还没有登录'))
     if (Date.now() > this.session.accessExpiresAt - REFRESH_AHEAD_MS) await this.refresh()
     return this.session!.accessToken
   }
@@ -146,7 +147,7 @@ export class CloudApi {
   private refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing
     const refreshToken = this.session?.refreshToken
-    if (!refreshToken) return Promise.reject(new ApiError(401, 'SIGNED_OUT', '还没有登录'))
+    if (!refreshToken) return Promise.reject(new ApiError(401, 'SIGNED_OUT', tm('还没有登录')))
     this.refreshing = (async () => {
       try {
         this.setSession(await this.request<TokenResponse>('POST', '/api/auth/refresh', { refreshToken }, false))

@@ -7,8 +7,11 @@
  * 长任务：「出方案」（或者输入 /plan 目标）让她先只读地交一份分阶段的计划，你批准后一阶段一阶段做下去；
  * 计划和进度从日志推出来（plan.ts），右边有计划进度和「接着做」。
  */
+import { t as tr, t as tr2, localized, joinList } from '../i18n'
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { agentModes, MODE_HINTS, MODE_LABELS, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+const MODE_LABELS = localized(MODE_LABELS_RAW)
+const MODE_HINTS = localized(MODE_HINTS_RAW)
 import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
@@ -71,7 +74,7 @@ const undoPreview = ref<{ sid: string; plan: UndoPreview; branch: string | null 
 // 左边列表：搜索、改名、删除
 const query = ref('')
 const groups = computed(() => groupSessions(sessions.value))
-const WAITING: Record<string, string> = { confirm: '等你确认', plan: '等你看计划', paused: '计划停了' }
+const WAITING: Record<string, string> = localized({ confirm: '等你确认', plan: '等你看计划', paused: '计划停了' })
 const waitingCount = computed(() => sessions.value.filter((s) => s.waiting).length)
 watch(waitingCount, (n) => emit('waiting', n), { immediate: true })
 /** 终端里开的、别的窗口开的会话也可能在等你：每隔一会儿刷新一次列表 */
@@ -146,8 +149,8 @@ function loadLedger(): void {
 const modelLabel = computed(() => {
   const m = models.value
   if (!m) return ''
-  if (!m.keySet) return '假模型（还没填密钥）'
-  return m.coder ? m.coder : `${m.chat}（和对话一样）`
+  if (!m.keySet) return tr('假模型（还没填密钥）')
+  return m.coder ? m.coder : tr('{model}（和对话一样）', { model: m.chat })
 })
 const choices = computed<ProjectChoice[]>(() => {
   const seen = new Set<string>()
@@ -293,7 +296,7 @@ async function saveRename(s: AgentSessionSummary): Promise<void> {
 async function askDelete(s: AgentSessionSummary): Promise<void> {
   menuFor.value = ''
   if (s.running) {
-    error.value = '她还在做这个任务：先打断，再删除。'
+    error.value = tr('她还在做这个任务：先打断，再删除。')
     return
   }
   deleteTarget.value = s
@@ -388,7 +391,7 @@ async function forgetNote(note: AgentMemoryNote): Promise<void> {
 function canStart(): boolean {
   if (!current.value || undoBusy.value || opening.value || undoPreview.value || t.value.closed) return false
   if (running.value) {
-    error.value = '她还在做事：等她做完，或者先按 Esc 打断。'
+    error.value = tr('她还在做事：等她做完，或者先按 Esc 打断。')
     return false
   }
   return true
@@ -414,7 +417,7 @@ function send(): void {
 /** 出方案：这一轮只读，goal 是目标；她交计划以后等你批准 */
 function proposePlan(goal: string): void {
   if (!goal.trim()) {
-    error.value = '先在输入框里写下要做的大目标，再点「出方案」。'
+    error.value = tr('先在输入框里写下要做的大目标，再点「出方案」。')
     return
   }
   if (!canStart() || !current.value) return
@@ -451,7 +454,7 @@ async function planAction(action: 'approve' | 'continue' | 'reject', pauseEach =
 /** /review：她只读地审一遍没提交的改动，按严重程度列出问题；focus 是可选的「特别注意什么」 */
 function review(focus = ''): void {
   if (current.value?.kind === 'computer') {
-    error.value = '电脑任务没有项目代码可审。要审改动，在项目里开一个任务。'
+    error.value = tr('电脑任务没有项目代码可审。要审改动，在项目里开一个任务。')
     return
   }
   if (!canStart() || !current.value) return
@@ -464,7 +467,7 @@ function review(focus = ''): void {
 
 async function answer(item: ToolItem, approved: boolean, remember: boolean): Promise<void> {
   if (!item.confirm || item.confirm.result) return
-  if (!(await source.confirm(item.confirm.id, approved, remember))) error.value = '这个确认已经结束了（超时或者被打断）。'
+  if (!(await source.confirm(item.confirm.id, approved, remember))) error.value = tr('这个确认已经结束了（超时或者被打断）。')
 }
 
 async function interrupt(): Promise<void> {
@@ -491,7 +494,7 @@ async function setMode(mode: AgentMode): Promise<void> {
 
 async function mergeNow(runTests: boolean): Promise<void> {
   if (!current.value || running.value || merging.value || undoBusy.value) return
-  merging.value = runTests ? '正在跑测试……' : '正在合并……'
+  merging.value = runTests ? tr('正在跑测试……') : tr('正在合并……')
   error.value = ''
   try {
     t.value.apply(await source.merge(current.value.id, runTests))
@@ -505,7 +508,7 @@ async function mergeNow(runTests: boolean): Promise<void> {
 
 async function discardNow(): Promise<void> {
   if (!current.value || running.value || undoBusy.value) return
-  if (!window.confirm(`放弃分支 ${t.value.branch}？她在分支上还没合并的改动会删掉，你的代码保持原样。`)) return
+  if (!window.confirm(tr('放弃分支 {branch}？她在分支上还没合并的改动会删掉，你的代码保持原样。', { branch: t.value.branch ?? '' }))) return
   try {
     t.value.apply(await source.discard(current.value.id))
     void refreshList()
@@ -546,7 +549,7 @@ async function undoNow(): Promise<void> {
   closeUndoPreview()
   if (current.value?.id !== sid || undoing.has(sid)) return
   if (undoTarget.value?.undo?.turnSeq !== plan.turnSeq) {
-    error.value = '最近一轮已经变了，重新查看再撤销。'
+    error.value = tr('最近一轮已经变了，重新查看再撤销。')
     return
   }
   undoing.add(sid)
@@ -619,7 +622,7 @@ function openFromBoard(sid: string): void {
 }
 
 async function answerFromBoard(_sid: string, id: string, approved: boolean): Promise<void> {
-  if (!(await source.confirm(id, approved, false))) error.value = '这个确认已经结束了（超时或者被打断）。'
+  if (!(await source.confirm(id, approved, false))) error.value = tr('这个确认已经结束了（超时或者被打断）。')
   void refreshList()
 }
 
@@ -632,7 +635,7 @@ async function batchFromBoard(cwd: string, mode: AgentMode, tasks: string[]): Pr
       streaming.add(s.id)
       source.send(s.id, task)
     } catch (err) {
-      error.value = `「${task}」没开成：${(err as Error).message}`
+      error.value = tr('「{task}」没开成：{why}', { task, why: (err as Error).message })
       break
     }
   }
@@ -736,8 +739,8 @@ function when(ts?: number): string {
   if (!ts) return ''
   const d = new Date(ts * 1000)
   const mins = (Date.now() - d.getTime()) / 60000
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${Math.floor(mins)} 分钟前`
+  if (mins < 1) return tr('刚刚')
+  if (mins < 60) return tr('{n} 分钟前', { n: Math.floor(mins) })
   const today = new Date().toDateString() === d.toDateString()
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   return today ? hm : `${d.getMonth() + 1}-${d.getDate()} ${hm}`
@@ -798,17 +801,17 @@ onBeforeUnmount(() => {
   <div class="app" :class="{ bare: !current }">
     <aside class="side">
       <div class="side-head">
-        <h2>任务</h2>
+        <h2>{{ tr('任务') }}</h2>
         <div class="head-actions">
-          <button class="board-toggle" :class="{ on: board }" :title="board ? '回到当前任务' : '看板：几个任务同时做时一眼看全'" @click="board = !board">
-            看板<span v-if="boardBusy" class="dot">{{ boardBusy }}</span>
+          <button class="board-toggle" :class="{ on: board }" :title="board ? tr('回到当前任务') : tr('看板：几个任务同时做时一眼看全')" @click="board = !board">
+            {{ tr('看板') }}<span v-if="boardBusy" class="dot">{{ boardBusy }}</span>
           </button>
-          <button class="new" title="开一个新任务" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+          <button class="new" :title="tr('开一个新任务')" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />{{ tr('新任务') }}</button>
         </div>
       </div>
       <label class="search">
         <Icon name="search" :size="15" />
-        <input v-model="query" type="search" placeholder="找任务：标题或项目" aria-label="找任务" @keydown.stop @keydown.esc="query = ''" />
+        <input v-model="query" type="search" :placeholder="tr('找任务：标题或项目')" :aria-label="tr('找任务')" @keydown.stop @keydown.esc="query = ''" />
       </label>
       <div class="list">
         <template v-for="g in groups" :key="g.label">
@@ -827,7 +830,7 @@ onBeforeUnmount(() => {
               v-model="renameText"
               class="rename"
               maxlength="100"
-              aria-label="新标题"
+              :aria-label="tr('新标题')"
               @click.stop
               @keydown.stop
               @keydown.enter.prevent="saveRename(s)"
@@ -835,28 +838,28 @@ onBeforeUnmount(() => {
               @blur="saveRename(s)"
             />
             <template v-else>
-              <div class="title"><i v-if="s.running" class="live-dot" title="她在做"></i>{{ s.title }}</div>
+              <div class="title"><i v-if="s.running" class="live-dot" :title="tr('她在做')"></i>{{ s.title }}</div>
               <div class="meta">
                 <span>{{ sessionLabel(s) }}</span>
-                <span v-if="s.branch" class="meta-branch" :title="`在分支 ${s.branch} 上做`"><Icon name="branch" :size="12" /></span>
+                <span v-if="s.branch" class="meta-branch" :title="tr('在分支 {branch} 上做', { branch: s.branch })"><Icon name="branch" :size="12" /></span>
                 <span class="dot">·</span>
                 <span>{{ when(s.updated) }}</span>
                 <span v-if="s.plan && s.plan.decision === 'approved' && !s.plan.finished" class="meta-plan">
-                  第 {{ Math.min(s.plan.done + 1, s.plan.stages) }}/{{ s.plan.stages }} 阶段
+                  {{ tr('第 {n}/{total} 阶段', { n: Math.min(s.plan.done + 1, s.plan.stages), total: s.plan.stages }) }}
                 </span>
                 <span v-if="s.waiting" class="meta-wait">{{ WAITING[s.waiting] }}</span>
               </div>
-              <button class="more" title="改名、删除" aria-label="改名、删除" @click.stop="toggleMenu(s.id)"><Icon name="more" :size="16" :stroke="2.4" /></button>
+              <button class="more" :title="tr('改名、删除')" :aria-label="tr('改名、删除')" @click.stop="toggleMenu(s.id)"><Icon name="more" :size="16" :stroke="2.4" /></button>
               <div v-if="menuFor === s.id" class="menu-pop" role="menu" @click.stop>
-                <button role="menuitem" @click="startRename(s)"><Icon name="pencil" :size="15" />改名</button>
-                <button role="menuitem" class="danger" @click="askDelete(s)"><Icon name="trash" :size="15" />删除</button>
+                <button role="menuitem" @click="startRename(s)"><Icon name="pencil" :size="15" />{{ tr('改名') }}</button>
+                <button role="menuitem" class="danger" @click="askDelete(s)"><Icon name="trash" :size="15" />{{ tr('删除') }}</button>
               </div>
             </template>
           </div>
         </template>
-        <div v-if="!sessions.length" class="none">{{ query.trim() ? '没找到对得上的任务' : '还没有任务' }}</div>
+        <div v-if="!sessions.length" class="none">{{ query.trim() ? tr('没找到对得上的任务') : tr('还没有任务') }}</div>
       </div>
-      <div class="side-foot">终端里也能用：<code>aila</code></div>
+      <div class="side-foot">{{ tr('终端里也能用：') }}<code>aila</code></div>
     </aside>
 
     <TaskBoard
@@ -877,15 +880,15 @@ onBeforeUnmount(() => {
           <b>{{ sessionLabel(current) }}</b>
           <span class="path">{{ current.cwd }}</span>
         </div>
-        <span v-if="t.branch" class="branch-badge" title="她在这个分支的临时目录里改，你的代码一个字都没动"><Icon name="branch" :size="13" />{{ t.branch }}</span>
+        <span v-if="t.branch" class="branch-badge" :title="tr('她在这个分支的临时目录里改，你的代码一个字都没动')"><Icon name="branch" :size="13" />{{ t.branch }}</span>
         <BudgetControls class="task-budget" :sid="current.id" :cost="current.cost" :budget="t.budget" :change="source.setBudget" @changed="changedBudget" />
-        <select class="mode" aria-label="当前任务的权限模式" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
+        <select class="mode" :aria-label="tr('当前任务的权限模式')" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
           <option v-for="m in currentModes" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
-        <span class="model" title="编程用的模型：在「设置 → 对话」里改" @click="source.openSettings()">{{ modelLabel }}</span>
+        <span class="model" :title="tr('编程用的模型：在「设置 → 对话」里改')" @click="source.openSettings()">{{ modelLabel }}</span>
         <div class="tabs">
-          <button :class="{ on: view === 'chat' }" @click="view = 'chat'">过程</button>
-          <button :class="{ on: view === 'trace' }" title="按时间看每一步花了多久" @click="view = 'trace'">轨迹</button>
+          <button :class="{ on: view === 'chat' }" @click="view = 'chat'">{{ tr('过程') }}</button>
+          <button :class="{ on: view === 'trace' }" :title="tr('按时间看每一步花了多久')" @click="view = 'trace'">{{ tr('轨迹') }}</button>
         </div>
       </header>
 
@@ -896,22 +899,22 @@ onBeforeUnmount(() => {
         <div v-if="current" class="transcript">
           <div v-if="!t.items.length" class="hello">
             <template v-if="current.kind === 'computer'">
-              <p>要她在电脑上做什么？</p>
-              <p class="dim">比如「先看看测试文件夹里有哪些文件，给我一份按类型整理的方案」「用 PowerShell 读一个 Excel」。她通过命令和脚本操作，改动前会问你。</p>
+              <p>{{ tr('要她在电脑上做什么？') }}</p>
+              <p class="dim">{{ tr('比如「先看看测试文件夹里有哪些文件，给我一份按类型整理的方案」「用 PowerShell 读一个 Excel」。她通过命令和脚本操作，改动前会问你。') }}</p>
             </template>
             <template v-else>
-              <p>在 <b>{{ basename(current.cwd) }}</b> 里，要她做什么？</p>
-              <p class="dim">比如「这个项目是做什么的」「给购物车加一个打折函数，写好测试并跑通」「看看为什么 npm test 失败」</p>
+              <p>{{ tr('在') }} <b>{{ basename(current.cwd) }}</b> {{ tr('里，要她做什么？') }}</p>
+              <p class="dim">{{ tr('比如「这个项目是做什么的」「给购物车加一个打折函数，写好测试并跑通」「看看为什么 npm test 失败」') }}</p>
             </template>
           </div>
           <template v-for="item in t.items" :key="item.key">
-            <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>只读</span></div>
-            <div v-else-if="item.kind === 'user' && item.tag === 'plan'" class="user review"><Icon name="plan" :size="16" />{{ item.text }}<span>只读</span></div>
+            <div v-if="item.kind === 'user' && item.review" class="user review"><Icon name="review" :size="16" />{{ item.text }}<span>{{ tr('只读') }}</span></div>
+            <div v-else-if="item.kind === 'user' && item.tag === 'plan'" class="user review"><Icon name="plan" :size="16" />{{ item.text }}<span>{{ tr('只读') }}</span></div>
             <div v-else-if="item.kind === 'user' && item.tag === 'stage'" class="stage-line"><Icon name="play" :size="12" :stroke="2" />{{ item.text }}</div>
             <div v-else-if="item.kind === 'user' && item.tag === 'command'" class="user command">
               <div class="command-head">
                 <Icon name="command" :size="16" />{{ item.text }}
-                <button class="link" type="button" @click="toggleCommand(item.key)">{{ openCommands.has(item.key) ? '收起' : '看发了什么' }}</button>
+                <button class="link" type="button" @click="toggleCommand(item.key)">{{ openCommands.has(item.key) ? tr('收起') : tr('看发了什么') }}</button>
               </div>
               <pre v-if="openCommands.has(item.key)" class="command-body">{{ item.detail }}</pre>
             </div>
@@ -929,35 +932,35 @@ onBeforeUnmount(() => {
             <ToolCard v-else-if="item.kind === 'tool'" :item="item" :session-id="current.id" :computer="current?.kind === 'computer'"
               :load-screenshot="source.screenshot" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
             <div v-else-if="item.kind === 'merge'" class="merge" :class="{ ok: item.merged }">
-              <div class="merge-head">{{ item.merged ? '✓ 合并了' : '■ 没有合并' }}</div>
+              <div class="merge-head">{{ item.merged ? tr('✓ 合并了') : tr('■ 没有合并') }}</div>
               <div>{{ item.reason }}</div>
               <ul v-if="item.tests.length" class="merge-tests">
                 <li v-for="(tr, i) in item.tests" :key="i" :class="{ bad: !tr.ok }">
-                  {{ tr.ok ? '✓' : '✗' }} {{ tr.label }} · {{ tr.seconds }} 秒
+                  {{ tr.ok ? '✓' : '✗' }} {{ tr.label }} · {{ tr2('{n} 秒', { n: tr.seconds }) }}
                   <pre v-if="!tr.ok && tr.tail">{{ tr.tail }}</pre>
                 </li>
               </ul>
-              <div v-if="item.files.length" class="dim">文件：{{ item.files.join('、') }}</div>
+              <div v-if="item.files.length" class="dim">{{ tr('文件：') }}{{ joinList(item.files) }}</div>
               <div v-if="item.noTests && t.branch" class="merge-actions">
-                <button class="ghost" :disabled="!!merging" @click="mergeNow(false)">不跑测试，直接合并</button>
+                <button class="ghost" :disabled="!!merging" @click="mergeNow(false)">{{ tr('不跑测试，直接合并') }}</button>
               </div>
             </div>
             <div v-else-if="item.kind === 'end'" class="end" :class="item.reason">
               <span>{{ endMark[item.reason] ?? '■' }} {{ endText(item) }}</span>
               <span class="stats">{{ endStats(item) }}</span>
               <button v-if="undoTarget?.key === item.key" class="ghost undo-button" :disabled="undoBusy" @click="previewUndo(item)">
-                {{ undoBusy ? '正在撤销…' : '撤销这一轮' }}
+                {{ undoBusy ? tr('正在撤销…') : tr('撤销这一轮') }}
               </button>
             </div>
             <UndoResult v-else-if="item.kind === 'undo'" :result="item.result" />
             <div v-else class="note">{{ item.text }}</div>
           </template>
-          <div v-if="running && !pending" class="working"><i></i><i></i><i></i>她在做……<span>Esc 打断</span></div>
+          <div v-if="running && !pending" class="working"><i></i><i></i><i></i>{{ tr('她在做……') }}<span>{{ tr('Esc 打断') }}</span></div>
         </div>
         <div v-else class="hello big">
           <div class="hello-mark" aria-hidden="true">&gt;_</div>
-          <p>给她一个编程或电脑任务：她会读文件、跑命令，改动前按你选的权限来。</p>
-          <button class="new" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />新任务</button>
+          <p>{{ tr('给她一个编程或电脑任务：她会读文件、跑命令，改动前按你选的权限来。') }}</p>
+          <button class="new" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />{{ tr('新任务') }}</button>
         </div>
       </div>
 
@@ -965,7 +968,7 @@ onBeforeUnmount(() => {
 
       <footer v-if="current" class="composer">
         <div class="box">
-          <div v-if="menu.length" class="cmd-menu" role="listbox" aria-label="命令">
+          <div v-if="menu.length" class="cmd-menu" role="listbox" :aria-label="tr('命令')">
             <button
               v-for="(c, i) in menu"
               :key="c.source + c.name"
@@ -979,11 +982,10 @@ onBeforeUnmount(() => {
               <b>/{{ c.name }}</b><span class="desc">{{ c.description }}</span><span class="src">{{ SOURCE_LABEL[c.source] }}</span>
             </button>
             <div v-if="!commandList?.commands.length" class="cmd-hint">
-              常做的流程可以写成自定义命令：把「名字.md」放进
-              {{ commandList?.project_dir ? '项目的 .aila/commands/' : '' }}{{ commandList?.project_dir ? '，或者 ' : '' }}{{ commandList?.user_dir ?? '数据目录的 commands/' }}，
-              以后输入「/名字」她就照着做
+              {{ tr('常做的流程可以写成自定义命令：把「名字.md」放进') }}
+              {{ commandList?.project_dir ? tr('项目的 .aila/commands/') : '' }}{{ commandList?.project_dir ? tr('，或者 ') : '' }}{{ commandList?.user_dir ?? tr('数据目录的 commands/') }}{{ tr('，以后输入「/名字」她就照着做') }}
             </div>
-            <div class="cmd-keys">↑↓ 选 · Tab 补全 · Esc 收起</div>
+            <div class="cmd-keys">{{ tr('↑↓ 选 · Tab 补全 · Esc 收起') }}</div>
           </div>
           <textarea
             ref="input"
@@ -992,12 +994,12 @@ onBeforeUnmount(() => {
             :disabled="t.closed"
             :placeholder="
               t.closed
-                ? '这个会话的分支已经放弃了，点左上角「新任务」开一个新的'
+                ? tr('这个会话的分支已经放弃了，点左上角「新任务」开一个新的')
                 : running
-                  ? '她在做事……想好的下一句可以先写着'
+                  ? tr('她在做事……想好的下一句可以先写着')
                   : planNext
-                    ? '说一下大目标：她先出一份分阶段的计划给你看'
-                    : '要她做什么？'
+                    ? tr('说一下大目标：她先出一份分阶段的计划给你看')
+                    : tr('要她做什么？')
             "
             @keydown="onComposerKey"
           ></textarea>
@@ -1006,23 +1008,23 @@ onBeforeUnmount(() => {
               class="chip"
               :class="{ on: planNext }"
               :disabled="running || undoBusy || opening || t.closed"
-              title="大活先出方案：她只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做。也可以输入「/plan 目标」"
+              :title="tr('大活先出方案：她只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做。也可以输入「/plan 目标」')"
               @click="proposePlan(text)"
             >
-              <Icon name="plan" :size="15" />出方案
+              <Icon name="plan" :size="15" />{{ tr('出方案') }}
             </button>
             <button
               v-if="current?.kind !== 'computer'"
               class="chip"
               :disabled="running || undoBusy || opening || t.closed"
-              title="她只读地审一遍还没提交的改动，按严重程度列出问题。也可以输入「/review 要特别注意的地方」"
+              :title="tr('她只读地审一遍还没提交的改动，按严重程度列出问题。也可以输入「/review 要特别注意的地方」')"
               @click="review()"
             >
-              <Icon name="review" :size="15" />审查改动
+              <Icon name="review" :size="15" />{{ tr('审查改动') }}
             </button>
-            <span class="keys">Enter 发送 · Shift+Enter 换行</span>
-            <button v-if="running" class="stop" @click="interrupt"><Icon name="stop" :size="13" :stroke="2.2" />停下 <kbd>Esc</kbd></button>
-            <button v-else class="send" :disabled="!text.trim() || undoBusy || opening" @click="send">发送<Icon name="send" :size="15" :stroke="2" /></button>
+            <span class="keys">{{ tr('Enter 发送 · Shift+Enter 换行') }}</span>
+            <button v-if="running" class="stop" @click="interrupt"><Icon name="stop" :size="13" :stroke="2.2" />{{ tr('停下') }} <kbd>Esc</kbd></button>
+            <button v-else class="send" :disabled="!text.trim() || undoBusy || opening" @click="send">{{ tr('发送') }}<Icon name="send" :size="15" :stroke="2" /></button>
           </div>
         </div>
       </footer>
@@ -1030,67 +1032,67 @@ onBeforeUnmount(() => {
 
     <aside v-if="current && !board" class="info">
       <section v-if="plan && plan.decision !== 'rejected'" class="plan-side">
-        <h3>计划</h3>
+        <h3>{{ tr('计划') }}</h3>
         <p class="plan-side-goal">{{ plan.goal }}</p>
         <ol class="plan-steps">
           <li v-for="(s, i) in plan.stages" :key="i" :class="s.status" :title="s.summary || s.goal">
             <i aria-hidden="true"></i>{{ s.title }}
           </li>
         </ol>
-        <p v-if="plan.decision === 'proposed'" class="dim">等你在左边的计划卡片上决定</p>
-        <p v-else-if="plan.finished" class="plan-ok">全部做完了</p>
-        <p v-else-if="plan.paused" class="plan-paused">停下了：{{ plan.paused.text }}</p>
+        <p v-if="plan.decision === 'proposed'" class="dim">{{ tr('等你在左边的计划卡片上决定') }}</p>
+        <p v-else-if="plan.finished" class="plan-ok">{{ tr('全部做完了') }}</p>
+        <p v-else-if="plan.paused" class="plan-paused">{{ tr('停下了：{why}', { why: plan.paused.text }) }}</p>
         <button
           v-if="canContinue(plan, running)"
           class="ghost plan-continue"
           :disabled="planBusy || undoBusy || opening"
           @click="planAction('continue')"
         >
-          <Icon name="play" :size="12" :stroke="2" />接着做第 {{ (plan.current ?? 0) + 1 }} 阶段
+          <Icon name="play" :size="12" :stroke="2" />{{ tr('接着做第 {n} 阶段', { n: (plan.current ?? 0) + 1 }) }}
         </button>
       </section>
       <section v-if="t.branch">
-        <h3>分支</h3>
-        <p class="dim">她在 <code>{{ t.branch }}</code> 上改，你的代码一个字都没动。觉得可以了就合并：先跑项目的测试，全过、而且你这期间没改过同样的文件，才写回你的代码（不替你提交）。</p>
+        <h3>{{ tr('分支') }}</h3>
+        <p class="dim">{{ tr('她在') }} <code>{{ t.branch }}</code> {{ tr('上改，你的代码一个字都没动。觉得可以了就合并：先跑项目的测试，全过、而且你这期间没改过同样的文件，才写回你的代码（不替你提交）。') }}</p>
         <div class="branch-actions">
-          <button class="merge-btn" :disabled="running || !!merging || undoBusy" @click="mergeNow(true)">{{ merging || '跑测试并合并' }}</button>
-          <button class="ghost" :disabled="running || !!merging || undoBusy" @click="discardNow">放弃分支</button>
+          <button class="merge-btn" :disabled="running || !!merging || undoBusy" @click="mergeNow(true)">{{ merging || tr('跑测试并合并') }}</button>
+          <button class="ghost" :disabled="running || !!merging || undoBusy" @click="discardNow">{{ tr('放弃分支') }}</button>
         </div>
       </section>
       <section>
-        <h3>待办</h3>
+        <h3>{{ tr('待办') }}</h3>
         <ul v-if="t.todos.length" class="todos">
           <li v-for="(item, i) in t.todos" :key="i" :class="item.status">
             {{ item.status === 'completed' ? '☑' : item.status === 'in_progress' ? '◐' : '☐' }} {{ item.content }}
           </li>
         </ul>
-        <p v-else class="dim">步骤多的任务她会先列出来</p>
+        <p v-else class="dim">{{ tr('步骤多的任务她会先列出来') }}</p>
       </section>
       <section>
-        <h3>改过的文件</h3>
+        <h3>{{ tr('改过的文件') }}</h3>
         <ul v-if="files.length" class="files">
           <li v-for="[path, n] in files" :key="path" :title="path">{{ path }}<span v-if="n > 1" class="dim"> ×{{ n }}</span></li>
         </ul>
-        <p v-else class="dim">还没有</p>
+        <p v-else class="dim">{{ tr('还没有') }}</p>
       </section>
       <section v-if="current?.kind !== 'computer'" class="memory">
-        <h3>项目记忆</h3>
+        <h3>{{ tr('项目记忆') }}</h3>
         <ul v-if="notes.length" class="notes">
-          <li v-for="n in notes" :key="n.id" :class="n.source" :title="n.source === 'agent' ? '她记的' : '你加的'">
+          <li v-for="n in notes" :key="n.id" :class="n.source" :title="n.source === 'agent' ? tr('她记的') : tr('你加的')">
             <span>{{ n.text }}</span>
-            <button class="x" title="删掉这条" aria-label="删掉这条" @click="forgetNote(n)"><Icon name="close" :size="12" :stroke="2" /></button>
+            <button class="x" :title="tr('删掉这条')" :aria-label="tr('删掉这条')" @click="forgetNote(n)"><Icon name="close" :size="12" :stroke="2" /></button>
           </li>
         </ul>
-        <p v-else class="dim">她弄清了测试命令、代码约定这类事会记在这里，下次在这个项目开任务时带上。</p>
+        <p v-else class="dim">{{ tr('她弄清了测试命令、代码约定这类事会记在这里，下次在这个项目开任务时带上。') }}</p>
         <form class="note-add" @submit.prevent="addNote">
-          <input v-model="noteText" maxlength="300" placeholder="自己加一条……" aria-label="加一条项目记忆" @keydown.stop />
-          <button type="submit" :disabled="!noteText.trim() || noteBusy">记下</button>
+          <input v-model="noteText" maxlength="300" :placeholder="tr('自己加一条……')" :aria-label="tr('加一条项目记忆')" @keydown.stop />
+          <button type="submit" :disabled="!noteText.trim() || noteBusy">{{ tr('记下') }}</button>
         </form>
       </section>
       <section>
-        <h3>上下文账本</h3>
+        <h3>{{ tr('上下文账本') }}</h3>
         <LedgerPanel :ledger="ledger" :steps="t.steps" :totals="usage" />
-        <button class="ghost" :disabled="running || undoBusy" title="用一份交接说明代替前面的对话（快满时会自动做）" @click="compactNow">压缩上下文</button>
+        <button class="ghost" :disabled="running || undoBusy" :title="tr('用一份交接说明代替前面的对话（快满时会自动做）')" @click="compactNow">{{ tr('压缩上下文') }}</button>
       </section>
     </aside>
 
@@ -1102,23 +1104,23 @@ onBeforeUnmount(() => {
       @close="!undoDialog?.open && (undoPreview = null)"
     >
       <template v-if="undoPreview">
-        <h2 id="undo-heading">撤销最近一轮？</h2>
-        <p id="undo-summary">以下文件会退回到这一轮开始前。你之后改过的文件会跳过。</p>
+        <h2 id="undo-heading">{{ tr('撤销最近一轮？') }}</h2>
+        <p id="undo-summary">{{ tr('以下文件会退回到这一轮开始前。你之后改过的文件会跳过。') }}</p>
         <ul>
           <li v-for="file in undoPreview.plan.files" :key="file.path">
-            <code>{{ file.path }}</code> · {{ file.created ? '删除这一轮新建的文件' : '恢复原内容' }}
+            <code>{{ file.path }}</code> · {{ file.created ? tr('删除这一轮新建的文件') : tr('恢复原内容') }}
           </li>
         </ul>
         <p v-if="undoPreview.plan.missing.length" class="dim">
-          未留底的文件会跳过：{{ undoPreview.plan.missing.join('、') }}
+          {{ tr('未留底的文件会跳过：') }}{{ joinList(undoPreview.plan.missing) }}
         </p>
         <p v-if="undoPreview.branch" class="dim">
-          只处理分支 <code>{{ undoPreview.branch }}</code> 的临时目录，已经合并到项目里的改动需要另外处理。
+          {{ tr('只处理分支') }} <code>{{ undoPreview.branch }}</code> {{ tr('的临时目录，已经合并到项目里的改动需要另外处理。') }}
         </p>
-        <p v-if="undoPreview.plan.commands" class="dim">这一轮还跑过命令，命令做的事无法撤销。</p>
+        <p v-if="undoPreview.plan.commands" class="dim">{{ tr('这一轮还跑过命令，命令做的事无法撤销。') }}</p>
         <div class="undo-actions">
-          <button type="button" class="ghost" autofocus @click="closeUndoPreview">取消</button>
-          <button type="button" class="ghost undo-confirm" @click="undoNow">确认撤销</button>
+          <button type="button" class="ghost" autofocus @click="closeUndoPreview">{{ tr('取消') }}</button>
+          <button type="button" class="ghost undo-confirm" @click="undoNow">{{ tr('确认撤销') }}</button>
         </div>
       </template>
     </dialog>
@@ -1130,34 +1132,34 @@ onBeforeUnmount(() => {
       @close="!deleteDialog?.open && (deleteTarget = null)"
     >
       <template v-if="deleteTarget">
-        <h2 id="delete-heading">删除「{{ deleteTarget.title }}」？</h2>
+        <h2 id="delete-heading">{{ tr('删除「{title}」？', { title: deleteTarget.title }) }}</h2>
         <p v-for="line in deleteNotice(deleteTarget)" :key="line">{{ line }}</p>
         <div class="undo-actions">
-          <button type="button" class="ghost" autofocus @click="closeDelete">取消</button>
-          <button type="button" class="ghost danger-btn" :disabled="deleting" @click="deleteNow">{{ deleting ? '正在删除…' : '删除' }}</button>
+          <button type="button" class="ghost" autofocus @click="closeDelete">{{ tr('取消') }}</button>
+          <button type="button" class="ghost danger-btn" :disabled="deleting" @click="deleteNow">{{ deleting ? tr('正在删除…') : tr('删除') }}</button>
         </div>
       </template>
     </dialog>
 
     <div v-if="picking" class="overlay" @click.self="current && (picking = false)">
       <div class="picker">
-        <h2>开一个新任务</h2>
+        <h2>{{ tr('开一个新任务') }}</h2>
         <fieldset class="task-kinds" :disabled="creating" @keydown.stop>
-          <legend>在哪里做？</legend>
-          <label :class="{ on: newKind === 'project' }"><input v-model="newKind" type="radio" value="project" name="task-kind" />在项目里编程</label>
-          <label :class="{ on: newKind === 'computer' }"><input v-model="newKind" type="radio" value="computer" name="task-kind" />不选项目，操作电脑</label>
+          <legend>{{ tr('在哪里做？') }}</legend>
+          <label :class="{ on: newKind === 'project' }"><input v-model="newKind" type="radio" value="project" name="task-kind" />{{ tr('在项目里编程') }}</label>
+          <label :class="{ on: newKind === 'computer' }"><input v-model="newKind" type="radio" value="computer" name="task-kind" />{{ tr('不选项目，操作电脑') }}</label>
         </fieldset>
         <div v-if="newKind === 'project'" class="choices">
           <button v-for="p in choices" :key="p.path" class="choice" :title="p.path" :disabled="creating" @click="startNew(p.path)">
             <b>{{ p.name }}</b><span>{{ p.path }}</span>
           </button>
-          <button class="choice other" :disabled="creating" @click="pickOther">选择其他文件夹…</button>
+          <button class="choice other" :disabled="creating" @click="pickOther">{{ tr('选择其他文件夹…') }}</button>
         </div>
         <label v-if="newKind === 'project'" class="isolate" :class="{ on: newIsolate }">
           <input id="new-task-isolate" v-model="newIsolate" type="checkbox" :disabled="creating" @keydown.stop />
           <span>
-            <b>在新分支上做</b>
-            她在一个临时的 git 分支里改，你的代码一个字都不动；你说合并时先跑测试，全过才写回来（要是 git 仓库）
+            <b>{{ tr('在新分支上做') }}</b>
+            {{ tr('她在一个临时的 git 分支里改，你的代码一个字都不动；你说合并时先跑测试，全过才写回来（要是 git 仓库）') }}
           </span>
         </label>
         <div class="modes" :class="{ computer: newKind === 'computer' }" @keydown.stop>
@@ -1169,29 +1171,29 @@ onBeforeUnmount(() => {
         <label class="isolate" :class="{ on: newPlan }">
           <input id="new-task-plan" v-model="newPlan" type="checkbox" :disabled="creating" @keydown.stop />
           <span>
-            <b>先出方案再动手</b>
-            大活用这个：她先只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做下去，不受一轮步数的限制
+            <b>{{ tr('先出方案再动手') }}</b>
+            {{ tr('大活用这个：她先只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做下去，不受一轮步数的限制') }}
           </span>
         </label>
         <div class="new-budget">
-          <label for="new-task-budget">花费上限（元，可以不填）</label>
+          <label for="new-task-budget">{{ tr('花费上限（元，可以不填）') }}</label>
           <input
             id="new-task-budget"
             v-model="newBudget"
             @keydown.stop
             inputmode="decimal"
-            placeholder="不限"
+            :placeholder="tr('不限')"
             :aria-invalid="Boolean(newBudgetError)"
             aria-describedby="new-task-budget-help new-task-budget-error"
           />
-          <p id="new-task-budget-help" class="dim">未知价格的用量无法完整计价。达到上限后在下一步前停下，单步可能超出上限。</p>
+          <p id="new-task-budget-help" class="dim">{{ tr('未知价格的用量无法完整计价。达到上限后在下一步前停下，单步可能超出上限。') }}</p>
           <p v-if="newBudgetError" id="new-task-budget-error" class="budget-error" role="alert">{{ newBudgetError }}</p>
         </div>
-        <p v-if="newKind === 'computer'" class="dim">从你的用户目录开始，通过命令和脚本操作。没有自动权限；危险命令和受保护位置每次都要问。批量操作先列方案，移动、改名等命令无法靠「撤销这一轮」恢复。</p>
-        <p v-else class="dim">她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。</p>
+        <p v-if="newKind === 'computer'" class="dim">{{ tr('从你的用户目录开始，通过命令和脚本操作。没有自动权限；危险命令和受保护位置每次都要问。批量操作先列方案，移动、改名等命令无法靠「撤销这一轮」恢复。') }}</p>
+        <p v-else class="dim">{{ tr('她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。') }}</p>
         <p v-if="error" class="budget-error" role="alert">{{ error }}</p>
-        <button v-if="newKind === 'computer'" class="new computer-start" :disabled="creating" @click="startNew()">{{ creating ? '正在开任务…' : '开电脑任务' }}</button>
-        <button v-if="current" class="ghost" :disabled="creating" @click="picking = false">取消</button>
+        <button v-if="newKind === 'computer'" class="new computer-start" :disabled="creating" @click="startNew()">{{ creating ? tr('正在开任务…') : tr('开电脑任务') }}</button>
+        <button v-if="current" class="ghost" :disabled="creating" @click="picking = false">{{ tr('取消') }}</button>
       </div>
     </div>
   </div>

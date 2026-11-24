@@ -7,6 +7,7 @@
  */
 import type { AgentEvent, AgentSessionSummary } from '../../../shared/agent'
 import { starOf } from './layout'
+import { localized } from '../i18n'
 
 export type StepKind = 'ask' | 'read' | 'edit' | 'run' | 'search' | 'explore' | 'other' | 'end'
 
@@ -32,7 +33,7 @@ const KIND: Record<string, StepKind> = {
   explore: 'explore'
 }
 
-const VERB: Record<StepKind, string> = {
+const VERB: Record<StepKind, string> = localized({
   ask: '你说',
   read: '读',
   edit: '改',
@@ -41,16 +42,16 @@ const VERB: Record<StepKind, string> = {
   explore: '派助手查',
   other: '用',
   end: ''
-}
+})
 
-const END: Record<string, string> = {
+const END: Record<string, string> = localized({
   done: '这一轮做完了',
   error: '这一轮出错了',
   max_steps: '步数用完了',
   interrupted: '被打断了',
   budget: '花费到上限了',
   rejected: '你拒绝以后停下了'
-}
+})
 
 function argsOf(raw: unknown): Record<string, unknown> {
   if (typeof raw !== 'string') return {}

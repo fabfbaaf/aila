@@ -2,6 +2,7 @@
 import type { IpcMain, WebContents } from 'electron'
 import type { AgentRelay } from './agent'
 import { validBudget } from '../shared/budget'
+import { tm } from './lang'
 
 export function registerAgentBudgetIpc(
   ipc: Pick<IpcMain, 'handle'>,
@@ -10,8 +11,8 @@ export function registerAgentBudgetIpc(
   sidOk: (sid: unknown) => sid is string
 ): void {
   ipc.handle('agent:budget', (event, sid: unknown, amount: unknown) => {
-    if (!fromMain(event) || !sidOk(sid)) return { ok: false, error: '只有主窗口能用' }
-    if (!validBudget(amount)) return { ok: false, error: '花费上限要是有限的非负金额，null 表示不限。' }
+    if (!fromMain(event) || !sidOk(sid)) return { ok: false, error: tm('只有主窗口能用') }
+    if (!validBudget(amount)) return { ok: false, error: tm('花费上限要是有限的非负金额，null 表示不限。') }
     return relay.setBudget(sid, amount)
   })
 }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** 执行轨迹：每一轮一条时间轴，模型请求、工具、等你确认各一行，看得出时间花在哪、每一步命中多少缓存 */
+import { t } from '../i18n'
 import { computed, ref } from 'vue'
 import { compact } from './fold'
 import { slowest, type TraceRow, type TraceTurn } from './trace'
@@ -23,7 +24,7 @@ function width(r: TraceRow, turn: TraceTurn): string {
 }
 
 function secs(x: number): string {
-  return x >= 10 ? `${x.toFixed(0)} 秒` : `${x.toFixed(1)} 秒`
+  return t('{n} 秒', { n: x >= 10 ? x.toFixed(0) : x.toFixed(1) })
 }
 
 function rowClass(r: TraceRow): string {
@@ -38,14 +39,14 @@ function ticks(turn: TraceTurn): number[] {
 
 <template>
   <div class="trace">
-    <p v-if="!turns.length" class="empty">还没有做过事。给她一个任务，这里会按时间画出每一步。</p>
+    <p v-if="!turns.length" class="empty">{{ t('还没有做过事。给她一个任务，这里会按时间画出每一步。') }}</p>
     <section v-for="turn in shown" :key="turn.key" class="turn">
       <header>
         <span class="ask">{{ turn.text }}</span>
         <span class="meta">
-          {{ turn.running ? '正在做 · ' : '' }}{{ secs(turn.duration) }} · {{ turn.steps }} 步
+          {{ turn.running ? t('正在做 · ') : '' }}{{ secs(turn.duration) }} · {{ t('{n} 步', { n: turn.steps }) }}
           <template v-if="turn.prompt">
-            · 输入 {{ compact(turn.prompt) }}（命中缓存 {{ Math.round((turn.hit / turn.prompt) * 100) }}%）· 输出 {{ compact(turn.completion) }}
+            · {{ t('输入 {p}（命中缓存 {pct}%）', { p: compact(turn.prompt), pct: Math.round((turn.hit / turn.prompt) * 100) }) }}· {{ t('输出 {o}', { o: compact(turn.completion) }) }}
           </template>
         </span>
       </header>
@@ -65,20 +66,20 @@ function ticks(turn: TraceTurn): number[] {
         </div>
         <span class="stat">
           {{ secs(r.end - r.start) }}
-          <template v-if="r.tokens">· 命中 {{ r.tokens.prompt ? Math.round((r.tokens.hit / r.tokens.prompt) * 100) : 0 }}%</template>
+          <template v-if="r.tokens">· {{ t('命中 {pct}%', { pct: r.tokens.prompt ? Math.round((r.tokens.hit / r.tokens.prompt) * 100) : 0 }) }}</template>
         </span>
       </div>
       <footer v-if="!turn.running && turn.rows.length > 2">
-        最慢：<span v-for="(r, i) in slowest(turn)" :key="i">{{ i ? '、' : '' }}{{ r.label }} {{ secs(r.end - r.start) }}</span>
+        {{ t('最慢：') }}<span v-for="(r, i) in slowest(turn)" :key="i">{{ i ? '、' : '' }}{{ r.label }} {{ secs(r.end - r.start) }}</span>
       </footer>
       <UndoResult v-if="turn.undo" :result="turn.undo" />
     </section>
-    <button v-if="turns.length > 3 && !showAll" class="more" @click="showAll = true">还有 {{ turns.length - 3 }} 轮更早的</button>
+    <button v-if="turns.length > 3 && !showAll" class="more" @click="showAll = true">{{ t('还有 {n} 轮更早的', { n: turns.length - 3 }) }}</button>
     <div class="legend">
-      <span><i class="model"></i>她在想（浅色：等第一个字）</span>
-      <span><i class="tool"></i>工具</span>
-      <span><i class="wait"></i>等你确认</span>
-      <span><i class="bad"></i>出错、被拒</span>
+      <span><i class="model"></i>{{ t('她在想（浅色：等第一个字）') }}</span>
+      <span><i class="tool"></i>{{ t('工具') }}</span>
+      <span><i class="wait"></i>{{ t('等你确认') }}</span>
+      <span><i class="bad"></i>{{ t('出错、被拒') }}</span>
     </div>
   </div>
 </template>

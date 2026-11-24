@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { t } from '../../i18n'
+import { t, lang } from '../../i18n'
 import { computed, onActivated, onUnmounted, ref } from 'vue'
 import { describeDownload, IDLE_DOWNLOAD, type ModelDownloadState } from '../../../../shared/models'
+const describeDownloadL = (s: ModelDownloadState): string => describeDownload(s, lang.value)
 import type { AiSettings, AiSettingsUpdate } from '../../../../shared/settings'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
@@ -146,7 +147,7 @@ onActivated(async () => {
             {{ t('唤醒、听写、说话都要语音模型，约 460MB，从 sherpa-onnx 的 GitHub 发布页下载，放在这台电脑上。下载好以后 AI 服务会自动重启一次。') }}
           </span>
           <div v-if="download.running && !download.finished" class="bar"><div :style="{ width: `${percent}%` }"></div></div>
-          <div v-if="describeDownload(download)" class="hint" :class="{ error: !!download.error }">{{ describeDownload(download) }}</div>
+          <div v-if="describeDownloadL(download)" class="hint" :class="{ error: !!download.error }">{{ describeDownloadL(download) }}</div>
           <button v-if="missing.length && !download.running" class="btn" @click="startDownload">
             {{ download.error ? t('再试一次') : t('下载语音模型') }}
           </button>

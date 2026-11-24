@@ -3,6 +3,7 @@
  * 手势层：摄像头预览（带手的骨架）+ 屏幕上的手势光标（保持进度圈）+ 手势说明。
  * 挂上就开摄像头，卸掉就关（v-if 控制）。认出来的动作通过 gesture 事件交给星图。
  */
+import { t } from '../i18n'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { classifyHand, type Point } from './classify'
 import { GestureEngine, REACH, toScreen, type GestureEvent } from './GestureEngine'
@@ -94,7 +95,7 @@ onMounted(async () => {
     phase.value = 'on'
   } catch (err) {
     phase.value = 'failed'
-    message.value = err instanceof TrackerStartError ? err.message : `摄像头打不开：${(err as Error).message}`
+    message.value = err instanceof TrackerStartError ? err.message : t('摄像头打不开：{why}', { why: (err as Error).message })
     emit('failed', message.value)
   }
 })
@@ -109,22 +110,22 @@ onBeforeUnmount(() => {
   <div class="cam" :class="{ shifted }">
     <div ref="preview" class="preview">
       <canvas ref="bones"></canvas>
-      <div v-if="phase === 'starting'" class="cover">正在打开摄像头、加载手势模型……</div>
+      <div v-if="phase === 'starting'" class="cover">{{ t('正在打开摄像头、加载手势模型……') }}</div>
       <div v-else-if="phase === 'failed'" class="cover failed">{{ message }}</div>
     </div>
     <div class="cam-note">
       <i class="dot" :class="phase"></i>
-      <template v-if="phase === 'on'">摄像头开着 · 只在这台电脑上识别，不保存、不上传</template>
-      <template v-else-if="phase === 'starting'">正在打开摄像头</template>
-      <template v-else>摄像头没开</template>
+      <template v-if="phase === 'on'">{{ t('摄像头开着 · 只在这台电脑上识别，不保存、不上传') }}</template>
+      <template v-else-if="phase === 'starting'">{{ t('正在打开摄像头') }}</template>
+      <template v-else>{{ t('摄像头没开') }}</template>
     </div>
     <ul class="cheats">
-      <li><b>剑指</b>唤出全图</li>
-      <li><b>握拳</b>收起面板 / 关掉星图</li>
-      <li><b>捏合</b>抓住星球，往面前拉展开代码</li>
-      <li><b>张开手掌</b>移动旋转星图</li>
-      <li><b>双手张开</b>拉开放大，合拢缩小</li>
-      <li><b>双手合十</b>确认她准备好的修改</li>
+      <li><b>{{ t('剑指') }}</b>{{ t('唤出全图') }}</li>
+      <li><b>{{ t('握拳') }}</b>{{ t('收起面板 / 关掉星图') }}</li>
+      <li><b>{{ t('捏合') }}</b>{{ t('抓住星球，往面前拉展开代码') }}</li>
+      <li><b>{{ t('张开手掌') }}</b>{{ t('移动旋转星图') }}</li>
+      <li><b>{{ t('双手张开') }}</b>{{ t('拉开放大，合拢缩小') }}</li>
+      <li><b>{{ t('双手合十') }}</b>{{ t('确认她准备好的修改') }}</li>
     </ul>
   </div>
 

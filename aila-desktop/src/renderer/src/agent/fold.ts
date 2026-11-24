@@ -10,6 +10,7 @@
 import type { AgentEvent, AgentMode, AgentUndoEvent } from '../../../shared/agent'
 import { isAgentScreenshotName } from '../../../shared/agent'
 import { validBudget, yuan } from '../../../shared/budget'
+import { t, localized } from '../i18n'
 
 export interface TodoItem {
   content: string
@@ -92,45 +93,45 @@ export type Item =
   | { kind: 'undo'; key: string; result: AgentUndoEvent }
   | { kind: 'note'; key: string; text: string }
 
-export const MODE_NOTE: Record<string, string> = { read_only: '只读', ask: '先问再改', auto: '工作区内自动' }
+export const MODE_NOTE: Record<string, string> = localized({ read_only: '只读', ask: '先问再改', auto: '工作区内自动' })
 
 export function actionOf(name: string, args: Record<string, unknown>): string {
   const s = (k: string): string => String(args[k] ?? '')
   switch (name) {
     case 'read_file':
-      return `读 ${s('path')}`
+      return t('读 {path}', { path: s('path') })
     case 'list_files':
-      return `找文件 ${s('pattern') || '*'}`
+      return t('找文件 {pattern}', { pattern: s('pattern') || '*' })
     case 'search':
-      return `搜「${s('pattern').slice(0, 40)}」`
+      return t('搜「{q}」', { q: s('pattern').slice(0, 40) })
     case 'edit_file':
-      return `改 ${s('path')}`
+      return t('改 {path}', { path: s('path') })
     case 'write_file':
-      return `写 ${s('path')}`
+      return t('写 {path}', { path: s('path') })
     case 'run_command':
-      return (args.background ? '后台：' : '') + (s('description') || s('command')).slice(0, 80)
+      return (args.background ? t('后台：') : '') + (s('description') || s('command')).slice(0, 80)
     case 'todo_write':
-      return '更新待办清单'
+      return t('更新待办清单')
     case 'code_search':
-      return `按意思搜「${s('query').slice(0, 24)}」`
+      return t('按意思搜「{q}」', { q: s('query').slice(0, 24) })
     case 'code_locate':
-      return '按报错定位代码'
+      return t('按报错定位代码')
     case 'code_symbol':
-      return `看 ${s('name').slice(0, 30)} 的调用关系`
+      return t('看 {name} 的调用关系', { name: s('name').slice(0, 30) })
     case 'explore':
-      return `派助手去查「${s('task').trim().slice(0, 30)}」`
+      return t('派助手去查「{task}」', { task: s('task').trim().slice(0, 30) })
     case 'job_output':
-      return `看后台任务 ${s('id')} 的输出`
+      return t('看后台任务 {id} 的输出', { id: s('id') })
     case 'job_stop':
-      return `停掉后台任务 ${s('id')}`
+      return t('停掉后台任务 {id}', { id: s('id') })
     case 'propose_plan':
-      return '交计划给你看'
+      return t('交计划给你看')
     case 'stage_done':
-      return '这个阶段做完了'
+      return t('这个阶段做完了')
     case 'stage_blocked':
-      return '这个阶段卡住了'
+      return t('这个阶段卡住了')
     case 'remember':
-      return '记进项目记忆'
+      return t('记进项目记忆')
     default:
       return name
   }
@@ -215,19 +216,19 @@ export class Transcript {
           files: (e.files as string[]) ?? [],
           tests: (e.tests as MergeItem['tests']) ?? [],
           conflicts: (e.conflicts as string[]) ?? [],
-          noTests: !e.merged && String(e.reason ?? '').includes('没找到这个项目的测试命令')
+          noTests: !e.merged && [ '没找到这个项目的测试命令', t('没找到这个项目的测试命令') ].some((k) => String(e.reason ?? '').includes(k)) // AI 服务的原因可能是中文也可能已经翻好
         })
         break
       case 'branch_closed':
-        this.items.push({ kind: 'note', key: this.key(), text: `放弃了分支 ${String(e.branch ?? '')}：你的代码保持原样` })
+        this.items.push({ kind: 'note', key: this.key(), text: t('放弃了分支 {branch}：你的代码保持原样', { branch: String(e.branch ?? '') }) })
         this.branch = null
         this.closed = true
         break
       case 'user':
         this.closeText()
-        if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '审查没提交的改动'), review: true, tag: 'review' })
-        else if (e.plan_request) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? '出方案'), tag: 'plan' })
-        else if (typeof e.plan_stage === 'number') this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `第 ${e.plan_stage + 1} 阶段`), tag: 'stage' })
+        if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('审查没提交的改动')), review: true, tag: 'review' })
+        else if (e.plan_request) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('出方案')), tag: 'plan' })
+        else if (typeof e.plan_stage === 'number') this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('第 {n} 阶段', { n: e.plan_stage + 1 })), tag: 'stage' })
         else if (typeof e.command === 'string')
           this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `/${e.command}`), tag: 'command', detail: String(e.text ?? '') })
         else this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
@@ -333,28 +334,28 @@ export class Transcript {
       }
       case 'plan_decision':
         this.closeText()
-        this.items.push({ kind: 'note', key: this.key(), text: e.approved ? (e.pause_each ? '你批准了计划：每个阶段做完停一下' : '你批准了计划：按阶段做下去') : '你没要这份计划' })
+        this.items.push({ kind: 'note', key: this.key(), text: e.approved ? (e.pause_each ? t('你批准了计划：每个阶段做完停一下') : t('你批准了计划：按阶段做下去')) : t('你没要这份计划') })
         break
       case 'plan_pause':
         this.closeText()
-        this.items.push({ kind: 'note', key: this.key(), text: `计划停在第 ${Number(e.stage ?? 0) + 1} 阶段：${String(e.text ?? '')}` })
+        this.items.push({ kind: 'note', key: this.key(), text: t('计划停在第 {n} 阶段：{why}', { n: Number(e.stage ?? 0) + 1, why: String(e.text ?? '') }) })
         break
       case 'plan_end':
         this.closeText()
-        this.items.push({ kind: 'note', key: this.key(), text: '计划全部做完了' })
+        this.items.push({ kind: 'note', key: this.key(), text: t('计划全部做完了') })
         break
       case 'compaction':
         this.closeText()
-        this.items.push({ kind: 'note', key: this.key(), text: '上下文快满了：用交接说明代替了前面的对话' })
+        this.items.push({ kind: 'note', key: this.key(), text: t('上下文快满了：用交接说明代替了前面的对话') })
         break
       case 'mode':
         this.mode = e.mode as AgentMode
-        this.items.push({ kind: 'note', key: this.key(), text: `权限模式：${MODE_NOTE[String(e.mode)] ?? e.mode}` })
+        this.items.push({ kind: 'note', key: this.key(), text: t('权限模式：{mode}', { mode: MODE_NOTE[String(e.mode)] ?? String(e.mode) }) })
         break
       case 'budget':
         if (validBudget(e.amount)) {
           this.budget = e.amount
-          this.items.push({ kind: 'note', key: this.key(), text: e.amount === null ? '花费上限已取消' : `花费上限设为 ${yuan(e.amount)}` })
+          this.items.push({ kind: 'note', key: this.key(), text: e.amount === null ? t('花费上限已取消') : t('花费上限设为 {money}', { money: yuan(e.amount) }) })
         }
         break
       case 'turn_end': {
@@ -445,23 +446,23 @@ export function compact(n: number): string {
 
 export function endText(end: EndItem): string {
   const words: Record<string, string> = {
-    done: '做完了',
-    max_steps: '步数到上限了，说「继续」接着做',
-    denied: '她要做的事连着被权限挡下，先停下了：换个权限模式（比如「先问再改」），或者说清楚接下来怎么做',
-    rejected: '停下来了，等你说接下来怎么做',
-    timeout: '一直没等到你的回答，先停下了',
-    interrupted: '被打断了，说「继续」接着做',
-    budget: '花到上限了，调高或取消上限后说「继续」接着做',
-    error: `出错了${end.error ? `：${end.error}` : ''}`
+    done: t('做完了'),
+    max_steps: t('步数到上限了，说「继续」接着做'),
+    denied: t('她要做的事连着被权限挡下，先停下了：换个权限模式（比如「先问再改」），或者说清楚接下来怎么做'),
+    rejected: t('停下来了，等你说接下来怎么做'),
+    timeout: t('一直没等到你的回答，先停下了'),
+    interrupted: t('被打断了，说「继续」接着做'),
+    budget: t('花到上限了，调高或取消上限后说「继续」接着做'),
+    error: end.error ? t('出错了：{why}', { why: end.error }) : t('出错了')
   }
   return words[end.reason] ?? end.reason
 }
 
 export function endStats(end: EndItem): string {
-  const parts = [`${end.steps} 步`, `${end.seconds.toFixed(1)} 秒`]
+  const parts = [t('{n} 步', { n: end.steps }), t('{n} 秒', { n: end.seconds.toFixed(1) })]
   if (end.prompt) {
-    parts.push(`输入 ${compact(end.prompt)}（命中缓存 ${Math.round((end.hit / end.prompt) * 100)}%${end.estimated ? '，估算' : ''}）`)
-    parts.push(`输出 ${compact(end.completion)}`)
+    parts.push(t('输入 {p}（命中缓存 {pct}%{est}）', { p: compact(end.prompt), pct: Math.round((end.hit / end.prompt) * 100), est: end.estimated ? t('，估算') : '' }))
+    parts.push(t('输出 {o}', { o: compact(end.completion) }))
   }
   if (typeof end.cost === 'number' && Number.isFinite(end.cost) && end.cost >= 0) parts.push(yuan(end.cost))
   return parts.join(' · ')

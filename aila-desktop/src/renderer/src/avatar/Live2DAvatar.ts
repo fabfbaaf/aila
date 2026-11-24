@@ -15,6 +15,7 @@ import { CanvasTexture, Mesh, MeshBasicMaterial, Object3D, PlaneGeometry, SRGBCo
 import type { ModelFiles } from '../../../shared/model'
 import { live2dParams, lookFrom } from './live2dParams'
 import type { Avatar, Expressions, PoseState } from './types'
+import { t } from '../i18n'
 
 /** 世界坐标里她有多高（和 VRM 模型差不多，镜头构图不用改） */
 const WORLD_HEIGHT = 1.55
@@ -42,10 +43,10 @@ async function loadCore(): Promise<void> {
     const s = document.createElement('script')
     s.src = new URL(CORE_URL, location.href).href
     s.onload = () => resolve()
-    s.onerror = () => reject(new Live2DUnavailable('还没装 Live2D 运行库：在 aila-desktop 里运行 npm run setup:live2d（会先给你看 Live2D 的许可协议）'))
+    s.onerror = () => reject(new Live2DUnavailable(t('还没装 Live2D 运行库：在 aila-desktop 里运行 npm run setup:live2d（会先给你看 Live2D 的许可协议）')))
     document.head.appendChild(s)
   })
-  if (!window.Live2DCubismCore) throw new Live2DUnavailable('Live2D 运行库加载失败')
+  if (!window.Live2DCubismCore) throw new Live2DUnavailable(t('Live2D 运行库加载失败'))
 }
 
 /** 主进程读来的文件 → 带相对路径的 File（pixi-live2d-display 的 FileLoader 按 webkitRelativePath 找） */

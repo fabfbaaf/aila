@@ -8,8 +8,10 @@
  * - 日记：每天晚上一篇
  * 什么时候自己做、每件花多少钱，在设置 → 桌面里改。
  */
+import { t, localized, dateText } from '../i18n'
 import { computed, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
-import { WORK_STATUS_TEXT, type DiaryEntry, type Work, type WorkDetail } from '../../../shared/studio'
+import { WORK_STATUS_TEXT as WORK_STATUS_TEXT_RAW, type DiaryEntry, type Work, type WorkDetail } from '../../../shared/studio'
+const WORK_STATUS_TEXT = localized(WORK_STATUS_TEXT_RAW)
 import { renderMarkdown } from '../agent/markdown'
 import { weekOf, type ReviewEntry } from '../../../shared/review'
 import { createStudioSource } from './studioSource'
@@ -40,7 +42,7 @@ const making = computed(() => works.value.find((w) => w.status === 'making' || w
 
 function dateOf(seconds: number): string {
   const d = new Date(seconds * 1000)
-  return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return dateText(d, true)
 }
 
 async function load(): Promise<void> {
@@ -175,16 +177,16 @@ onDeactivated(() => window.clearInterval(timer))
 <template>
   <div class="studio">
     <header class="bar">
-      <b>她的作品</b>
+      <b>{{ t('她的作品') }}</b>
       <nav class="tabs" role="tablist">
-        <button role="tab" :aria-selected="tab === 'works'" :class="{ on: tab === 'works' }" @click="tab = 'works'">作品</button>
-        <button role="tab" :aria-selected="tab === 'diary'" :class="{ on: tab === 'diary' }" @click="tab = 'diary'">日记</button>
-        <button role="tab" :aria-selected="tab === 'review'" :class="{ on: tab === 'review' }" @click="tab = 'review'">回顾</button>
+        <button role="tab" :aria-selected="tab === 'works'" :class="{ on: tab === 'works' }" @click="tab = 'works'">{{ t('作品') }}</button>
+        <button role="tab" :aria-selected="tab === 'diary'" :class="{ on: tab === 'diary' }" @click="tab = 'diary'">{{ t('日记') }}</button>
+        <button role="tab" :aria-selected="tab === 'review'" :class="{ on: tab === 'review' }" @click="tab = 'review'">{{ t('回顾') }}</button>
       </nav>
-      <span v-if="known && known.days" class="known">认识第 {{ known.days }} 天</span>
+      <span v-if="known && known.days" class="known">{{ t('认识第 {n} 天', { n: known.days }) }}</span>
       <span class="spacer"></span>
       <button v-if="tab === 'works'" class="primary" :disabled="!!making || busy" @click="asking = !asking">
-        {{ making ? `她在做「${making.title}」` : '现在就让她做一个' }}
+        {{ making ? t('她在做「{title}」', { title: making.title }) : t('现在就让她做一个') }}
       </button>
     </header>
 
@@ -192,27 +194,27 @@ onDeactivated(() => window.clearInterval(timer))
 
     <template v-if="tab === 'works'">
       <form v-if="asking" class="ask" @submit.prevent="makeNow">
-        <p>给她出个题，或者什么都不写，让她自己挑。她只在自己的文件夹里做，你的项目一个字都不碰。</p>
+        <p>{{ t('给她出个题，或者什么都不写，让她自己挑。她只在自己的文件夹里做，你的项目一个字都不碰。') }}</p>
         <div class="row">
-          <input v-model="ideaTitle" maxlength="40" placeholder="名字（比如：番茄小钟）" />
-          <select v-model="ideaKind" aria-label="做成什么">
-            <option value="web">网页</option>
-            <option value="script">Python 脚本</option>
+          <input v-model="ideaTitle" maxlength="40" :placeholder="t('名字（比如：番茄小钟）')" />
+          <select v-model="ideaKind" :aria-label="t('做成什么')">
+            <option value="web">{{ t('网页') }}</option>
+            <option value="script">{{ t('Python 脚本') }}</option>
           </select>
         </div>
-        <textarea v-model="ideaText" maxlength="300" rows="2" placeholder="做什么、怎么玩（不写就她自己挑）"></textarea>
+        <textarea v-model="ideaText" maxlength="300" rows="2" :placeholder="t('做什么、怎么玩（不写就她自己挑）')"></textarea>
         <div class="row end">
-          <button type="button" class="ghost" @click="asking = false">算了</button>
-          <button type="submit" class="primary" :disabled="busy">{{ busy ? '她在想做什么……' : '去做吧' }}</button>
+          <button type="button" class="ghost" @click="asking = false">{{ t('算了') }}</button>
+          <button type="submit" class="primary" :disabled="busy">{{ busy ? t('她在想做什么……') : t('去做吧') }}</button>
         </div>
       </form>
 
       <div class="layout" :class="{ open: !!selected }">
         <div class="grid">
           <p v-if="!works.length" class="empty">
-            她还没做过作品。点右上角「现在就让她做一个」，或者在
-            <a href="#" @click.prevent="emit('go', { page: 'settings', section: 'desktop' })">设置 → 桌面</a>
-            里让她隔几天自己做一个——做好了会在桌面上告诉你。
+            {{ t('她还没做过作品。点右上角「现在就让她做一个」，或者在') }}
+            <a href="#" @click.prevent="emit('go', { page: 'settings', section: 'desktop' })">{{ t('设置 → 桌面') }}</a>
+            {{ t('里让她隔几天自己做一个——做好了会在桌面上告诉你。') }}
           </p>
           <article
             v-for="w in works"
@@ -234,31 +236,31 @@ onDeactivated(() => window.clearInterval(timer))
         <aside v-if="selected" class="detail">
           <div class="head">
             <h2>{{ selected.title }}</h2>
-            <button class="x" title="关掉" @click="selected = null">×</button>
+            <button class="x" :title="t('关掉')" @click="selected = null">×</button>
           </div>
           <div class="meta">
             <span class="chip" :class="selected.status">{{ WORK_STATUS_TEXT[selected.status] }}</span>
             <span>{{ dateOf(selected.created) }}</span>
-            <span>{{ selected.kind === 'web' ? '网页' : 'Python 脚本' }}</span>
+            <span>{{ selected.kind === 'web' ? t('网页') : t('Python 脚本') }}</span>
           </div>
           <p v-if="selected.why" class="why">「{{ selected.why }}」</p>
-          <p v-if="selected.status === 'failed'" class="reason">没做成：{{ selected.reason }}</p>
-          <p v-if="selected.status === 'waiting'" class="reason">她要做的一步需要你点头，去任务页看看。</p>
+          <p v-if="selected.status === 'failed'" class="reason">{{ t('没做成：{why}', { why: selected.reason ?? '' }) }}</p>
+          <p v-if="selected.status === 'waiting'" class="reason">{{ t('她要做的一步需要你点头，去任务页看看。') }}</p>
           <div class="actions">
-            <button v-if="selected.entry.endsWith('.html')" class="primary" @click="open(selected)">打开玩玩</button>
-            <button v-if="source.reveal && selected.files.length" @click="source.reveal!(selected.id)">打开文件夹</button>
-            <button v-if="source.openSession" @click="source.openSession!(selected.session)">看她怎么做的</button>
-            <button v-if="!confirmDelete" class="ghost danger" @click="confirmDelete = true">删掉</button>
+            <button v-if="selected.entry.endsWith('.html')" class="primary" @click="open(selected)">{{ t('打开玩玩') }}</button>
+            <button v-if="source.reveal && selected.files.length" @click="source.reveal!(selected.id)">{{ t('打开文件夹') }}</button>
+            <button v-if="source.openSession" @click="source.openSession!(selected.session)">{{ t('看她怎么做的') }}</button>
+            <button v-if="!confirmDelete" class="ghost danger" @click="confirmDelete = true">{{ t('删掉') }}</button>
             <template v-else>
-              <span class="confirm">删掉这件作品和它的文件？找不回来。</span>
-              <button class="danger" @click="remove(selected)">删掉</button>
-              <button class="ghost" @click="confirmDelete = false">不删</button>
+              <span class="confirm">{{ t('删掉这件作品和它的文件？找不回来。') }}</span>
+              <button class="danger" @click="remove(selected)">{{ t('删掉') }}</button>
+              <button class="ghost" @click="confirmDelete = false">{{ t('不删') }}</button>
             </template>
           </div>
           <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
           <div v-if="selected.readme" class="readme md" v-html="renderMarkdown(selected.readme)"></div>
           <div v-if="selected.files.length" class="files">
-            <div class="files-title">文件</div>
+            <div class="files-title">{{ t('文件') }}</div>
             <div v-for="f in selected.files" :key="f.path" class="file">
               {{ f.path }}<span>{{ (f.size / 1024).toFixed(1) }} KB</span>
             </div>
@@ -269,16 +271,16 @@ onDeactivated(() => window.clearInterval(timer))
 
     <section v-else-if="tab === 'review'" class="diary">
       <div class="review-bar">
-        <span class="hint">每周五晚上六点以后她写一份这周的回顾：做了什么、还没做完、下周约好的事，改两句就能当周报（设置 → 桌面里可以关掉）。</span>
+        <span class="hint">{{ t('每周五晚上六点以后她写一份这周的回顾：做了什么、还没做完、下周约好的事，改两句就能当周报（设置 → 桌面里可以关掉）。') }}</span>
         <button v-if="source.reviewNow" class="primary" :disabled="writing" @click="writeReview(reviews.some((r) => r.week === thisWeek))">
-          {{ writing ? '在写……' : reviews.some((r) => r.week === thisWeek) ? '重写这周的' : '现在写这周的' }}
+          {{ writing ? t('在写……') : reviews.some((r) => r.week === thisWeek) ? t('重写这周的') : t('现在写这周的') }}
         </button>
       </div>
-      <p v-if="!reviews.length" class="empty">还没有回顾。周五晚上她会写第一份，也可以点上面的按钮现在就写。</p>
+      <p v-if="!reviews.length" class="empty">{{ t('还没有回顾。周五晚上她会写第一份，也可以点上面的按钮现在就写。') }}</p>
       <article v-for="r in reviews" :key="r.week" class="entry">
         <div class="day">
           {{ r.start }} ～ {{ r.end }}
-          <button class="copy" @click="copyReview(r)">{{ copied === r.week ? '复制好了' : '复制' }}</button>
+          <button class="copy" @click="copyReview(r)">{{ copied === r.week ? t('复制好了') : t('复制') }}</button>
         </div>
         <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown 先整段转义，只插固定标签 -->
         <div class="md" v-html="renderMarkdown(r.markdown)" />
@@ -286,7 +288,7 @@ onDeactivated(() => window.clearInterval(timer))
     </section>
 
     <section v-else class="diary">
-      <p v-if="!diary.length" class="empty">还没有日记。她每天晚上十点以后写一篇（设置 → 桌面里可以关掉）。</p>
+      <p v-if="!diary.length" class="empty">{{ t('还没有日记。她每天晚上十点以后写一篇（设置 → 桌面里可以关掉）。') }}</p>
       <article v-for="d in diary" :key="d.day" class="entry">
         <div class="day">{{ d.day }}</div>
         <p>{{ d.text }}</p>

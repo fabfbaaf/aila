@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** 过程和轨迹共用这条撤销记录，重放时也显示跳过的原因。 */
+import { t, joinList } from '../i18n'
 import type { AgentUndoEvent } from '../../../shared/agent'
 
 defineProps<{ result: AgentUndoEvent }>()
@@ -7,13 +8,13 @@ defineProps<{ result: AgentUndoEvent }>()
 
 <template>
   <div class="undo-result" role="status">
-    <strong>撤销结果</strong>
-    <div v-if="result.restored.length">已撤销 {{ result.restored.length }} 个文件的改动：{{ result.restored.join('、') }}</div>
-    <div v-else>没有撤销任何文件的改动。</div>
+    <strong>{{ t('撤销结果') }}</strong>
+    <div v-if="result.restored.length">{{ t('已撤销 {n} 个文件的改动：', { n: result.restored.length }) }}{{ joinList(result.restored) }}</div>
+    <div v-else>{{ t('没有撤销任何文件的改动。') }}</div>
     <ul v-if="Object.keys(result.skipped).length">
-      <li v-for="(reason, file) in result.skipped" :key="file">跳过 <code>{{ file }}</code>：{{ reason }}</li>
+      <li v-for="(reason, file) in result.skipped" :key="file">{{ t('跳过') }} <code>{{ file }}</code>：{{ reason }}</li>
     </ul>
-    <div v-if="result.commands">这一轮还跑过命令，命令做的事没有撤销。</div>
+    <div v-if="result.commands">{{ t('这一轮还跑过命令，命令做的事没有撤销。') }}</div>
   </div>
 </template>
 

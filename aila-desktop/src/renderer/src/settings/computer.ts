@@ -2,6 +2,7 @@
 import type { ComputerContext } from '../../../shared/agent'
 import type { AiResult, AiSettings } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
+import { t } from '../i18n'
 
 async function request<T>(path: '/settings' | '/agent/computer/context', inventory?: boolean): Promise<AiResult<T>> {
   try {
@@ -15,7 +16,7 @@ async function request<T>(path: '/settings' | '/agent/computer/context', invento
     if (!res.ok) return { ok: false, error: typeof data.detail === 'string' ? data.detail : `AI 服务返回 ${res.status}` }
     return { ok: true, data: data as T }
   } catch {
-    return { ok: false, error: '连不上 AI 服务，启动服务后再重试。' }
+    return { ok: false, error: t('连不上 AI 服务，启动服务后再重试。') }
   }
 }
 

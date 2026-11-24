@@ -4,9 +4,11 @@
  * 卡片上能直接同意 / 拒绝她等着的那个操作（说明是代码生成的，和任务页里的一样）、停下、打开。
  * 「一次开几个」：一行一个任务，每个都在新分支上做（互不干扰，做完一个合一个）。
  */
+import { t, localized } from '../i18n'
 import { computed, ref } from 'vue'
 import type { AgentMode, AgentSessionSummary } from '../../../shared/agent'
-import { MODE_LABELS } from '../../../shared/agent'
+import { MODE_LABELS as MODE_LABELS_RAW } from '../../../shared/agent'
+const MODE_LABELS = localized(MODE_LABELS_RAW)
 import Icon from '../theme/Icon.vue'
 import { boardColumns, COLUMNS, MAX_BATCH, parseBatch, statusLine } from './board'
 import type { ProjectChoice } from './source'
@@ -58,8 +60,8 @@ function submitBatch(): void {
     batchError.value = (err as Error).message
     return
   }
-  if (!batchCwd.value) return void (batchError.value = '先选在哪个项目里做。')
-  if (!tasks.length) return void (batchError.value = '一行写一个任务。')
+  if (!batchCwd.value) return void (batchError.value = t('先选在哪个项目里做。'))
+  if (!tasks.length) return void (batchError.value = t('一行写一个任务。'))
   emit('batch', batchCwd.value, batchMode.value, tasks)
   batchOpen.value = false
   batchText.value = ''
@@ -69,39 +71,39 @@ function submitBatch(): void {
 <template>
   <section class="board">
     <header class="board-head">
-      <h2>看板</h2>
-      <span class="hint">几个任务同时做：每个在自己的分支上，互不干扰</span>
-      <button class="primary" type="button" @click="openBatch"><Icon name="plus" :size="15" :stroke="2" />一次开几个</button>
+      <h2>{{ t('看板') }}</h2>
+      <span class="hint">{{ t('几个任务同时做：每个在自己的分支上，互不干扰') }}</span>
+      <button class="primary" type="button" @click="openBatch"><Icon name="plus" :size="15" :stroke="2" />{{ t('一次开几个') }}</button>
     </header>
 
     <form v-if="batchOpen" class="batch" @submit.prevent="submitBatch" @keydown.stop>
       <label>
-        在哪个项目
+        {{ t('在哪个项目') }}
         <select v-model="batchCwd">
           <option v-for="p in choices" :key="p.path" :value="p.path">{{ p.name }} — {{ p.path }}</option>
         </select>
       </label>
       <label>
-        做什么（一行一个，最多 {{ MAX_BATCH }} 个）
+        {{ t('做什么（一行一个，最多 {n} 个）', { n: MAX_BATCH }) }}
         <textarea
           v-model="batchText"
           rows="5"
-          placeholder="给购物车加优惠券&#10;修好分页从第二页开始的问题&#10;给 utils 补测试"
+          :placeholder="t('给购物车加优惠券\n修好分页从第二页开始的问题\n给 utils 补测试')"
         ></textarea>
       </label>
       <div class="batch-row">
-        <select v-model="batchMode" aria-label="权限模式">
+        <select v-model="batchMode" :aria-label="t('权限模式')">
           <option v-for="m in (['read_only', 'ask', 'auto'] as AgentMode[])" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
-        <span class="hint">每个任务都开在新分支上；你的代码不动，做完在各自的任务里合并</span>
-        <button type="button" class="ghost" @click="batchOpen = false">算了</button>
-        <button type="submit" class="primary" :disabled="!batchTasks.length">开 {{ batchTasks.length || '' }} 个任务</button>
+        <span class="hint">{{ t('每个任务都开在新分支上；你的代码不动，做完在各自的任务里合并') }}</span>
+        <button type="button" class="ghost" @click="batchOpen = false">{{ t('算了') }}</button>
+        <button type="submit" class="primary" :disabled="!batchTasks.length">{{ t('开 {n} 个任务', { n: batchTasks.length || '' }) }}</button>
       </div>
       <div v-if="batchError" class="error">{{ batchError }}</div>
     </form>
 
     <div v-if="error" class="error top">{{ error }}</div>
-    <p v-if="empty && !batchOpen" class="empty">还没有进行中的任务。点「一次开几个」，一行写一件事，她会同时在各自的分支上做。</p>
+    <p v-if="empty && !batchOpen" class="empty">{{ t('还没有进行中的任务。点「一次开几个」，一行写一件事，她会同时在各自的分支上做。') }}</p>
 
     <div class="cols">
       <div v-for="col in COLUMNS" :key="col.id" class="col" :class="col.id">
@@ -114,14 +116,14 @@ function submitBatch(): void {
             {{ sessionLabel(s) }}<template v-if="s.branch"> · <Icon name="branch" :size="12" />{{ s.branch }}</template>
           </div>
           <div class="status" :class="col.id">{{ statusLine(s) }}</div>
-          <div v-if="s.plan && s.plan.decision === 'approved'" class="meta">第 {{ Math.min(s.plan.done + 1, s.plan.stages) }}/{{ s.plan.stages }} 阶段</div>
+          <div v-if="s.plan && s.plan.decision === 'approved'" class="meta">{{ t('第 {n}/{total} 阶段', { n: Math.min(s.plan.done + 1, s.plan.stages), total: s.plan.stages }) }}</div>
           <div class="actions" @click.stop>
             <template v-if="s.waiting === 'confirm' && s.pending && s.running">
-              <button type="button" class="ok" @click="emit('answer', s.id, s.pending.id, true)">可以</button>
-              <button type="button" class="ghost" @click="emit('answer', s.id, s.pending.id, false)">不行</button>
+              <button type="button" class="ok" @click="emit('answer', s.id, s.pending.id, true)">{{ t('可以') }}</button>
+              <button type="button" class="ghost" @click="emit('answer', s.id, s.pending.id, false)">{{ t('不行') }}</button>
             </template>
-            <button v-if="s.running" type="button" class="ghost" @click="emit('stop', s.id)">停下</button>
-            <button type="button" class="ghost" @click="emit('open', s.id)">打开</button>
+            <button v-if="s.running" type="button" class="ghost" @click="emit('stop', s.id)">{{ t('停下') }}</button>
+            <button type="button" class="ghost" @click="emit('open', s.id)">{{ t('打开') }}</button>
           </div>
         </article>
       </div>

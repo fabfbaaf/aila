@@ -3,6 +3,7 @@
  * 项目页：登记过的项目（索引状态，原来在「设置 → 代码库」）和地图（原来的代码星图窗口）。
  * 地图只在这一页、这一块正显示着的时候才挂上：离开时卸掉，3D 不在后台一直画，摄像头（手势）也随之关掉。
  */
+import { t } from '../i18n'
 import { defineAsyncComponent, onActivated, onDeactivated, ref } from 'vue'
 import type { ProjectsTab, ShellRoute } from '../../../shared/shell'
 import { bridge } from '../platform/bridge'
@@ -22,19 +23,19 @@ onDeactivated(() => (shown.value = false))
 <template>
   <div class="projects">
     <header class="bar">
-      <b>项目</b>
+      <b>{{ t('项目') }}</b>
       <div class="tabs" role="tablist">
         <button role="tab" :aria-selected="tab === 'list'" :class="{ on: tab === 'list' }" @click="emit('go', { page: 'projects', tab: 'list' })">
-          列表
+          {{ t('列表') }}
         </button>
         <button role="tab" :aria-selected="tab === 'map'" :class="{ on: tab === 'map' }" @click="emit('go', { page: 'projects', tab: 'map' })">
-          地图
+          {{ t('地图') }}
         </button>
       </div>
-      <span class="hint">{{ tab === 'map' ? '她最近读过、改过的文件会亮起来' : '登记过的项目：她按意思搜代码、按报错定位都靠这里的索引' }}</span>
+      <span class="hint">{{ tab === 'map' ? t('她最近读过、改过的文件会亮起来') : t('登记过的项目：她按意思搜代码、按报错定位都靠这里的索引') }}</span>
     </header>
     <div v-show="tab === 'list'" class="settings-scope list">
-      <div v-if="!bridge" class="empty">项目列表只在桌面版里能用（npm run dev）。</div>
+      <div v-if="!bridge" class="empty">{{ t('项目列表只在桌面版里能用（npm run dev）。') }}</div>
       <div v-else class="inner"><CodeSection /></div>
     </div>
     <div v-if="tab === 'map' && shown" class="map">

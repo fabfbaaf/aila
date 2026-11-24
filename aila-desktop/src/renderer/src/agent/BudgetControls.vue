@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** 任务顶部的页内预算表单，按会话保存，切换后不把旧请求结果写到新会话。 */
+import { t } from '../i18n'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import type { AgentBudgetEvent } from '../../../shared/agent'
 import { parseBudget, yuan } from '../../../shared/budget'
@@ -20,8 +21,8 @@ let generation = 0
 const saving = computed(() => pending.has(props.sid))
 const known = computed(() => typeof props.cost === 'number' && Number.isFinite(props.cost) && props.cost >= 0)
 const label = computed(() => {
-  const limit = props.budget === null ? '不限' : `上限 ${yuan(props.budget)}`
-  return known.value ? `已花 ${yuan(props.cost!)} / ${limit}` : `价格未知 / ${limit}`
+  const limit = props.budget === null ? t('不限') : t('上限 {money}', { money: yuan(props.budget) })
+  return known.value ? t('已花 {money} / {limit}', { money: yuan(props.cost!), limit }) : t('价格未知 / {limit}', { limit })
 })
 
 function cancel(): void {
@@ -57,7 +58,7 @@ async function save(): Promise<void> {
     emit('changed', sid, event)
     if (props.sid === sid && generation === request) editing.value = false
   } catch (err) {
-    if (props.sid === sid && generation === request) error.value = (err as Error).message || '上限没能保存，再试一次。'
+    if (props.sid === sid && generation === request) error.value = (err as Error).message || t('上限没能保存，再试一次。')
   } finally { pending.delete(sid) }
 }
 </script>
@@ -65,28 +66,28 @@ async function save(): Promise<void> {
 <template>
   <div class="budget-controls">
     <button type="button" class="budget-button" :title="label" :aria-expanded="editing" aria-controls="task-budget-editor" :disabled="saving" @click="edit">
-      {{ saving ? '正在保存上限…' : label }}
+      {{ saving ? t('正在保存上限…') : label }}
     </button>
     <form v-if="editing" id="task-budget-editor" class="budget-editor" @submit.prevent="save" @keydown.stop @keydown.esc.prevent.stop="cancel">
-      <label for="task-budget-amount">花费上限（元，可以留空）</label>
+      <label for="task-budget-amount">{{ t('花费上限（元，可以留空）') }}</label>
       <div class="budget-row">
         <input
           id="task-budget-amount"
           ref="input"
           v-model="text"
           inputmode="decimal"
-          placeholder="不限"
+          :placeholder="t('不限')"
           :disabled="saving"
           :aria-invalid="Boolean(error)"
           aria-describedby="task-budget-help task-budget-error"
         />
-        <button type="submit" :disabled="saving">{{ saving ? '正在保存…' : '保存' }}</button>
-        <button type="button" @click="cancel">取消</button>
+        <button type="submit" :disabled="saving">{{ saving ? t('正在保存…') : t('保存') }}</button>
+        <button type="button" @click="cancel">{{ t('取消') }}</button>
       </div>
       <p id="task-budget-help">
-        留空表示不限，0 会在下一步前停下。达到上限后在下一步前停下，当前一步的费用可能超出上限。
+        {{ t('留空表示不限，0 会在下一步前停下。达到上限后在下一步前停下，当前一步的费用可能超出上限。') }}
       </p>
-      <p v-if="!known" class="unknown">当前有价格未知的用量，无法完整计价和按此上限保护。</p>
+      <p v-if="!known" class="unknown">{{ t('当前有价格未知的用量，无法完整计价和按此上限保护。') }}</p>
       <p v-if="error" id="task-budget-error" class="error" role="alert">{{ error }}</p>
     </form>
   </div>

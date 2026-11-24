@@ -4,9 +4,10 @@
  * 加服务 = 让这台电脑跑一个程序：先把贴进来的配置给 AI 服务解析，显示要启动的命令（代码拼的），你点了才保存启动。
  * 服务的环境变量（常常是密钥）只显示名字。
  */
-import { t, joinList } from '../../i18n'
+import { t, joinList, localized } from '../../i18n'
 import { onActivated, onMounted, ref } from 'vue'
-import { MCP_STATUS_LABELS, type McpPreviewItem, type McpServerInfo } from '../../../../shared/mcp'
+import { MCP_STATUS_LABELS as MCP_STATUS_LABELS_RAW, type McpPreviewItem, type McpServerInfo } from '../../../../shared/mcp'
+const MCP_STATUS_LABELS = localized(MCP_STATUS_LABELS_RAW)
 import { MCP_EXAMPLE, disableMcp, forgetMcpTool, importMcp, loadMcp, previewMcp, removeMcp, restartMcp } from '../mcp'
 
 const servers = ref<McpServerInfo[]>([])

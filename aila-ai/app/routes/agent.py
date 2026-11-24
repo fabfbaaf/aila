@@ -50,6 +50,7 @@ from ..runtime.mcp import McpError, parse_import
 from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 from ..runtime.session import Event
+from ..i18n import localize_event, localize_labels, localize_summary
 from ..sse import with_heartbeat
 
 router = APIRouter(prefix="/agent")
@@ -117,7 +118,7 @@ class Answer(BaseModel):
 def _sse(events: AsyncIterator[Event]) -> StreamingResponse:
     async def body() -> AsyncIterator[str]:
         async for event in events:
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps(localize_event(event), ensure_ascii=False)}\n\n"  # 英文界面时给人看的字段换成英文
 
     # 隔 15 秒没事件就发一行心跳：她跑长命令、想很久时连接不会被桌面端当成断了
     return StreamingResponse(with_heartbeat(body()), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
@@ -158,14 +159,15 @@ async def new_task(req: NewTask, rt: Runtime = Depends(get_runtime)) -> dict:
 
 @router.get("/sessions")
 async def list_sessions(rt: Runtime = Depends(get_runtime), q: str | None = None, cwd: str | None = None) -> list[dict]:
-    return [{**s, "running": rt.running(s["id"])} for s in rt.store.list(query=q, cwd=cwd)]
+    return [{**localize_summary(s), "running": rt.running(s["id"])} for s in rt.store.list(query=q, cwd=cwd)]
 
 
 @router.get("/sessions/{sid}")
 async def get_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
     session = _session_or_404(rt, sid)
     shell = computer_shell() if session.kind == "computer" else rt.shell
-    return {**session.summary(), "running": rt.running(sid), "shell": shell.label, "events": session.events}
+    return {**localize_summary(session.summary()), "running": rt.running(sid), "shell": shell.label,
+            "events": [localize_event(e) for e in session.events]}  # 打开旧会话时进度、确认也按现在的语言显示
 
 
 @router.post("/sessions/{sid}/messages")
@@ -204,7 +206,8 @@ async def set_mode(sid: str, req: SetMode, rt: Runtime = Depends(get_runtime)) -
 async def context(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
     """上下文账本：下一步发给模型的上下文由哪几块组成、各占多少、命中缓存多少"""
     _session_or_404(rt, sid)
-    return rt.context(sid)
+    ledger = rt.context(sid)
+    return {**ledger, "segments": localize_labels(ledger.get("segments", [])), "biggest": localize_labels(ledger.get("biggest", []))}
 
 
 @router.post("/sessions/{sid}/compact")

@@ -4,6 +4,7 @@
  */
 
 import type { StoredMessage } from '../../../shared/cloud'
+import { t } from '../i18n'
 
 export interface DayGroup {
   /** 今天 / 昨天 / 11 月 14 日（星期五） */
@@ -21,8 +22,8 @@ function dayKey(d: Date): string {
 
 export function dayLabel(d: Date, now: Date): string {
   const key = dayKey(d)
-  if (key === dayKey(now)) return '今天'
-  if (key === dayKey(new Date(now.getTime() - 24 * 3600 * 1000))) return '昨天'
+  if (key === dayKey(now)) return t('今天')
+  if (key === dayKey(new Date(now.getTime() - 24 * 3600 * 1000))) return t('昨天')
   const year = d.getFullYear() === now.getFullYear() ? '' : `${d.getFullYear()} 年 `
   return `${year}${d.getMonth() + 1} 月 ${d.getDate()} 日（星期${WEEKDAYS[d.getDay()]}）`
 }

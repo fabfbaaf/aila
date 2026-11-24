@@ -1,3 +1,4 @@
+import { translate, type Lang } from './i18n'
 /**
  * 下载语音模型的进度。安装包不带语音模型（约 460MB），设置页「语音」里点按钮下载：
  * 主进程用 AI 服务同一个程序跑 --download-models，它每行打一条（格式见 aila-ai/app/models_download.py），
@@ -35,10 +36,11 @@ export function applyDownloadLine(state: ModelDownloadState, raw: string): Model
 }
 
 /** 进度条下面那一行字 */
-export function describeDownload(s: ModelDownloadState): string {
-  if (s.error) return `没下完：${s.error}。网络好了再点一次，已经下好的不会重下`
-  if (s.finished) return s.running ? '下载好了，正在重启 AI 服务……' : '下载好了，语音可以用了'
+/** lang：界面语言（页面传进来；不传是中文） */
+export function describeDownload(s: ModelDownloadState, lang: Lang = 'zh'): string {
+  if (s.error) return translate(lang, '没下完：{why}。网络好了再点一次，已经下好的不会重下', { why: s.error })
+  if (s.finished) return translate(lang, s.running ? '下载好了，正在重启 AI 服务……' : '下载好了，语音可以用了')
   if (s.message) return s.message
-  if (s.current) return s.totalMb ? `${s.current}：${s.doneMb} / ${s.totalMb} MB` : `${s.current}：${s.doneMb} MB`
-  return s.running ? '准备下载……' : ''
+  if (s.current) return s.totalMb ? translate(lang, '{name}：{done} / {total} MB', { name: s.current, done: s.doneMb, total: s.totalMb }) : translate(lang, '{name}：{done} MB', { name: s.current, done: s.doneMb })
+  return s.running ? translate(lang, '准备下载……') : ''
 }

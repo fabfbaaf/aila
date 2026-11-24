@@ -3,6 +3,7 @@ import type { AiResult, CodeProject } from '../../../shared/settings'
 import type { AgentActivity, AgentSession, AgentSessionSummary } from '../../../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../../../shared/workbench'
 import { bridge } from '../platform/bridge'
+import { t } from '../i18n'
 
 export interface StarSource {
   projects(): Promise<CodeProject[]>
@@ -56,7 +57,7 @@ function desktop(api: NonNullable<typeof bridge>): StarSource {
     seal: (id) => api.gestureSeal(id),
     task: async (project, text) => {
       const r = await api.agentTask({ project, text })
-      return r.ok ? null : (r.error ?? '没开成')
+      return r.ok ? null : (r.error ?? t('没开成'))
     },
     sessions: async () => unwrap(await api.agentList('')),
     session: async (sid) => unwrap(await api.agentGet(sid))

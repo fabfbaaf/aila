@@ -10,6 +10,7 @@ import { mkdirSync } from 'node:fs'
 import { StringDecoder } from 'node:string_decoder'
 import { applyDownloadLine, IDLE_DOWNLOAD, type ModelDownloadState } from '../shared/models'
 import type { ServiceCommand } from './service'
+import { tm } from './lang'
 
 export interface ModelDownloaderDeps {
   command: () => ServiceCommand | null
@@ -31,7 +32,7 @@ export class ModelDownloader {
   start(): { ok: boolean; error?: string } {
     if (this.child) return { ok: true }
     const command = this.deps.command()
-    if (!command) return { ok: false, error: '找不到 AI 服务，没法下载' }
+    if (!command) return { ok: false, error: tm('找不到 AI 服务，没法下载') }
     mkdirSync(command.cwd, { recursive: true })
     const child = spawn(command.executable, [...command.args, '--download-models'], {
       cwd: command.cwd,

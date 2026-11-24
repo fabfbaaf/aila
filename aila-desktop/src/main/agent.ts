@@ -24,6 +24,7 @@ import type {
 import type { AiResult } from '../shared/settings'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
+import { tm } from './lang'
 
 export interface RelayHooks {
   /** 一个事件 → 工作窗口 */
@@ -317,7 +318,7 @@ export class AgentRelay {
         parser.feed(decoder.decode(value, { stream: true }))
       }
     } catch (err) {
-      if (!controller.signal.aborted) error = `连不上 AI 服务：${err instanceof Error ? err.message : String(err)}`
+      if (!controller.signal.aborted) error = tm('连不上 AI 服务：{why}', { why: err instanceof Error ? err.message : String(err) })
     } finally {
       if (this.streams.get(sid) === controller) this.streams.delete(sid)
       if (!controller.signal.aborted) this.hooks.ended(sid, error)
@@ -426,7 +427,7 @@ export class AgentRelay {
       if (!res.ok) return { ok: false, error: await detail(res) }
       return { ok: true, data: (await res.json()) as T }
     } catch (err) {
-      return { ok: false, error: `连不上 AI 服务：${err instanceof Error ? err.message : String(err)}` }
+      return { ok: false, error: tm('连不上 AI 服务：{why}', { why: err instanceof Error ? err.message : String(err) }) }
     }
   }
 }
@@ -438,5 +439,5 @@ async function detail(res: Response): Promise<string> {
   } catch {
     // 不是 JSON
   }
-  return `AI 服务返回 ${res.status}`
+  return tm('AI 服务返回 {status}', { status: res.status })
 }

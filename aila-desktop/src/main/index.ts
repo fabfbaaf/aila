@@ -59,7 +59,8 @@ import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionNam
 import { droppedPathOk, openExtensionPage } from './extensions'
 import { loadModelFile } from './modelFiles'
 import { modelKind, type LoadedModel } from '../shared/model'
-import { isLangPref, resolveLang, translate, type Lang, type LangPref, type Params } from '../shared/i18n'
+import { isLangPref, resolveLang, type LangPref } from '../shared/i18n'
+import { mainLang, setMainLang, tm } from './lang'
 import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
@@ -202,16 +203,14 @@ interface Settings {
 // ---------- 界面语言（shared/i18n.ts） ----------
 
 /** 现在用哪种语言（菜单、通知用；页面那边由 lang:changed 通知） */
-let uiLang: Lang = 'zh'
-const tm = (zh: string, params?: Params): string => translate(uiLang, zh, params)
 
 function applyLanguage(): void {
-  uiLang = resolveLang(loadSettings().language, app.getLocale())
+  setMainLang(resolveLang(loadSettings().language, app.getLocale()))
 }
 
 /** 告诉 AI 服务（她用哪种语言回答）；服务没开也没关系，服务起来时会再推一次 */
 function pushLanguage(): void {
-  void putAiSettings(AI_URL, { language: uiLang }).catch(() => undefined)
+  void putAiSettings(AI_URL, { language: mainLang() }).catch(() => undefined)
 }
 
 // ---------- 检查更新（shared/update.ts） ----------
@@ -1047,15 +1046,15 @@ function registerIpc(): void {
   ipcMain.on('settings:open', (_e, section?: SettingsSection) => openSettings(section))
   ipcMain.handle('ai:settings', () => getAiSettings(AI_URL))
   // 界面语言：谁都能读；只有主窗口能改，改了通知所有窗口、重画托盘菜单、告诉 AI 服务
-  ipcMain.handle('lang:get', () => ({ pref: loadSettings().language ?? 'auto', lang: uiLang }))
+  ipcMain.handle('lang:get', () => ({ pref: loadSettings().language ?? 'auto', lang: mainLang() }))
   ipcMain.handle('lang:set', (e, pref: unknown) => {
     if (!fromMainWindow(e) || !isLangPref(pref)) return null
     saveSettings({ ...loadSettings(), language: pref })
     applyLanguage()
-    broadcast('lang:changed', uiLang)
+    broadcast('lang:changed', mainLang())
     updateTray()
     pushLanguage()
-    return { pref, lang: uiLang }
+    return { pref, lang: mainLang() }
   })
   ipcMain.handle('ai:settings:put', async (e, update: AiSettingsUpdate) => {
     if (!fromMainWindow(e)) return MAIN_ONLY // 能改大模型地址和密钥：只认主窗口
