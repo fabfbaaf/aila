@@ -7,7 +7,7 @@
  * 页面和地址的对应规则在 shared/shell.ts，主进程也用同一份。
  * 界面风格（颜色、字体、图标）在 theme/：tokens.css、icons.ts。
  */
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import { PAGES, parseHash, toHash, type ShellRoute } from '../../../shared/shell'
 import { bridge } from '../platform/bridge'
 import { startStore } from '../settings/store'
@@ -20,6 +20,9 @@ import SectionPage from './SectionPage.vue'
 import SettingsPage from './SettingsPage.vue'
 import ChatHistoryPage from './ChatHistoryPage.vue'
 import StudioPage from './StudioPage.vue'
+import CommandPalette from './CommandPalette.vue'
+import { chatQueryRequest, newTaskRequest } from './intents'
+import type { PaletteAct } from './palette'
 
 const KnowledgeSection = defineAsyncComponent(() => import('../settings/sections/KnowledgeSection.vue'))
 const MemorySection = defineAsyncComponent(() => import('../settings/sections/MemorySection.vue'))
@@ -55,9 +58,38 @@ function go(next: ShellRoute): void {
   document.title = name && next.page !== 'tasks' ? `艾拉 · ${name}` : '艾拉'
 }
 
-/** Ctrl+1…7 切页面（和图标栏的顺序一样） */
+// ---------- Ctrl+K 快捷跳转（palette.ts） ----------
+
+const paletteOpen = ref(false)
+const palette = ref<InstanceType<typeof CommandPalette> | null>(null)
+
+async function openPalette(): Promise<void> {
+  paletteOpen.value = true
+  await nextTick()
+  await palette.value?.open()
+}
+
+function act(a: PaletteAct): void {
+  if (a.kind === 'go') go(a.route)
+  else if (a.kind === 'open-chat') bridge?.openChat()
+  else if (a.kind === 'new-task') {
+    go({ page: 'tasks' })
+    newTaskRequest.value++
+  } else if (a.kind === 'chat') {
+    go({ page: 'chat' })
+    chatQueryRequest.value = a.query
+  }
+}
+
+/** Ctrl+1…7 切页面（和图标栏的顺序一样）；Ctrl+K 快捷跳转 */
 function onKey(e: KeyboardEvent): void {
   if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
+  if (e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    if (paletteOpen.value) paletteOpen.value = false
+    else void openPalette()
+    return
+  }
   const target = PAGES.find((p) => p.key === e.key)
   if (!target) return
   e.preventDefault()
@@ -89,7 +121,7 @@ onBeforeUnmount(() => {
         :key="p.id"
         class="ic"
         :class="{ on: route.page === p.id, end: p.id === 'settings' }"
-        :title="`${p.name}（Ctrl+${p.key}）`"
+        :title="`${p.name}（Ctrl+${p.key}；Ctrl+K 快捷跳转）`"
         :aria-current="route.page === p.id ? 'page' : undefined"
         @click="go(p.id === 'projects' ? { page: 'projects', tab: route.tab ?? 'list' } : { page: p.id })"
       >
@@ -109,6 +141,7 @@ onBeforeUnmount(() => {
         />
       </KeepAlive>
     </main>
+    <CommandPalette v-if="paletteOpen" ref="palette" @close="paletteOpen = false" @act="act" />
   </div>
 </template>
 

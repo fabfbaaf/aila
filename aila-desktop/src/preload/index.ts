@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import { AI_SERVICE_URL, type ChatEvent, type ChatMessage } from '../shared/chat'
+import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
+import type { UpdateInfo } from '../shared/update'
 import type {
   AccountStatus,
   AuthForm,
@@ -10,6 +11,7 @@ import type {
   RemoteChanges,
   SkillInfo,
   MemoryEpisode,
+  MemoryKind,
   StoredMemory,
   StoredMessage
 } from '../shared/cloud'
@@ -113,6 +115,9 @@ const api = {
   memoryList: (): Promise<StoredMemory[]> => ipcRenderer.invoke('memory:list'),
   memoryDelete: (id: string): void => ipcRenderer.send('memory:delete', id),
   memoryForgetAll: (): Promise<number> => ipcRenderer.invoke('memory:forget-all'),
+  /** 自己加一条（op: 'add'）或改一条（op: 'update', id） */
+  memoryEdit: (edit: { op: 'add' | 'update'; id?: string; content: string; kind: MemoryKind; expiresAt?: string | null }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('memory:edit', edit),
   memoryEpisodes: (): Promise<MemoryEpisode[]> => ipcRenderer.invoke('memory:episodes'),
   /** id 不给就是全部删 */
   memoryForgetEpisode: (id?: string): Promise<boolean> => ipcRenderer.invoke('memory:forget-episode', id),
@@ -136,7 +141,20 @@ const api = {
   workbenchTakeFocus: (): Promise<WorkbenchFocus | null> => ipcRenderer.invoke('workbench:take-focus'),
   onWorkbenchFocus: (cb: (focus: WorkbenchFocus) => void): Unsubscribe => listen('workbench:focus', cb),
   /** 星图里点「问她」：让桌面上的她说（主进程只认星图窗口发来的） */
+  // 检查更新（只给主窗口）
+  updateCheck: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:check'),
+  updateLast: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:last'),
+  updateOpen: (url: string): void => ipcRenderer.send('update:open', url),
   sayToAila: (text: string): void => ipcRenderer.send('chat:say', text),
+  // 主窗口的对话页：看她正在说的回复，回答她的确认，让她停下
+  onChatLive: (cb: (r: LiveReply) => void): Unsubscribe => listen('chat:live', cb),
+  chatLiveState: (): Promise<LiveReply | null> => ipcRenderer.invoke('chat:live-state'),
+  chatAnswer: (id: string, approved: boolean): void => ipcRenderer.send('chat:answer', id, approved),
+  chatStop: (): void => ipcRenderer.send('chat:stop'),
+  // 角色窗口：把回复的进度推出去；收主窗口那边的回答、停下
+  chatLive: (r: LiveReply): void => ipcRenderer.send('chat:live', r),
+  onChatAnswer: (cb: (id: string, approved: boolean) => void): Unsubscribe => listen('chat:answer', cb),
+  onChatStop: (cb: () => void): Unsubscribe => listen('chat:stop', cb),
   onChatSay: (cb: (text: string) => void): Unsubscribe => listen('chat:say', cb),
   /** 角色窗口：报告现在有没有等用户点头的代码修改 */
   reportPendingFix: (fix: PendingFix | null): void => ipcRenderer.send('fix:pending', fix),
@@ -287,7 +305,8 @@ const api = {
   moveTo: (target: MoveTarget): void => ipcRenderer.send('character:move', target),
   /** 开始走：往右是 1，往左是 -1，竖着走是 0 */
   onWalking: (cb: (dir: number) => void): Unsubscribe => listen('character:walking', cb),
-  onArrived: (cb: () => void): Unsubscribe => listen('character:arrived', cb),
+  /** 走到了：target 是这次去的地方（stroll 是自己闲逛） */
+  onArrived: (cb: (target: MoveTarget) => void): Unsubscribe => listen('character:arrived', cb),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),
 

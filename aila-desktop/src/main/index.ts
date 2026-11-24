@@ -7,6 +7,8 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  Notification,
+  powerMonitor,
   safeStorage,
   screen,
   session,
@@ -40,8 +42,8 @@ import {
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import WebSocket from 'ws'
-import { AI_SERVICE_URL, answerConfirm, streamChat, type ChatMessage } from '../shared/chat'
-import type { AuthForm, MemoryOp, StoredMessage } from '../shared/cloud'
+import { AI_SERVICE_URL, answerConfirm, cleanLive, streamChat, type ChatMessage, type LiveReply } from '../shared/chat'
+import { cleanMemoryEdit, type AuthForm, type MemoryOp, type StoredMessage } from '../shared/cloud'
 import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
@@ -57,6 +59,7 @@ import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionNam
 import { droppedPathOk, openExtensionPage } from './extensions'
 import { loadModelFile } from './modelFiles'
 import { modelKind, type LoadedModel } from '../shared/model'
+import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
@@ -186,6 +189,44 @@ interface Settings {
   briefing?: BriefingState
   /** 她的一天：第一次见面的日子、下一件作品什么时候做、哪天写过日记…… */
   life?: LifeState
+  /** 检查更新：上次什么时候查的、哪个新版本已经提醒过（同一版只提醒一次） */
+  update?: { lastCheck?: string; notified?: string }
+}
+
+// ---------- 检查更新（shared/update.ts） ----------
+
+let lastUpdate: UpdateInfo | null = null
+
+/** 查 GitHub 上最新的发布。manual：你点了「检查更新」（自动检查有新版时只用系统通知提醒一次） */
+async function checkForUpdate(manual: boolean): Promise<UpdateInfo> {
+  const current = app.getVersion()
+  try {
+    const res = await fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'aila-desktop' },
+      signal: AbortSignal.timeout(8000)
+    })
+    if (res.status === 404) {
+      lastUpdate = { ...parseRelease({}, current), error: '还没有发布过版本。' }
+    } else if (!res.ok) {
+      throw new Error(`GitHub 返回 ${res.status}`)
+    } else {
+      lastUpdate = parseRelease(await res.json(), current)
+    }
+  } catch (err) {
+    const why = err instanceof Error && err.name === 'TimeoutError' ? '连 GitHub 超时了' : '连不上 GitHub'
+    return { ...parseRelease({}, current), error: `${why}，过会儿再试。` }
+  }
+  const s = loadSettings()
+  const state = { ...s.update, lastCheck: lastUpdate.checkedAt }
+  if (!manual && lastUpdate.newer && state.notified !== lastUpdate.latest && Notification.isSupported()) {
+    state.notified = lastUpdate.latest
+    const page = lastUpdate.page
+    const n = new Notification({ title: `艾拉有新版本 ${lastUpdate.latest}`, body: '点这里打开下载页。在 设置 → 运行状态 里也能看。' })
+    n.on('click', () => void shell.openExternal(page))
+    n.show()
+  }
+  saveSettings({ ...loadSettings(), update: state })
+  return lastUpdate
 }
 
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
@@ -396,15 +437,21 @@ function stopWalk(): void {
 /** 在她现在所在的那块屏幕上走过去；你拖她、她被藏起来都会停下 */
 function walkTo(target: MoveTarget): void {
   if (!win || !win.isVisible()) return
+  if (target === 'stroll') {
+    // 自己闲逛：你正在打字、拖着她、她正在走，或者你离开好一阵了（没人看），都不走
+    const idle = powerMonitor.getSystemIdleTime()
+    if (drag || walking || idle < 3 || idle > 600) return
+  }
   stopWalk()
   const b = win.getBounds()
   const from = { x: b.x, y: b.y }
   const to = targetPosition(target, b, screen.getDisplayMatching(b).workArea)
   if (from.x === to.x && from.y === to.y) {
-    win.webContents.send('character:arrived')
+    win.webContents.send('character:arrived', target)
     return
   }
-  const ms = walkDuration(from, to)
+  // 闲逛慢慢走，叫她去哪就快点
+  const ms = walkDuration(from, to) * (target === 'stroll' ? 2.2 : 1)
   const start = Date.now()
   win.webContents.send('character:walking', Math.sign(to.x - from.x))
   walking = setInterval(() => {
@@ -414,7 +461,7 @@ function walkTo(target: MoveTarget): void {
     win.setPosition(p.x, p.y)
     if (t >= 1) {
       stopWalk()
-      win.webContents.send('character:arrived')
+      win.webContents.send('character:arrived', target)
     }
   }, 16)
 }
@@ -657,6 +704,20 @@ function registerIpc(): void {
     account?.deleteMemory(String(id))
     characterEvent({ kind: 'forget-one' })
   })
+  // 检查更新、打开下载页：只认主窗口；打开的地址只能是这个仓库在 GitHub 上的
+  ipcMain.handle('update:check', (e) => (fromMainWindow(e) ? checkForUpdate(true) : null))
+  ipcMain.handle('update:last', (e) => (fromMainWindow(e) ? (lastUpdate ?? { ...parseRelease({}, app.getVersion()), checkedAt: '' }) : null))
+  ipcMain.on('update:open', (e, url: unknown) => {
+    if (fromMainWindow(e) && isReleaseUrl(url)) void shell.openExternal(url)
+  })
+  // 你自己加、改一条记忆：只认主窗口，内容检查过（shared/cloud.ts）
+  ipcMain.handle('memory:edit', (e, raw: unknown) => {
+    if (!fromMainWindow(e)) return MAIN_ONLY
+    const op = cleanMemoryEdit(raw)
+    if (typeof op === 'string') return { ok: false, error: op }
+    if (!account?.editMemory(op)) return { ok: false, error: '这条记忆已经不在了（可能在别的设备上删了）。' }
+    return { ok: true }
+  })
   // 经历（对话摘要、编程任务做了什么）：只在本机的 AI 服务里，只给主窗口看、只让主窗口删
   ipcMain.handle('memory:episodes', (e) => (fromMainWindow(e) ? listEpisodes(AI_URL) : []))
   ipcMain.handle('memory:forget-episode', (e, id: unknown) =>
@@ -721,10 +782,28 @@ function registerIpc(): void {
     workbenchFocus = null
     return f
   })
-  // 在地图里点「问她」：只认主窗口发来的，交给桌面上的她去说
+  // 在地图里点「问她」、在主窗口的对话页打字：只认主窗口发来的，交给桌面上的她去说
   ipcMain.on('chat:say', (e, text: unknown) => {
     if (e.sender !== mainWin?.webContents || typeof text !== 'string' || !text.trim()) return
     win?.webContents.send('chat:say', text.slice(0, 8000))
+  })
+  // 她正在说的回复：只认角色窗口发来的，检查过再转给主窗口；主窗口打开对话页时先取一次现在的状态
+  let liveReply: LiveReply | null = null
+  ipcMain.on('chat:live', (e, raw: unknown) => {
+    if (!win || e.sender !== win.webContents) return
+    const r = cleanLive(raw)
+    if (!r) return
+    liveReply = r
+    mainWin?.webContents.send('chat:live', r)
+  })
+  ipcMain.handle('chat:live-state', (e) => (e.sender === mainWin?.webContents ? liveReply : null))
+  // 主窗口里回答她的确认、让她停下：只认主窗口，交给角色窗口（确认要对得上她正在问的那一个）
+  ipcMain.on('chat:answer', (e, id: unknown, approved: unknown) => {
+    if (e.sender !== mainWin?.webContents || typeof id !== 'string' || typeof approved !== 'boolean') return
+    win?.webContents.send('chat:answer', id.slice(0, 64), approved)
+  })
+  ipcMain.on('chat:stop', (e) => {
+    if (e.sender === mainWin?.webContents) win?.webContents.send('chat:stop')
   })
   // 编程 Agent：只认主窗口发来的（角色窗口不能替你开会话、点「可以」）
   const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents
@@ -1178,6 +1257,10 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   desktop.start()
+  // 自动检查更新：装好的版本才查，开着开关，一天最多一次；启动一分钟后再查，不和启动抢网络
+  setTimeout(() => {
+    if (app.isPackaged && desktop?.prefs.checkUpdates && dueForCheck(loadSettings().update?.lastCheck)) void checkForUpdate(false)
+  }, 60_000)
   // 设置里关了「桌面上显示她」：打开艾拉就是打开主窗口（不然只剩托盘图标，像是没打开）
   if (!desktop.prefs.showCharacter) openMain({ page: 'tasks' })
   if (!globalShortcut.register(CHAT_SHORTCUT, openChat)) {

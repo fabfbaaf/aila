@@ -118,3 +118,26 @@ export interface SkillInfo {
 /** 用户对技能包的开关（覆盖默认值），跟着账号同步 */
 export type SkillOverrides = Record<string, boolean>
 export const SKILLS_SETTING = 'skills'
+
+const MEMORY_KINDS: readonly MemoryKind[] = ['profile', 'preference', 'event', 'other']
+/** 和 AI 服务整理记忆时的上限差不多（app/memory/extract.py 的 MAX_CONTENT） */
+export const MEMORY_MAX = 120
+
+/** 记忆页里你自己加、改的一条：检查好变成操作，不对就返回要告诉你的话 */
+export function cleanMemoryEdit(raw: unknown): MemoryOp | string {
+  if (!raw || typeof raw !== 'object') return '内容不对。'
+  const r = raw as Record<string, unknown>
+  const content = typeof r.content === 'string' ? r.content.replace(/\s+/g, ' ').trim() : ''
+  if (!content) return '写点什么再保存。'
+  if (content.length > MEMORY_MAX) return `一条最多 ${MEMORY_MAX} 个字，挑最要紧的写。`
+  const kind = MEMORY_KINDS.includes(r.kind as MemoryKind) ? (r.kind as MemoryKind) : 'other'
+  let expiresAt: string | null = null
+  if (typeof r.expiresAt === 'string' && r.expiresAt) {
+    const d = new Date(r.expiresAt)
+    if (Number.isNaN(d.getTime())) return '日期不对。'
+    expiresAt = d.toISOString()
+  }
+  if (r.op === 'add') return { op: 'add', content, kind, expiresAt }
+  if (r.op === 'update' && typeof r.id === 'string' && r.id && r.id.length <= 64) return { op: 'update', id: r.id, content, kind, expiresAt }
+  return '内容不对。'
+}

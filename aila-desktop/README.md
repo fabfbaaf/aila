@@ -54,6 +54,8 @@ npm.cmd run dist
 - 没有代码签名证书：Windows 会弹「已保护你的电脑」，点「更多信息 → 仍要运行」
 - 卸载会删掉安装目录，`%APPDATA%\aila-desktop` 留着（下次装还在）。要彻底删：卸载后再删掉这个文件夹
 
+**发布新版本**：把 `package.json` 的 `version` 改好、提交，再推一个同名标签（比如 `git tag v0.2.0`、`git push origin v0.2.0`）。GitHub Actions（`.github/workflows/release.yml`）会在 Windows 上打 AI 服务和安装包，传到 GitHub Releases。装好的艾拉在「设置 → 运行状态」里能检查更新（默认每天自动看一次，有新版用系统通知提醒一次），点「下载」打开安装包的下载地址；没有签名证书，所以不会自己静默装。CI 打的包不带 Live2D 运行库（许可要每个人自己同意）。
+
 **本机测试版**（`npm.cmd run pack:local`）：只打桌面端，AI 服务用这台电脑上仓库里的虚拟环境，所以只能在这台电脑上用；打得快，适合自己试。
 
 ## 怎么玩

@@ -12,6 +12,7 @@ import { agentModes, MODE_HINTS, MODE_LABELS, type AgentCommandList, type AgentK
 import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
 import { Transcript, endStats, endText, type EndItem, type ToolItem, type UndoPreview } from './fold'
 import { renderMarkdown } from './markdown'
+import { newTaskRequest } from '../shell/intents'
 import { createAgentSource, type ProjectChoice } from './source'
 import { buildTrace } from './trace'
 import LedgerPanel from './LedgerPanel.vue'
@@ -35,6 +36,8 @@ const t = shallowRef(reactive(new Transcript()))
 const text = ref('')
 const error = ref('')
 const picking = ref(false)
+// 主窗口 Ctrl+K 里点了「开新任务」
+watch(newTaskRequest, () => (picking.value = true))
 const projects = ref<ProjectChoice[]>([])
 const newMode = ref<AgentMode>('ask')
 const newKind = ref<AgentKind>('project')

@@ -30,6 +30,10 @@ export interface DesktopPrefs {
   worksBudget: number
   /** 每天晚上写日记 */
   diary: boolean
+  /** 没事时自己在屏幕上走两步（你在打字、全屏、和她说话时不动） */
+  wander: boolean
+  /** 每天看一次 GitHub 上有没有新版本（装好的版本才查） */
+  checkUpdates: boolean
 }
 
 export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
@@ -41,7 +45,9 @@ export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
   reportAt: '',
   worksEvery: 0,
   worksBudget: 0.5,
-  diary: true
+  diary: true,
+  wander: false,
+  checkUpdates: true
 }
 
 export const SIT_BREAK_CHOICES = [0, 30, 45, 60, 90] as const
@@ -97,6 +103,8 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
     reportAt,
     worksEvery: pick('worksEvery', WORKS_EVERY_CHOICES),
     worksBudget: pick('worksBudget', WORKS_BUDGET_CHOICES),
-    diary: bool('diary')
+    diary: bool('diary'),
+    wander: bool('wander'),
+    checkUpdates: bool('checkUpdates')
   }
 }

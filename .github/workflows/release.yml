@@ -1,0 +1,62 @@
+# 发布：推一个 v 开头的标签（比如 v0.2.0）就在 Windows 上打安装包，传到 GitHub Releases。
+# 装好的艾拉在 设置 → 运行状态 里「检查更新」看的就是这里最新的发布（aila-desktop/src/shared/update.ts）。
+#
+# - 标签要和 aila-desktop/package.json 的 version 一样，不一样就停下（免得装好以后版本号对不上，一直提示有新版）
+# - 不带 Live2D 运行库：它的许可要每个人自己同意，装好以后在 设置 → 形象 里按说明装（npm run setup:live2d）
+# - 没有代码签名证书：Windows 会弹「已保护你的电脑」，点「更多信息 → 仍要运行」
+name: 发布
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    name: 打安装包
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 标签和版本号要对上
+        shell: pwsh
+        run: |
+          $version = (Get-Content aila-desktop/package.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($version -ne $tag) { Write-Error "标签是 $tag，package.json 里是 $version：先改成一样再打标签"; exit 1 }
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: aila-ai/requirements*.txt
+      - name: 打 AI 服务（带 Python，打完自己冒烟测试）
+        working-directory: aila-ai
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install -q -r requirements-dev.txt
+          .venv\Scripts\python scripts\build_service.py
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: aila-desktop/package-lock.json
+      - name: 打安装包
+        working-directory: aila-desktop
+        run: |
+          npm ci
+          npm run dist
+
+      - name: 传到 GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 艾拉 ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            aila-desktop/dist/installer/*.exe

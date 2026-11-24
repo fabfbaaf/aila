@@ -568,6 +568,7 @@ app/
 scripts/
   download_models.py  下载语音模型和向量模型（逻辑在 app/models_download.py，安装包里用 --download-models 调同一个）
   build_service.py    打成安装包里的 aila-ai.exe，打完冒烟测试
+  real_check.py       真实测试里能自动跑的部分：用真模型走对话、记忆、资料库、确认、编程 Agent，出报告（自己开临时服务，不碰你的数据）
 packaging/
   entry.py         PyInstaller 的入口（就是 python -m app）
   eval_code_rag.py    代码检索评测（code_eval.json 是问题和标注的答案）

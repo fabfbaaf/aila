@@ -94,6 +94,13 @@ onActivated(load)
         </div>
       </div>
       <div class="row">
+        <span class="label">没事时走走</span>
+        <div>
+          <Toggle :model-value="status.prefs.wander" @update:model-value="(v) => set({ wander: v })" />
+          <span class="hint">隔一阵自己在屏幕上挪几步，偶尔伸个懒腰。你在打字、全屏、和她说话、离开电脑的时候不动。也可以直接叫她「去右上角」「往左一点」。</span>
+        </div>
+      </div>
+      <div class="row">
         <span class="label">免打扰</span>
         <div>
           <Toggle :model-value="status.dnd" @update:model-value="setDnd" />

@@ -31,7 +31,8 @@ export function dayLabel(d: Date, now: Date): string {
  * 删掉的不显示；有关键词时只留含关键词的消息（不分大小写）。
  * 新的一天在上面，一天之内按时间先后（读起来像聊天记录）。
  */
-export function groupHistory(messages: StoredMessage[], query: string, now: Date): DayGroup[] {
+/** oldestFirst：对话页像聊天一样，早的在上、新的在下；默认新的一天在上（翻记录用） */
+export function groupHistory(messages: StoredMessage[], query: string, now: Date, oldestFirst = false): DayGroup[] {
   const q = query.trim().toLowerCase()
   const kept = messages
     .filter((m) => !m.deleted && (!q || m.content.toLowerCase().includes(q)))
@@ -48,12 +49,13 @@ export function groupHistory(messages: StoredMessage[], query: string, now: Date
     }
     g.items.push(m)
   }
-  return [...groups.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
+  const days = [...groups.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
+  return oldestFirst ? days.reverse() : days
 }
 
-/** 存下来的她的话里带着表情和动作标签（[nod]、[happy]……），给人看时去掉 */
+/** 存下来的她的话里带着表情、动作、走动标签（[nod]、[happy]、[go-topright]……），给人看时去掉 */
 export function cleanText(text: string): string {
-  return text.replace(/\[(?:happy|sad|surprised|relaxed|neutral|nod|shake|tilt|think|bow|wave|stretch)\]/g, '').trim()
+  return text.replace(/\[(?:happy|sad|surprised|relaxed|neutral|nod|shake|tilt|think|bow|wave|stretch|go-[a-z]+)\]/g, '').trim()
 }
 
 export function timeOf(iso: string): string {

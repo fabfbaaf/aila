@@ -2,6 +2,8 @@
 import { computed, onActivated, onDeactivated, ref } from 'vue'
 import type { AiSettings } from '../../../../shared/settings'
 import type { ServiceLog, ServiceState } from '../../../../shared/service'
+import type { UpdateInfo } from '../../../../shared/update'
+import Toggle from '../Toggle.vue'
 import { bridge } from '../../platform/bridge'
 import { store } from '../store'
 
@@ -12,6 +14,33 @@ const loading = ref(false)
 const service = ref<ServiceState>({ phase: 'checking', pid: null, error: '' })
 const restarting = ref(false)
 const serviceError = ref('')
+
+// ---------- 版本和更新（shared/update.ts） ----------
+
+const update = ref<UpdateInfo | null>(null)
+const checking = ref(false)
+const checkAuto = ref(true)
+
+async function loadUpdate(): Promise<void> {
+  update.value = await api.updateLast()
+  const s = await api.desktopStatus()
+  if (s) checkAuto.value = s.prefs.checkUpdates
+}
+
+async function checkUpdate(): Promise<void> {
+  checking.value = true
+  try {
+    update.value = await api.updateCheck()
+  } finally {
+    checking.value = false
+  }
+}
+
+async function setAuto(v: boolean): Promise<void> {
+  checkAuto.value = v
+  const s = await api.desktopSetPrefs({ checkUpdates: v })
+  if (s) checkAuto.value = s.prefs.checkUpdates
+}
 const showLogs = ref(false)
 const logs = ref<ServiceLog[]>([])
 const logsError = ref('')
@@ -69,6 +98,7 @@ function reveal(key: 'env' | 'models' | 'data' | 'mcp'): void {
 }
 
 onActivated(async () => {
+  void loadUpdate()
   const current = ++activation
   unsubscribe = api.onServiceState((state) => {
     service.value = state
@@ -93,6 +123,39 @@ onDeactivated(() => { ++activation; unsubscribe?.(); clearInterval(logTimer) })
 <template>
   <h2>运行状态</h2>
   <p class="lead">艾拉由三部分组成：桌面上的她、这台电脑上的 AI 服务（aila-ai）、可选的同步服务器（aila-server）。</p>
+
+  <div class="card">
+    <h3>版本和更新</h3>
+    <div class="row">
+      <span class="label">现在的版本</span>
+      <div class="inline">
+        <span>{{ update?.current ?? '…' }}</span>
+        <button class="btn" :disabled="checking" @click="checkUpdate">{{ checking ? '在查……' : '检查更新' }}</button>
+        <template v-if="update?.checkedAt && !checking">
+          <span v-if="update.error" :class="update.error.startsWith('还没有') ? 'hint' : 'warn-text'" role="status">{{ update.error }}</span>
+          <span v-else-if="!update.newer" class="hint">已经是最新的了。</span>
+        </template>
+      </div>
+    </div>
+    <div v-if="update?.newer" class="row">
+      <span class="label">新版本</span>
+      <div>
+        <div class="inline">
+          <span class="tag good">{{ update.latest }}</span>
+          <button class="btn primary" @click="api.updateOpen(update.installer || update.page)">下载</button>
+          <button class="link" @click="api.updateOpen(update.page)">看看改了什么</button>
+        </div>
+        <pre v-if="update.notes" class="notes">{{ update.notes }}</pre>
+      </div>
+    </div>
+    <div class="row">
+      <span class="label">自动检查</span>
+      <div>
+        <Toggle :model-value="checkAuto" @update:model-value="setAuto" />
+        <span class="hint">每天看一次 GitHub 上有没有新版本，有的话用系统通知提醒一次。只发一个不带你任何信息的请求；没有签名证书，所以下载、安装要你自己点。</span>
+      </div>
+    </div>
+  </div>
 
   <div class="card">
     <h3>AI 服务</h3>
@@ -178,4 +241,26 @@ onDeactivated(() => { ++activation; unsubscribe?.(); clearInterval(logTimer) })
 .service-logs { min-width: 0; margin-top: 16px; }
 .service-logs pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 Consolas, monospace; padding: 12px; background: var(--bg); border: 1px solid var(--field-line); border-radius: 8px; }
 .service-logs pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.warn-text {
+  color: var(--warn, #fbbf24);
+  font-size: 13px;
+}
+
+.notes {
+  max-height: 180px;
+  margin: 8px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+}
 </style>

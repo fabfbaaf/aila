@@ -99,6 +99,13 @@ export class Account {
     if (this.memories.delete(id)) this.memoriesChanged()
   }
 
+  /** 你在记忆页自己加的、改的（和她整理出来的一样同步到别的设备、推给 AI 服务） */
+  editMemory(op: MemoryOp): boolean {
+    if (op.op === 'update' && !this.memories.list().some((m) => m.id === op.id)) return false
+    if (this.memories.apply([op])) this.memoriesChanged()
+    return true
+  }
+
   forgetEverything(): number {
     const n = this.memories.deleteAll()
     if (n) this.memoriesChanged()

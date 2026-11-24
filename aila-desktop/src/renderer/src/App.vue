@@ -10,7 +10,7 @@ import { cleanMotions } from '../../shared/extensions'
 import type { AgentProgress } from '../../shared/agent'
 import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
-import { parseMove } from '../../shared/move'
+import { parseMove, shouldStroll } from '../../shared/move'
 import { ScreenWatch, helpRequest, type ScreenFinding } from './screen/ScreenWatch'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
@@ -887,9 +887,10 @@ onMounted(async () => {
       bridge.onModelBuiltin(() => void loadBuiltin(true)),
       bridge.onChatOpen(() => void openChat()),
       bridge.onVoiceMenu(onVoiceMenu),
-      // 星图里点了「问她」「让她修」：当成用户说的一句话
+      // 星图里点了「问她」「让她修」、主窗口对话页打的字：当成用户说的一句话
       bridge.onChatSay((text) => {
         clearScreenAsk()
+        walkIfAsked(text)
         conversation.send(text)
       }),
       // 星图里双手合十：确认的必须正是她现在问的这一份修改
@@ -906,7 +907,35 @@ onMounted(async () => {
     // 说出来的话提到剪贴板，也先带上剪贴板的内容
     // 回复里的 [go-topright]：说得随意的（「躲开点」）由大模型决定去哪
     conversation.onMove = (spot) => bridge?.moveTo(spot)
-    subscriptions.push(bridge.onArrived(() => behavior.gesture('nod')))
+    // 主窗口的对话页：回复的进度推过去，那边点的「好 / 不要」「停下」交回来
+    conversation.onLive = (r) => bridge?.chatLive({ ...r, ask: r.ask ? { ...r.ask } : null })
+    subscriptions.push(
+      bridge.onChatAnswer((id, approved) => {
+        if (convAsk.value?.id === id) conversation.answer(approved)
+      }),
+      bridge.onChatStop(() => conversation.interrupt())
+    )
+    // 叫她去的：到了点点头；自己闲逛到的：偶尔伸个懒腰
+    subscriptions.push(
+      bridge.onArrived((target) => {
+        if (target !== 'stroll') behavior.gesture('nod')
+        else if (Math.random() < 0.3) behavior.gesture('stretch')
+      })
+    )
+    // 设置里开了「没事时走走」：隔一阵自己挪几步（打字、全屏、离开电脑由主进程再把一道关）
+    const strollTimer = setInterval(() => {
+      const s = desk.value
+      if (!s) return
+      const ok = shouldStroll({
+        enabled: s.prefs.wander,
+        visible: s.presence.visible,
+        quiet: s.presence.quiet,
+        chatting: chatOpen.value || conversation.busy,
+        asleep: behavior.isSleepy
+      })
+      if (ok) bridge?.moveTo('stroll')
+    }, 40_000)
+    subscriptions.push(() => clearInterval(strollTimer))
     voiceControl.onHeard = (text) => {
       walkIfAsked(text)
       if (!mentionsClipboard(text)) return false

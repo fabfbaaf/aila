@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NUDGE_STEP, SIDE_MARGIN, isMoveTarget, parseMove, targetPosition, walkDuration, walkPoint } from './move'
+import { NUDGE_STEP, SIDE_MARGIN, STROLL_MAX, STROLL_MIN, isMoveTarget, parseMove, shouldStroll, strollTarget, targetPosition, walkDuration, walkPoint } from './move'
 
 describe('认走动的指令', () => {
   it('整句就是让她去某个位置', () => {
@@ -72,5 +72,29 @@ describe('走过去', () => {
     expect(walkPoint(a, b, 0.25).y).toBeLessThan(400 * 0.0625 + 1) // 开头慢，还往上颠了一下
     expect(walkDuration(a, { x: 10, y: 0 })).toBe(350)
     expect(walkDuration(a, { x: 5000, y: 0 })).toBe(1600)
+  })
+})
+
+describe('没事时走走', () => {
+  const area = { x: 0, y: 0, width: 1920, height: 1040 }
+  const fixed = (...vals: number[]) => { let i = 0; return () => vals[i++ % vals.length] }
+
+  it('在原来的高度上往左右走一小段，靠边时往回走，不出屏幕', () => {
+    const mid = { x: 900, y: 600, width: 380, height: 440 }
+    expect(strollTarget(mid, area, fixed(0, 0.2))).toEqual({ x: 900 - STROLL_MIN, y: 600 }) // 往左
+    expect(strollTarget(mid, area, fixed(1, 0.9))).toEqual({ x: 900 + STROLL_MAX, y: 600 }) // 往右
+    const atRight = { x: 1920 - 380 - 40, y: 600, width: 380, height: 440 }
+    expect(strollTarget(atRight, area, fixed(0.5, 0.9)).x).toBeLessThan(atRight.x)
+    const atLeft = { x: 10, y: 600, width: 380, height: 440 }
+    expect(strollTarget(atLeft, area, fixed(0.5, 0.1)).x).toBeGreaterThan(atLeft.x)
+    expect(isMoveTarget('stroll')).toBe(true)
+  })
+
+  it('开了开关、她在桌面上、没在聊没在睡，才碰运气走一次', () => {
+    const ok = { enabled: true, visible: true, quiet: false, chatting: false, asleep: false }
+    expect(shouldStroll(ok, () => 0.1)).toBe(true)
+    expect(shouldStroll(ok, () => 0.9)).toBe(false)
+    for (const k of ["enabled", "visible"] as const) expect(shouldStroll({ ...ok, [k]: false }, () => 0)).toBe(false)
+    for (const k of ["quiet", "chatting", "asleep"] as const) expect(shouldStroll({ ...ok, [k]: true }, () => 0)).toBe(false)
   })
 })

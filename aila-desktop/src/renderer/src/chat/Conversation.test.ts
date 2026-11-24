@@ -316,3 +316,24 @@ describe('Conversation 里让她走动', () => {
     expect(saved.at(-1)?.content).toBe('[go-topright]好，我去右上角。')
   })
 })
+
+describe('Conversation 把回复进度推给主窗口', () => {
+  it('等第一个字、查东西、收到字、问完出按钮、回答后接着说完', async () => {
+    const { conv, transport, talk } = setup()
+    const lives: string[] = []
+    conv.onLive = (r) => lives.push(`${r.phase}|${r.text}|${r.status}|${r.ask?.id ?? ''}`)
+    conv.send('帮我打开 github')
+    expect(lives.at(-1)).toBe('waiting|||')
+    transport.push({ type: 'status', text: '正在搜索' })
+    expect(lives.at(-1)).toBe('waiting||正在搜索|')
+    transport.push({ type: 'text', text: '好。', spoken: true })
+    transport.push({ type: 'confirm', ...OPEN })
+    talk()
+    expect(lives.at(-1)).toBe('streaming|好。……要我在浏览器里打开这个网页吗？||c1') // 问完才出按钮
+    conv.answer(true)
+    expect(lives.at(-1)).toBe('streaming|好。……要我在浏览器里打开这个网页吗？||')
+    transport.push({ type: 'text', text: '打开了。', spoken: true })
+    transport.push({ type: 'done' })
+    expect(lives.at(-1)).toBe('done|好。……要我在浏览器里打开这个网页吗？打开了。||')
+  })
+})
