@@ -323,10 +323,8 @@ async function deleteNow(): Promise<void> {
       notes.value = []
     }
     await refreshList()
-    if (!current.value) {
-      if (sessions.value.length) await open(sessions.value[0].id)
-      else picking.value = true
-    }
+    // 删完了就停在「还没有任务」那一页（上面有新任务按钮），不硬弹新任务的框
+    if (!current.value && sessions.value.length) await open(sessions.value[0].id)
   } catch (err) {
     closeDelete()
     error.value = (err as Error).message
@@ -724,8 +722,9 @@ function onKey(e: KeyboardEvent): void {
     if (e.key === 'Escape') return void answer(p, false, false)
   }
   if (e.key === 'Escape') {
-    if (picking.value && current.value) picking.value = false
-    else void interrupt()
+    if (picking.value) {
+      if (!creating.value) picking.value = false
+    } else void interrupt()
   }
 }
 
@@ -773,7 +772,7 @@ onMounted(async () => {
   const focus = await source.takeFocus()
   if (focus) await open(focus)
   else if (sessions.value.length) await open(sessions.value[0].id)
-  else picking.value = true
+  // 一个任务都没有：先看到任务页本身（说明 + 新任务按钮），不一进来就弹框
 })
 
 // 在主窗口里切到别的页面时，任务页还留着（KeepAlive）：这时不能再听 1 / 2 / Esc，
@@ -1141,7 +1140,7 @@ onBeforeUnmount(() => {
       </template>
     </dialog>
 
-    <div v-if="picking" class="overlay" @click.self="current && (picking = false)">
+    <div v-if="picking" class="overlay" @click.self="!creating && (picking = false)">
       <div class="picker">
         <h2>{{ tr('开一个新任务') }}</h2>
         <fieldset class="task-kinds" :disabled="creating" @keydown.stop>
@@ -1149,12 +1148,6 @@ onBeforeUnmount(() => {
           <label :class="{ on: newKind === 'project' }"><input v-model="newKind" type="radio" value="project" name="task-kind" />{{ tr('在项目里编程') }}</label>
           <label :class="{ on: newKind === 'computer' }"><input v-model="newKind" type="radio" value="computer" name="task-kind" />{{ tr('不选项目，操作电脑') }}</label>
         </fieldset>
-        <div v-if="newKind === 'project'" class="choices">
-          <button v-for="p in choices" :key="p.path" class="choice" :title="p.path" :disabled="creating" @click="startNew(p.path)">
-            <b>{{ p.name }}</b><span>{{ p.path }}</span>
-          </button>
-          <button class="choice other" :disabled="creating" @click="pickOther">{{ tr('选择其他文件夹…') }}</button>
-        </div>
         <label v-if="newKind === 'project'" class="isolate" :class="{ on: newIsolate }">
           <input id="new-task-isolate" v-model="newIsolate" type="checkbox" :disabled="creating" @keydown.stop />
           <span>
@@ -1191,9 +1184,17 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="newKind === 'computer'" class="dim">{{ tr('从你的用户目录开始，通过命令和脚本操作。没有自动权限；危险命令和受保护位置每次都要问。批量操作先列方案，移动、改名等命令无法靠「撤销这一轮」恢复。') }}</p>
         <p v-else class="dim">{{ tr('她只在这个文件夹里读写；删除、推送这类危险命令不管哪种模式都会先问你。') }}</p>
+        <!-- 上面的选项先选好；点项目就开始，所以项目放在最后 -->
+        <div v-if="newKind === 'project'" class="choices">
+          <p class="choices-title">{{ creating ? tr('正在开任务…') : tr('在哪个项目里做？点一下就开始') }}</p>
+          <button v-for="p in choices" :key="p.path" class="choice" :title="p.path" :disabled="creating" @click="startNew(p.path)">
+            <b>{{ p.name }}</b><span>{{ p.path }}</span>
+          </button>
+          <button class="choice other" :disabled="creating" @click="pickOther">{{ tr('选择其他文件夹…') }}</button>
+        </div>
         <p v-if="error" class="budget-error" role="alert">{{ error }}</p>
         <button v-if="newKind === 'computer'" class="new computer-start" :disabled="creating" @click="startNew()">{{ creating ? tr('正在开任务…') : tr('开电脑任务') }}</button>
-        <button v-if="current" class="ghost" :disabled="creating" @click="picking = false">{{ tr('取消') }}</button>
+        <button class="ghost" :disabled="creating" @click="picking = false">{{ tr('取消') }}</button>
       </div>
     </div>
   </div>
@@ -2593,6 +2594,16 @@ code {
 .choices {
   display: grid;
   gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.choices-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-text-2);
 }
 
 .task-kinds {

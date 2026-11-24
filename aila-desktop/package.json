@@ -15,7 +15,8 @@
     "setup:gestures": "node scripts/setup-gestures.mjs",
     "setup:live2d": "node scripts/setup-live2d.mjs",
     "pack:local": "node scripts/pack-local.mjs",
-    "dist": "node scripts/make-icon.mjs && npm run build && electron-builder --config electron-builder.yml --win nsis --x64 --publish never"
+    "icon": "electron scripts/make-icon.mjs",
+    "dist": "npm run build && electron-builder --config electron-builder.yml --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.2.0",

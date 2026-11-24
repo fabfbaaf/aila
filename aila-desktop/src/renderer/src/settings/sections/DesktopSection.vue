@@ -122,6 +122,13 @@ onActivated(load)
         </div>
       </div>
       <div class="row">
+        <span class="label">{{ t('出场动画') }}</span>
+        <div>
+          <Toggle :model-value="status.prefs.entrance" @update:model-value="(v) => set({ entrance: v })" />
+          <span class="hint">{{ t('打开艾拉时，屏幕中间先出来一张「艾拉」卡片，她从里面跳到右下角和你打招呼。下次打开生效。') }}</span>
+        </div>
+      </div>
+      <div class="row">
         <span class="label">{{ t('免打扰') }}</span>
         <div>
           <Toggle :model-value="status.dnd" @update:model-value="setDnd" />

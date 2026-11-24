@@ -1,3 +1,5 @@
+<p align="center"><img src="aila-desktop/build/logo.png" width="128" alt="艾拉"></p>
+
 # 艾拉 · 程序员的 AI 桌面伙伴
 
 有 3D 形象的开源编程 Agent：像 Claude Code 一样，给她一个任务，她在你的项目里读代码、改文件、跑命令和测试，直到做完；终端和桌面都能用。

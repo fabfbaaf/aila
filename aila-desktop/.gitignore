@@ -7,7 +7,9 @@ build-local/
 models/*.vrm
 # 手势识别的 WebAssembly 和模型：npm run setup:gestures 生成
 src/renderer/public/mediapipe/
-# 图标由 scripts/make-icon.mjs 生成（npm run dist 会先跑）
-build/
+# 图标由 scripts/make-icon.mjs 生成（npm run icon），生成好的提交进来：打包时不再重新画
+build/*
+!build/icon.ico
+!build/logo.png
 # Live2D 运行库（专有软件，npm run setup:live2d 下载，不进 Git）
 src/renderer/public/live2d/

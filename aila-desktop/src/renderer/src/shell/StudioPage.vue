@@ -13,6 +13,7 @@ import { computed, onActivated, onDeactivated, onMounted, ref, watch } from 'vue
 import { WORK_STATUS_TEXT as WORK_STATUS_TEXT_RAW, type DiaryEntry, type Work, type WorkDetail } from '../../../shared/studio'
 const WORK_STATUS_TEXT = localized(WORK_STATUS_TEXT_RAW)
 import { renderMarkdown } from '../agent/markdown'
+import BrandMark from '../theme/BrandMark.vue'
 import { weekOf, type ReviewEntry } from '../../../shared/review'
 import { createStudioSource } from './studioSource'
 
@@ -211,11 +212,14 @@ onDeactivated(() => window.clearInterval(timer))
 
       <div class="layout" :class="{ open: !!selected }">
         <div class="grid">
-          <p v-if="!works.length" class="empty">
-            {{ t('她还没做过作品。点右上角「现在就让她做一个」，或者在') }}
-            <a href="#" @click.prevent="emit('go', { page: 'settings', section: 'desktop' })">{{ t('设置 → 桌面') }}</a>
-            {{ t('里让她隔几天自己做一个——做好了会在桌面上告诉你。') }}
-          </p>
+          <div v-if="!works.length" class="empty">
+            <BrandMark :size="56" />
+            <p>
+              {{ t('她还没做过作品。点右上角「现在就让她做一个」，或者在') }}
+              <a href="#" @click.prevent="emit('go', { page: 'settings', section: 'desktop' })">{{ t('设置 → 桌面') }}</a>
+              {{ t('里让她隔几天自己做一个——做好了会在桌面上告诉你。') }}
+            </p>
+          </div>
           <article
             v-for="w in works"
             :key="w.id"
@@ -461,8 +465,19 @@ button:disabled {
 
 .empty {
   grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 12vh 16px 24px;
   color: var(--ui-muted);
   line-height: 1.7;
+  text-align: center;
+}
+
+.empty p {
+  max-width: 520px;
+  margin: 0;
 }
 
 .empty a {

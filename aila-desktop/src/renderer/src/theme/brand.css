@@ -1,0 +1,14 @@
+/* 艾拉的字标：字体和颜色。主窗口（tokens.css 引入）和启动卡片（LaunchCard.vue，透明窗口，不加载 tokens.css）都用。
+   字体是志莽行书只含「艾拉」两个字的子集（OFL，见 fonts/OFL.txt）；颜色和 exe、托盘图标一样（scripts/make-icon.mjs）。 */
+
+@font-face {
+  font-family: 'Aila Brand';
+  src: url('./fonts/ZhiMangXing-aila.woff2') format('woff2');
+  font-display: block;
+}
+
+:root {
+  --ui-brand-font: 'Aila Brand', 'STXingkai', 'KaiTi', serif;
+  --ui-brand-text: linear-gradient(160deg, #f1ecff 15%, #c4b5fd 55%, #67e8f9 110%);
+  --ui-brand-tile: radial-gradient(circle at 50% 30%, #33285c 0%, #1a1430 55%, #110d1f 100%);
+}

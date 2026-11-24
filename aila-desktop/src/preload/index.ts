@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
+import type { EntrancePhase } from '../shared/entrance'
 import type { UpdateInfo } from '../shared/update'
 import type { Lang, LangPref } from '../shared/i18n'
 import type {
@@ -315,6 +316,10 @@ const api = {
   onWalking: (cb: (dir: number) => void): Unsubscribe => listen('character:walking', cb),
   /** 走到了：target 是这次去的地方（stroll 是自己闲逛） */
   onArrived: (cb: (target: MoveTarget) => void): Unsubscribe => listen('character:arrived', cb),
+  /** 模型加载好了来报到；返回 true 表示要出场（先别打招呼，等落地） */
+  characterReady: (): Promise<boolean> => ipcRenderer.invoke('character:ready'),
+  /** 出场的各段：冒出来、蹲、跳、落地（first：第一次见面） */
+  onEntrance: (cb: (e: { phase: EntrancePhase; first: boolean }) => void): Unsubscribe => listen('character:entrance', cb),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),
 

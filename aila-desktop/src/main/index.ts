@@ -48,7 +48,7 @@ import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, Voice
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
 import { routeForSection, toHash, type ShellRoute } from '../shared/shell'
-import { trayIcon } from './trayIcon'
+import { TRAY_16, TRAY_32 } from './trayImage'
 import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
@@ -63,6 +63,7 @@ import { isLangPref, resolveLang, type LangPref } from '../shared/i18n'
 import { mainLang, setMainLang, tm } from './lang'
 import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
+import { ENTRANCE_MS, cardBounds, emergePosition, homePosition, jumpHeight, jumpPoint, shouldEnter, type EntrancePhase, type Point } from '../shared/entrance'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
@@ -271,12 +272,16 @@ function readModel(path: string | undefined): LoadedModel | null {
 
 function createWindow(): void {
   const { workArea } = screen.getPrimaryDisplay()
+  const home = homePosition(workArea, { width: WIN_WIDTH, height: WIN_HEIGHT })
+  // 出场：她先站在屏幕中间的卡片里（页面地址带 #enter，先不露面，等 character:entrance 再冒出来）
+  const enter = planEntrance()
+  const start = enter ? emergePosition(enter.card, { width: WIN_WIDTH, height: WIN_HEIGHT }) : home
 
   win = new BrowserWindow({
     width: WIN_WIDTH,
     height: WIN_HEIGHT,
-    x: workArea.x + workArea.width - WIN_WIDTH - 40,
-    y: workArea.y + workArea.height - WIN_HEIGHT,
+    x: start.x,
+    y: start.y,
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -297,16 +302,143 @@ function createWindow(): void {
   win.setAlwaysOnTop(true, 'floating')
 
   win.once('ready-to-show', () => {
-    if (desktop?.presence.visible ?? true) win?.showInactive()
+    // 出场时等她从卡片里冒出来再露面（runEntrance）
+    if (!enter && (desktop?.presence.visible ?? true)) win?.showInactive()
   })
 
-  loadPage(win)
+  loadPage(win, enter ? 'enter' : '')
   startCursorFeed()
+  if (enter) startEntrance(enter.card, home, workArea)
 
   win.on('closed', () => {
     if (cursorTimer) clearInterval(cursorTimer)
     win = null
   })
+}
+
+// ---------- 出场：卡片出来，她从里面跳到右下角打招呼（时间表和弧线在 shared/entrance.ts） ----------
+
+interface Entrance {
+  card: BrowserWindow | null
+  home: Point
+  workArea: Electron.Rectangle
+  /** 页面准备好了（模型加载完）才开演 */
+  ready: boolean
+  started: boolean
+  timer: ReturnType<typeof setTimeout> | null
+  flight: ReturnType<typeof setInterval> | null
+}
+
+let entrance: Entrance | null = null
+/** 第一次打开（还没见过面）：落地后说自我介绍，不说「早上好」 */
+let firstMeet = false
+
+function planEntrance(): { card: Electron.Rectangle } | null {
+  const prefs = desktop?.prefs
+  if (!prefs) return null
+  const ok = shouldEnter({ entrance: prefs.entrance, showCharacter: prefs.showCharacter, visible: desktop?.presence.visible ?? true, dnd: desktop?.dnd ?? false })
+  return ok ? { card: cardBounds(screen.getPrimaryDisplay().workArea) } : null
+}
+
+function startEntrance(cardRect: Electron.Rectangle, home: Point, workArea: Electron.Rectangle): void {
+  const card = new BrowserWindow({
+    ...cardRect,
+    transparent: true,
+    backgroundColor: '#00000000',
+    frame: false,
+    resizable: false,
+    movable: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    webPreferences: { contextIsolation: true, sandbox: true } // 卡片只是画面，不给预加载的接口
+  })
+  card.setIgnoreMouseEvents(true) // 点不到它：不挡你点后面的东西
+  card.once('ready-to-show', () => card.showInactive())
+  card.on('closed', () => {
+    if (entrance) entrance.card = null
+  })
+  loadPage(card, 'launch')
+  entrance = { card, home, workArea, ready: false, started: false, timer: null, flight: null }
+  // 页面一直没准备好（模型坏了、卡住）：不演了，直接站到右下角
+  entrance.timer = setTimeout(() => finishEntrance(true), ENTRANCE_MS.timeout)
+}
+
+/** 角色页面加载完模型后来报到：在出场就开演，返回 true（页面先别打招呼，落地时再说） */
+function entranceReady(): boolean {
+  if (!entrance || entrance.started) return false
+  entrance.ready = true
+  entrance.started = true
+  void runEntrance(entrance)
+  return true
+}
+
+function sendEntrance(phase: EntrancePhase): void {
+  win?.webContents.send('character:entrance', { phase, first: firstMeet })
+}
+
+async function runEntrance(e: Entrance): Promise<void> {
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  await sleep(ENTRANCE_MS.card)
+  if (entrance !== e || !win || win.isDestroyed()) return
+  if (desktop?.presence.visible ?? true) {
+    win.showInactive()
+    win.moveTop() // 在卡片上面
+  }
+  sendEntrance('emerge')
+  await sleep(ENTRANCE_MS.emerge)
+  if (entrance !== e || !win) return
+  sendEntrance('crouch')
+  await sleep(ENTRANCE_MS.crouch)
+  if (entrance !== e || !win) return
+  sendEntrance('jump')
+  fadeCard(e)
+  const [x, y] = win.getPosition()
+  const from = { x, y }
+  // 她站在窗口下半部分，上面 40% 是透明的：这截可以跳到屏幕外面，头不会出去
+  const height = jumpHeight(from, e.home, e.workArea, Math.round(WIN_HEIGHT * 0.4))
+  const begin = Date.now()
+  e.flight = setInterval(() => {
+    if (!win || win.isDestroyed() || drag) return finishEntrance(false) // 半空中被你拖住了：就停在那儿
+    const t = (Date.now() - begin) / ENTRANCE_MS.jump
+    const p = jumpPoint(from, e.home, t, height)
+    win.setPosition(p.x, p.y)
+    if (t >= 1) finishEntrance(false)
+  }, 16)
+}
+
+/** 卡片慢慢变透明再关掉 */
+function fadeCard(e: Entrance): void {
+  const card = e.card
+  if (!card || card.isDestroyed()) return
+  const begin = Date.now()
+  const fade = setInterval(() => {
+    if (card.isDestroyed()) return clearInterval(fade)
+    const t = (Date.now() - begin) / ENTRANCE_MS.fade
+    card.setOpacity(Math.max(0, 1 - t))
+    if (t >= 1) {
+      clearInterval(fade)
+      card.destroy()
+    }
+  }, 16)
+}
+
+/** 出场结束：落地打招呼；skipped（超时没演成）时直接站到右下角 */
+function finishEntrance(skipped: boolean): void {
+  const e = entrance
+  if (!e) return
+  entrance = null
+  if (e.timer) clearTimeout(e.timer)
+  if (e.flight) clearInterval(e.flight)
+  if (e.card && !e.card.isDestroyed()) e.card.destroy()
+  if (!win || win.isDestroyed()) return
+  if (skipped) {
+    win.setPosition(e.home.x, e.home.y)
+    if (desktop?.presence.visible ?? true) win.showInactive()
+  }
+  sendEntrance('land')
 }
 
 /** 角色窗口和主窗口加载同一个页面，主窗口的地址后面带 #/页面（见 shared/shell.ts） */
@@ -1146,6 +1278,8 @@ function registerIpc(): void {
   })
   ipcMain.handle('drop:read', (e, path: unknown) => (fromCharacter(e) && typeof path === 'string' ? drops.read(path) : null))
   ipcMain.handle('clipboard:text', (e) => (fromCharacter(e) ? clipboard.readText().slice(0, 20000) : ''))
+  // 角色页面加载完模型来报到：要出场的话返回 true，她等落地（character:entrance land）再打招呼
+  ipcMain.handle('character:ready', (e) => (fromCharacter(e) ? entranceReady() : false))
   ipcMain.handle('desktop:report-now', (e) => (fromMain(e) ? (desktop?.reportNow() ?? false) : false))
   ipcMain.handle('reminder:delete', (e, id: unknown) =>
     fromMain(e) && typeof id === 'string' && id.length <= 64 ? (desktop?.removeReminder(id) ?? false) : false
@@ -1212,7 +1346,10 @@ function registerIpc(): void {
 
 /** 托盘：桌面上的她被挡住、或者拖到别的屏幕上时，从这里也能打开主窗口 */
 function createTray(): void {
-  tray = new Tray(nativeImage.createFromBitmap(trayIcon(32), { width: 32, height: 32, scaleFactor: 2 }))
+  // 「艾」字标（scripts/make-icon.mjs 生成）：普通屏幕用 16，高分屏用 32
+  const icon = nativeImage.createFromBuffer(Buffer.from(TRAY_16, 'base64'), { scaleFactor: 1 })
+  icon.addRepresentation({ scaleFactor: 2, buffer: Buffer.from(TRAY_32, 'base64') })
+  tray = new Tray(icon)
   tray.on('click', () => openMain({ page: 'tasks' }))
   updateTray()
 }
@@ -1290,6 +1427,7 @@ app.whenReady().then(() => {
     }
   })
   void serviceKeeper.start()
+  firstMeet = !loadSettings().life?.firstSeen // desktop.start() 会记下今天是第一次见面，先看一眼
   createWindow()
   createTray()
   desktop.start()

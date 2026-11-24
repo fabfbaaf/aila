@@ -15,6 +15,7 @@ import { startStore } from '../settings/store'
 import '../theme/tokens.css'
 import '../settings/settings.css'
 import Icon from '../theme/Icon.vue'
+import BrandMark from '../theme/BrandMark.vue'
 import AgentApp from '../agent/AgentApp.vue'
 import ProjectsPage from './ProjectsPage.vue'
 import SectionPage from './SectionPage.vue'
@@ -40,9 +41,9 @@ const page = computed<{ component: Component; props: Record<string, unknown> }>(
     case 'projects':
       return { component: ProjectsPage, props: { tab: route.value.tab ?? 'list' } }
     case 'knowledge':
-      return { component: SectionPage, props: { section: KnowledgeSection } }
+      return { component: SectionPage, props: { section: KnowledgeSection, title: t('资料'), hint: t('她回答问题、写代码前会先翻这里的文档') } }
     case 'memory':
-      return { component: SectionPage, props: { section: MemorySection } }
+      return { component: SectionPage, props: { section: MemorySection, title: t('记忆'), hint: t('她记得的事和经历：聊天、开任务时挑相关的几条用上') } }
     case 'studio':
       return { component: StudioPage, props: { work: route.value.work } }
     case 'settings':
@@ -114,9 +115,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="shell">
     <nav class="rail" :aria-label="t('页面')">
-      <div class="brand" :title="t('艾拉')">
-        <span>{{ t('艾') }}</span><i aria-hidden="true"></i>
-      </div>
+      <div class="brand" :title="t('艾拉')"><BrandMark :size="44" /></div>
       <button
         v-for="p in PAGES"
         :key="p.id"
@@ -163,37 +162,11 @@ onBeforeUnmount(() => {
   border-right: 1px solid var(--ui-line);
 }
 
-/* 标志：「艾」字在品牌渐变上，右下角一截光标（和她发夹上的「▍」一样） */
+/* 标志：「艾拉」字标（theme/BrandMark.vue），和 exe、托盘图标一样 */
 .brand {
-  position: relative;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
   margin-bottom: 14px;
-  border-radius: 11px;
-  background: var(--ui-brand);
-  box-shadow: 0 4px 14px rgba(167, 139, 250, 0.28);
-  color: #171226;
-  font-weight: 800;
-  font-size: 17px;
-}
-
-.brand i {
-  position: absolute;
-  right: 6px;
-  bottom: 7px;
-  width: 3px;
-  height: 9px;
-  border-radius: 1px;
-  background: #171226;
-  animation: blink 1.2s steps(1) infinite;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
 }
 
 .ic {

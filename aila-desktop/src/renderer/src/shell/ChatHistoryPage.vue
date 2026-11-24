@@ -16,6 +16,7 @@ import { renderMarkdown } from '../agent/markdown'
 import { bridge } from '../platform/bridge'
 import { cleanText, groupHistory, timeOf } from './historyView'
 import { chatQueryRequest } from './intents'
+import BrandMark from '../theme/BrandMark.vue'
 
 const messages = ref<StoredMessage[]>([])
 const query = ref('')
@@ -25,6 +26,15 @@ const draft = ref('')
 const scroller = ref<HTMLElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
 const offs: (() => void)[] = []
+
+/** 还没聊过时给的几句开头：点了只是填进输入框，改完自己发（发出去才花钱） */
+const starters = computed(() => [t('你能帮我做些什么？'), t('帮我看看这个报错是怎么回事'), t('下午三点提醒我开会')])
+
+async function useStarter(text: string): Promise<void> {
+  draft.value = text
+  await nextTick()
+  input.value?.focus()
+}
 
 const groups = computed(() => groupHistory(messages.value, query.value, now.value, true))
 const total = computed(() => messages.value.filter((m) => !m.deleted).length)
@@ -131,7 +141,14 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
 
     <div ref="scroller" class="scroll">
       <div v-if="!bridge" class="empty">{{ t('对话只在桌面版里能用（npm run dev）。') }}</div>
-      <div v-else-if="!total && !showLive" class="empty">{{ t('还没聊过。在下面打字，或者双击桌面上的她、按') }} <kbd>Alt+Shift+A</kbd>。</div>
+      <div v-else-if="!total && !showLive" class="hello">
+        <BrandMark :size="64" />
+        <p class="hello-title">{{ t('和她聊聊') }}</p>
+        <p class="hello-sub">{{ t('还没聊过。在下面打字，或者双击桌面上的她、按') }} <kbd>Alt+Shift+A</kbd>。</p>
+        <div class="starters">
+          <button v-for="s in starters" :key="s" class="starter" @click="useStarter(s)">{{ s }}</button>
+        </div>
+      </div>
       <div v-else-if="query && !groups.length" class="empty">{{ t('没有含「{q}」的话。', { q: query }) }}</div>
       <section v-for="g in groups" :key="g.key" class="day">
         <h3>{{ dayTitle(g) }}</h3>
@@ -436,6 +453,59 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
   padding: 40px 0;
   color: var(--ui-muted);
   text-align: center;
+}
+
+/* 还没聊过：字标、一句说明、几句能点的开头 */
+.hello {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12vh 16px 24px;
+  text-align: center;
+}
+
+.hello-title {
+  margin: 8px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+.hello-sub {
+  margin: 0;
+  color: var(--ui-muted);
+}
+
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.starter {
+  padding: 7px 14px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 999px;
+  background: var(--ui-surface);
+  color: var(--ui-text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--ui-fast), color var(--ui-fast), background var(--ui-fast);
+}
+
+.starter:hover {
+  border-color: var(--ui-accent-line);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent-hi);
+}
+
+.starter:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-ring);
 }
 
 kbd {
