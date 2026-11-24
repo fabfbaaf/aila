@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import { AI_SERVICE_URL, type ChatEvent, type ChatMessage } from '../shared/chat'
+import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
 import type {
   AccountStatus,
@@ -137,6 +137,15 @@ const api = {
   onWorkbenchFocus: (cb: (focus: WorkbenchFocus) => void): Unsubscribe => listen('workbench:focus', cb),
   /** 星图里点「问她」：让桌面上的她说（主进程只认星图窗口发来的） */
   sayToAila: (text: string): void => ipcRenderer.send('chat:say', text),
+  // 主窗口的对话页：看她正在说的回复，回答她的确认，让她停下
+  onChatLive: (cb: (r: LiveReply) => void): Unsubscribe => listen('chat:live', cb),
+  chatLiveState: (): Promise<LiveReply | null> => ipcRenderer.invoke('chat:live-state'),
+  chatAnswer: (id: string, approved: boolean): void => ipcRenderer.send('chat:answer', id, approved),
+  chatStop: (): void => ipcRenderer.send('chat:stop'),
+  // 角色窗口：把回复的进度推出去；收主窗口那边的回答、停下
+  chatLive: (r: LiveReply): void => ipcRenderer.send('chat:live', r),
+  onChatAnswer: (cb: (id: string, approved: boolean) => void): Unsubscribe => listen('chat:answer', cb),
+  onChatStop: (cb: () => void): Unsubscribe => listen('chat:stop', cb),
   onChatSay: (cb: (text: string) => void): Unsubscribe => listen('chat:say', cb),
   /** 角色窗口：报告现在有没有等用户点头的代码修改 */
   reportPendingFix: (fix: PendingFix | null): void => ipcRenderer.send('fix:pending', fix),

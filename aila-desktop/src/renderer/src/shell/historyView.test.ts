@@ -49,3 +49,13 @@ describe('对话记录页', () => {
     expect(dayLabel(new Date(2025, 0, 2), NOW)).toBe('2025 年 1 月 2 日（星期四）')
   })
 })
+
+describe('对话页像聊天一样排', () => {
+  it('早的一天在上，走动标签也去掉', () => {
+    const now = new Date(2026, 10, 23, 12)
+    const list = [msg('a', new Date(2026, 10, 22, 9).toISOString(), '昨天'), msg('b', new Date(2026, 10, 23, 9).toISOString(), '今天')]
+    expect(groupHistory(list, '', now, true).map((g) => g.items[0].id)).toEqual(['a', 'b'])
+    expect(groupHistory(list, '', now).map((g) => g.items[0].id)).toEqual(['b', 'a'])
+    expect(cleanText('[go-topright][happy]好，我去右上角。')).toBe('好，我去右上角。')
+  })
+})

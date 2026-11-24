@@ -29,6 +29,36 @@ export interface ConfirmAsk {
 
 export type ConfirmResult = 'approved' | 'rejected' | 'timeout'
 
+/**
+ * 她正在说的这一句回复（主窗口的对话页实时显示用）。对话本身只有一份，在桌面上的她那里跑（出声、动作、记忆都在那）；
+ * 角色窗口把进度推给主进程，主进程转给主窗口。回复说完记进对话记录，主窗口从记录里显示
+ */
+export interface LiveReply {
+  phase: 'waiting' | 'streaming' | 'done' | 'error'
+  /** 到现在为止的全文（不含表情动作标签） */
+  text: string
+  /** 正在搜索、阅读时的进度 */
+  status: string
+  error: string
+  /** 正在等你回答的确认（没有是 null） */
+  ask: ConfirmAsk | null
+}
+
+const LIVE_PHASES = new Set(['waiting', 'streaming', 'done', 'error'])
+const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '')
+
+/** 主进程转发之前检查一遍（只认这些字段，长度有上限） */
+export function cleanLive(raw: unknown): LiveReply | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.phase !== 'string' || !LIVE_PHASES.has(r.phase)) return null
+  const a = r.ask as Record<string, unknown> | null | undefined
+  const ask = a && typeof a === 'object' && typeof a.id === 'string' && a.id
+    ? { id: str(a.id, 64), skill: str(a.skill, 40), action: str(a.action, 200), detail: str(a.detail, 4000) }
+    : null
+  return { phase: r.phase as LiveReply['phase'], text: str(r.text, 60_000), status: str(r.status, 200), error: str(r.error, 500), ask }
+}
+
 export type ChatEvent =
   /** spoken 省略时按旧版服务的行为，把文字照常念出来。more 是桌面端自己的提示。 */
   | { type: 'text'; text: string; spoken?: boolean; hint?: 'more' }

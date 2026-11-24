@@ -40,7 +40,7 @@ import {
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import WebSocket from 'ws'
-import { AI_SERVICE_URL, answerConfirm, streamChat, type ChatMessage } from '../shared/chat'
+import { AI_SERVICE_URL, answerConfirm, cleanLive, streamChat, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { AuthForm, MemoryOp, StoredMessage } from '../shared/cloud'
 import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
@@ -721,10 +721,28 @@ function registerIpc(): void {
     workbenchFocus = null
     return f
   })
-  // 在地图里点「问她」：只认主窗口发来的，交给桌面上的她去说
+  // 在地图里点「问她」、在主窗口的对话页打字：只认主窗口发来的，交给桌面上的她去说
   ipcMain.on('chat:say', (e, text: unknown) => {
     if (e.sender !== mainWin?.webContents || typeof text !== 'string' || !text.trim()) return
     win?.webContents.send('chat:say', text.slice(0, 8000))
+  })
+  // 她正在说的回复：只认角色窗口发来的，检查过再转给主窗口；主窗口打开对话页时先取一次现在的状态
+  let liveReply: LiveReply | null = null
+  ipcMain.on('chat:live', (e, raw: unknown) => {
+    if (!win || e.sender !== win.webContents) return
+    const r = cleanLive(raw)
+    if (!r) return
+    liveReply = r
+    mainWin?.webContents.send('chat:live', r)
+  })
+  ipcMain.handle('chat:live-state', (e) => (e.sender === mainWin?.webContents ? liveReply : null))
+  // 主窗口里回答她的确认、让她停下：只认主窗口，交给角色窗口（确认要对得上她正在问的那一个）
+  ipcMain.on('chat:answer', (e, id: unknown, approved: unknown) => {
+    if (e.sender !== mainWin?.webContents || typeof id !== 'string' || typeof approved !== 'boolean') return
+    win?.webContents.send('chat:answer', id.slice(0, 64), approved)
+  })
+  ipcMain.on('chat:stop', (e) => {
+    if (e.sender === mainWin?.webContents) win?.webContents.send('chat:stop')
   })
   // 编程 Agent：只认主窗口发来的（角色窗口不能替你开会话、点「可以」）
   const fromAgent = (e: { sender: Electron.WebContents }): boolean => !!mainWin && e.sender === mainWin.webContents

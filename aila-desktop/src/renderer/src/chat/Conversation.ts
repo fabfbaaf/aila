@@ -1,5 +1,5 @@
 /** 对话全文用于记录，口播片段和标签走原有的语音、打字队列。 */
-import type { ChatErrorCode, ChatEvent, ChatMessage, ConfirmAsk, Emotion, Gesture } from '../../../shared/chat'
+import type { ChatErrorCode, ChatEvent, ChatMessage, ConfirmAsk, Emotion, Gesture, LiveReply } from '../../../shared/chat'
 import type { RemoteChanges, StoredMessage } from '../../../shared/cloud'
 import type { Mouth } from '../avatar/types'
 import type { Behavior } from '../behavior/Behavior'
@@ -90,6 +90,8 @@ export class Conversation {
   onAsk: (ask: ConfirmAsk | null) => void = () => {}
   /** 回复里让她走到屏幕上的某个位置（[go-topright]）：收到就走，不等这句念完 */
   onMove: (spot: Spot) => void = () => {}
+  /** 正在说的这句回复有进展（主窗口的对话页实时显示）：等第一个字、收到字、在查东西、要你确认、说完、出错 */
+  onLive: (reply: LiveReply) => void = () => {}
 
   /** 对话记录：带 id 和时间，方便本地保存、多设备合并 */
   private history: StoredMessage[] = []
@@ -121,6 +123,8 @@ export class Conversation {
   private ask: ConfirmAsk | null = null
   /** 已经结束的确认（用户回答了、超时了）：还排在队列里的按钮不再显示 */
   private endedAsks = new Set<string>()
+  private livePhase: LiveReply['phase'] = 'done'
+  private liveStatus = ''
 
   // 只打字
   private queue: Item[] = []
@@ -222,6 +226,8 @@ export class Conversation {
     // 复制一份普通对象，跨进程传输不能带 Vue 的响应式代理
     const snapshot = this.history.map((m) => ({ role: m.role, content: m.content }))
     this.stream = this.transport.start(snapshot, (ev) => this.onEvent(ev))
+    this.liveStatus = ''
+    this.emitLive('waiting')
   }
 
   /** 说一句固定台词（不经过大模型，不进历史），出声设置和正常回复一样 */
@@ -241,6 +247,7 @@ export class Conversation {
     this.commit()
     this.stopAll()
     this.replying = false
+    this.emitLive('done')
   }
 
   /** 每帧调用 */
@@ -418,6 +425,7 @@ export class Conversation {
     if (this.ask === ask) return
     this.ask = ask
     this.onAsk(ask)
+    this.emitLive()
   }
 
   /** 让一个条目生效（字显示出来、标签触发）。返回气泡内容是否变了 */
@@ -493,6 +501,8 @@ export class Conversation {
         if (ev.text) {
           this.transcript += ev.text
           this.fullText += ev.text
+          this.liveStatus = ''
+          this.emitLive('streaming')
           this.lastTextSpoken = ev.spoken !== false
           if (!this.lastTextSpoken || ev.text.trim()) this.queueGestures(this.lastTextSpoken)
           if (this.lastTextSpoken) {
@@ -522,6 +532,8 @@ export class Conversation {
         break
       case 'status': {
         const item: Item = { kind: 'status', text: ev.text }
+        this.liveStatus = ev.text
+        this.emitLive()
         this.queueGestures(this.lastTextSpoken)
         if (this.voiced) {
           this.closeSentence(true)
@@ -557,13 +569,22 @@ export class Conversation {
         this.stream = null
         this.queueGestures(this.lastTextSpoken)
         if (this.voiced) this.closeSentence(true)
+        this.emitLive('done')
         break
       case 'error':
         this.receiving = false
         this.stream = null
         this.fail(ev.code, ev.message)
+        this.emitLive('error', ev.message)
         break
     }
+  }
+
+  /** 她自己念的固定台词（「我在」）不算回复，不推 */
+  private emitLive(phase?: LiveReply['phase'], error = ''): void {
+    if (this.announcing) return
+    if (phase) this.livePhase = phase
+    this.onLive({ phase: this.livePhase, text: this.fullText, status: this.liveStatus, error, ask: this.ask })
   }
 
   private stopAll(): void {

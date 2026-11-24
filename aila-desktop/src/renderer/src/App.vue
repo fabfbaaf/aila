@@ -887,9 +887,10 @@ onMounted(async () => {
       bridge.onModelBuiltin(() => void loadBuiltin(true)),
       bridge.onChatOpen(() => void openChat()),
       bridge.onVoiceMenu(onVoiceMenu),
-      // 星图里点了「问她」「让她修」：当成用户说的一句话
+      // 星图里点了「问她」「让她修」、主窗口对话页打的字：当成用户说的一句话
       bridge.onChatSay((text) => {
         clearScreenAsk()
+        walkIfAsked(text)
         conversation.send(text)
       }),
       // 星图里双手合十：确认的必须正是她现在问的这一份修改
@@ -906,6 +907,14 @@ onMounted(async () => {
     // 说出来的话提到剪贴板，也先带上剪贴板的内容
     // 回复里的 [go-topright]：说得随意的（「躲开点」）由大模型决定去哪
     conversation.onMove = (spot) => bridge?.moveTo(spot)
+    // 主窗口的对话页：回复的进度推过去，那边点的「好 / 不要」「停下」交回来
+    conversation.onLive = (r) => bridge?.chatLive({ ...r, ask: r.ask ? { ...r.ask } : null })
+    subscriptions.push(
+      bridge.onChatAnswer((id, approved) => {
+        if (convAsk.value?.id === id) conversation.answer(approved)
+      }),
+      bridge.onChatStop(() => conversation.interrupt())
+    )
     subscriptions.push(bridge.onArrived(() => behavior.gesture('nod')))
     voiceControl.onHeard = (text) => {
       walkIfAsked(text)
