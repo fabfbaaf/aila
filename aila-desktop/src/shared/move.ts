@@ -11,13 +11,38 @@
 
 export type Spot = 'topleft' | 'top' | 'topright' | 'left' | 'center' | 'right' | 'bottomleft' | 'bottom' | 'bottomright'
 export type Nudge = 'nudge-left' | 'nudge-right' | 'nudge-up' | 'nudge-down'
-export type MoveTarget = Spot | Nudge
+/** stroll：没事时自己走两步（设置里「没事时走走」），方向和远近由 strollTarget 定 */
+export type MoveTarget = Spot | Nudge | 'stroll'
 
 export const SPOTS: readonly Spot[] = ['topleft', 'top', 'topright', 'left', 'center', 'right', 'bottomleft', 'bottom', 'bottomright']
 const NUDGES: readonly Nudge[] = ['nudge-left', 'nudge-right', 'nudge-up', 'nudge-down']
 
 export function isMoveTarget(v: unknown): v is MoveTarget {
-  return typeof v === 'string' && ((SPOTS as readonly string[]).includes(v) || (NUDGES as readonly string[]).includes(v))
+  return typeof v === 'string' && (v === 'stroll' || (SPOTS as readonly string[]).includes(v) || (NUDGES as readonly string[]).includes(v))
+}
+
+/** 闲逛一次走多远（像素）：随机落在这个范围里 */
+export const STROLL_MIN = 80
+export const STROLL_MAX = 220
+
+/**
+ * 闲逛：在原来的高度上往左或往右走一小段（你把她放在哪就在那附近，不跑远）。
+ * 靠近一边时往另一边走；rand 返回 0 到 1（测试里传固定值）
+ */
+export function strollTarget(current: Rect, area: Rect, rand: () => number = Math.random): Point {
+  const step = Math.round(STROLL_MIN + (STROLL_MAX - STROLL_MIN) * rand())
+  const roomLeft = current.x - area.x
+  const roomRight = area.x + area.width - (current.x + current.width)
+  let dir = rand() < 0.5 ? -1 : 1
+  if (roomLeft < STROLL_MAX) dir = 1
+  else if (roomRight < STROLL_MAX) dir = -1
+  const x = Math.max(area.x, Math.min(current.x + dir * step, area.x + area.width - current.width))
+  return { x, y: current.y }
+}
+
+/** 什么时候可以闲逛：开了开关、她在桌面上能动、没在聊、没在睡，而且碰上这一次的运气（平均几分钟一次） */
+export function shouldStroll(o: { enabled: boolean; visible: boolean; quiet: boolean; chatting: boolean; asleep: boolean }, rand: () => number = Math.random): boolean {
+  return o.enabled && o.visible && !o.quiet && !o.chatting && !o.asleep && rand() < 0.3
 }
 
 /** 右键菜单里列的位置 */
@@ -125,6 +150,7 @@ export function targetPosition(target: MoveTarget, current: Rect, area: Rect): P
     case 'nudge-right': p = { x: current.x + NUDGE_STEP, y: current.y }; break
     case 'nudge-up': p = { x: current.x, y: current.y - NUDGE_STEP }; break
     case 'nudge-down': p = { x: current.x, y: current.y + NUDGE_STEP }; break
+    case 'stroll': p = strollTarget(current, area); break
   }
   // 屏幕比她还小这种极端情况：至少左上角在工作区里
   return {

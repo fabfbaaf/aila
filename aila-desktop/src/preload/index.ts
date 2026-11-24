@@ -300,7 +300,8 @@ const api = {
   moveTo: (target: MoveTarget): void => ipcRenderer.send('character:move', target),
   /** 开始走：往右是 1，往左是 -1，竖着走是 0 */
   onWalking: (cb: (dir: number) => void): Unsubscribe => listen('character:walking', cb),
-  onArrived: (cb: () => void): Unsubscribe => listen('character:arrived', cb),
+  /** 走到了：target 是这次去的地方（stroll 是自己闲逛） */
+  onArrived: (cb: (target: MoveTarget) => void): Unsubscribe => listen('character:arrived', cb),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),
 

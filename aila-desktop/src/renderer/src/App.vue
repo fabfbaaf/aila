@@ -10,7 +10,7 @@ import { cleanMotions } from '../../shared/extensions'
 import type { AgentProgress } from '../../shared/agent'
 import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
-import { parseMove } from '../../shared/move'
+import { parseMove, shouldStroll } from '../../shared/move'
 import { ScreenWatch, helpRequest, type ScreenFinding } from './screen/ScreenWatch'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
@@ -915,7 +915,27 @@ onMounted(async () => {
       }),
       bridge.onChatStop(() => conversation.interrupt())
     )
-    subscriptions.push(bridge.onArrived(() => behavior.gesture('nod')))
+    // 叫她去的：到了点点头；自己闲逛到的：偶尔伸个懒腰
+    subscriptions.push(
+      bridge.onArrived((target) => {
+        if (target !== 'stroll') behavior.gesture('nod')
+        else if (Math.random() < 0.3) behavior.gesture('stretch')
+      })
+    )
+    // 设置里开了「没事时走走」：隔一阵自己挪几步（打字、全屏、离开电脑由主进程再把一道关）
+    const strollTimer = setInterval(() => {
+      const s = desk.value
+      if (!s) return
+      const ok = shouldStroll({
+        enabled: s.prefs.wander,
+        visible: s.presence.visible,
+        quiet: s.presence.quiet,
+        chatting: chatOpen.value || conversation.busy,
+        asleep: behavior.isSleepy
+      })
+      if (ok) bridge?.moveTo('stroll')
+    }, 40_000)
+    subscriptions.push(() => clearInterval(strollTimer))
     voiceControl.onHeard = (text) => {
       walkIfAsked(text)
       if (!mentionsClipboard(text)) return false

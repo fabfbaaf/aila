@@ -7,6 +7,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  powerMonitor,
   safeStorage,
   screen,
   session,
@@ -396,15 +397,21 @@ function stopWalk(): void {
 /** 在她现在所在的那块屏幕上走过去；你拖她、她被藏起来都会停下 */
 function walkTo(target: MoveTarget): void {
   if (!win || !win.isVisible()) return
+  if (target === 'stroll') {
+    // 自己闲逛：你正在打字、拖着她、她正在走，或者你离开好一阵了（没人看），都不走
+    const idle = powerMonitor.getSystemIdleTime()
+    if (drag || walking || idle < 3 || idle > 600) return
+  }
   stopWalk()
   const b = win.getBounds()
   const from = { x: b.x, y: b.y }
   const to = targetPosition(target, b, screen.getDisplayMatching(b).workArea)
   if (from.x === to.x && from.y === to.y) {
-    win.webContents.send('character:arrived')
+    win.webContents.send('character:arrived', target)
     return
   }
-  const ms = walkDuration(from, to)
+  // 闲逛慢慢走，叫她去哪就快点
+  const ms = walkDuration(from, to) * (target === 'stroll' ? 2.2 : 1)
   const start = Date.now()
   win.webContents.send('character:walking', Math.sign(to.x - from.x))
   walking = setInterval(() => {
@@ -414,7 +421,7 @@ function walkTo(target: MoveTarget): void {
     win.setPosition(p.x, p.y)
     if (t >= 1) {
       stopWalk()
-      win.webContents.send('character:arrived')
+      win.webContents.send('character:arrived', target)
     }
   }, 16)
 }
