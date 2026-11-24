@@ -4,6 +4,7 @@ import { lstat, open, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { isAgentScreenshotName } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
+import { tm } from './lang'
 
 const SESSION_ID = /^\d{8}-\d{6}-[0-9a-f]{6}$/
 const MAX_SCREENSHOT_BYTES = 16 * 1024 * 1024
@@ -59,16 +60,16 @@ export function registerAgentScreenshotIpc(
   dataDir: () => Promise<string | undefined>
 ): void {
   ipc.handle('agent:screenshot', async (event, sid: unknown, name: unknown): Promise<AiResult<string>> => {
-    if (!fromMain(event)) return { ok: false, error: '只有主窗口能用' }
+    if (!fromMain(event)) return { ok: false, error: tm('只有主窗口能用') }
     if (typeof sid !== 'string' || sid.length !== 22 || !SESSION_ID.test(sid) || !isAgentScreenshotName(name)) {
-      return { ok: false, error: '截图路径无效。' }
+      return { ok: false, error: tm('截图路径无效。') }
     }
     try {
       const root = await dataDir()
-      if (!root) return { ok: false, error: 'AI 数据目录还没准备好。' }
+      if (!root) return { ok: false, error: tm('AI 数据目录还没准备好。') }
       return { ok: true, data: await readScreenshot(root, sid, name) }
     } catch {
-      return { ok: false, error: '截图读不到了。' }
+      return { ok: false, error: tm('截图读不到了。') }
     }
   })
 }

@@ -1,7 +1,17 @@
-import { readFileSync, writeFileSync } from 'fs'
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import { isLangPref, resolveLang, translate } from './i18n'
-import { TABLES, TABLE_FILES, TRANSLATED_FILES, calledKeys, literalKeys, tableKeys } from './i18nKeys'
+import { TABLES, TABLE_FILES, calledKeys, literalKeys, tableKeys, usesTranslation } from './i18nKeys'
+
+/** src 下所有的 .ts / .vue（测试除外） */
+function sources(dir = 'src'): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name)
+    if (statSync(p).isDirectory()) return name === 'locales' ? [] : sources(p)
+    return /.(ts|vue)$/.test(name) && !/.test.ts$/.test(name) ? [p] : []
+  })
+}
 import { EN } from './locales/en'
 
 describe('界面语言', () => {
@@ -25,7 +35,10 @@ describe('界面语言', () => {
 
   it('已经换成英文界面的地方，每句都有英文，英文里的 {名字} 和中文对得上', () => {
     const keys = new Set<string>()
-    for (const f of TRANSLATED_FILES) for (const k of calledKeys(readFileSync(f, 'utf8'))) keys.add(k)
+    for (const f of sources()) {
+      const src = readFileSync(f, 'utf8')
+      if (usesTranslation(src)) for (const k of calledKeys(src)) keys.add(k)
+    }
     for (const f of TABLE_FILES) for (const k of literalKeys(readFileSync(f, 'utf8'))) keys.add(k)
     for (const [f, names] of Object.entries(TABLES)) {
       for (const n of names) for (const k of tableKeys(readFileSync(f, 'utf8'), n)) keys.add(k)

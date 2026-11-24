@@ -11,6 +11,7 @@
  */
 import type { AgentEvent, AgentUndoEvent } from '../../../shared/agent'
 import { actionOf, readUndo } from './fold'
+import { t as tr } from '../i18n'
 
 export interface TraceRow {
   kind: 'model' | 'tool' | 'wait'
@@ -83,7 +84,7 @@ export function buildTrace(events: AgentEvent[], now?: number): TraceTurn[] {
         for (const c of toolCalls) calls.set(c.id, { name: c.name, args: parseArgs(c.arguments) })
         lastModel = {
           kind: 'model',
-          label: toolCalls.length ? `想下一步 → ${toolCalls.map((c) => actionOf(c.name, parseArgs(c.arguments))).join('、')}` : '回答',
+          label: toolCalls.length ? tr('想下一步 → {what}', { what: toolCalls.map((c) => actionOf(c.name, parseArgs(c.arguments))).join(', ') }) : tr('回答'),
           start: rel(start),
           end: rel(t),
           first: timing?.first
@@ -104,7 +105,7 @@ export function buildTrace(events: AgentEvent[], now?: number): TraceTurn[] {
         turn.completion += Number(e.completion ?? 0)
         break
       case 'confirm':
-        confirms.set(String(e.id), { start: t, label: `等你确认：${String(e.action ?? '')}` })
+        confirms.set(String(e.id), { start: t, label: tr('等你确认：{action}', { action: String(e.action ?? '') }) })
         cursor = t
         break
       case 'confirm_end': {
@@ -128,7 +129,7 @@ export function buildTrace(events: AgentEvent[], now?: number): TraceTurn[] {
         break
       }
       case 'compaction':
-        turn.rows.push({ kind: 'model', label: '压缩上下文', start: rel(cursor), end: rel(t) })
+        turn.rows.push({ kind: 'model', label: tr('压缩上下文'), start: rel(cursor), end: rel(t) })
         cursor = t
         break
       case 'turn_end':

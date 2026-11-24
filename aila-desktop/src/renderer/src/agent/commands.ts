@@ -3,6 +3,7 @@
  * 抽成纯函数方便单测；展开命令文件是 AI 服务做的，这里只管列出来、按前缀筛。
  */
 import type { AgentCommand } from '../../../shared/agent'
+import { localized } from '../i18n'
 
 export interface MenuItem {
   name: string
@@ -10,17 +11,17 @@ export interface MenuItem {
   source: 'builtin' | AgentCommand['source']
 }
 
-const BUILTIN: MenuItem[] = [
+const BUILTIN: MenuItem[] = localized([
   { name: 'plan', description: '先出分阶段的计划，批准后一段一段做', source: 'builtin' },
   { name: 'review', description: '只读地审一遍没提交的改动', source: 'builtin' },
   { name: 'commit', description: '把这次的改动提交到 git（只提交相关文件）', source: 'builtin' },
   { name: 'pr', description: '推送并开 GitHub PR（推送、开 PR 都要你点头）', source: 'builtin' },
   { name: 'pr-comments', description: '按 PR 上的评论接着改', source: 'builtin' }
-]
+])
 /** 电脑任务不在项目里：没有审查、提交、PR */
 const PROJECT_ONLY = new Set(['review', 'commit', 'pr', 'pr-comments'])
 
-export const SOURCE_LABEL: Record<MenuItem['source'], string> = { builtin: '内置', project: '项目', user: '我的' }
+export const SOURCE_LABEL: Record<MenuItem['source'], string> = localized({ builtin: '内置', project: '项目', user: '我的' })
 
 /**
  * 现在输入的是「/开头、还没打空格」时，列出名字对得上的命令（内置的在前）；否则空列表。

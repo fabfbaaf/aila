@@ -3,6 +3,7 @@
  * 选文件、弹窗都在主进程：渲染层不能让 AI 服务去读任意路径，只能拿主进程弹窗选出来的那一个。
  */
 import type { McpStatus, McpToolInfo } from './mcp'
+import { translate, type Lang } from './i18n'
 
 export interface ExtensionSetting {
   key: string
@@ -126,20 +127,22 @@ export function cleanUpdate(raw: unknown): ExtensionUpdate | null {
 }
 
 /** 列表里每个扩展的一行小结：「2 个命令 · 1 项本事 · 1 个工具服务（开着 1 个）」 */
-export function summarize(e: Pick<ExtensionInfo, 'commands' | 'skills' | 'servers'> & Partial<ExtensionExtras>): string {
+/** lang：界面语言（页面传进来；不传是中文） */
+export function summarize(e: Pick<ExtensionInfo, 'commands' | 'skills' | 'servers'> & Partial<ExtensionExtras>, lang: Lang = 'zh'): string {
+  const tr = (zh: string, n: number): string => translate(lang, zh, { n })
   const parts: string[] = []
-  if (e.commands.length) parts.push(`${e.commands.length} 个命令`)
-  if (e.skills.length) parts.push(`${e.skills.length} 项本事`)
+  if (e.commands.length) parts.push(tr('{n} 个命令', e.commands.length))
+  if (e.skills.length) parts.push(tr('{n} 项本事', e.skills.length))
   if (e.servers.length) {
     const on = e.servers.filter((s) => !s.disabled).length
-    parts.push(`${e.servers.length} 个工具服务${on ? `（开着 ${on} 个）` : '（都停着）'}`)
+    parts.push(tr('{n} 个工具服务', e.servers.length) + (on ? tr('（开着 {n} 个）', on) : translate(lang, '（都停着）')))
   }
-  if (e.motions?.length) parts.push(`${e.motions.length} 个动作`)
+  if (e.motions?.length) parts.push(tr('{n} 个动作', e.motions.length))
   const lines = Object.values(e.lines ?? {}).reduce((a, b) => a + b, 0)
-  if (lines) parts.push(`${lines} 句台词`)
-  if (e.avatars?.length) parts.push(`${e.avatars.length} 个形象`)
-  if (e.pages?.length) parts.push(`${e.pages.length} 个页面`)
-  return parts.join(' · ') || '里面什么都没有'
+  if (lines) parts.push(tr('{n} 句台词', lines))
+  if (e.avatars?.length) parts.push(tr('{n} 个形象', e.avatars.length))
+  if (e.pages?.length) parts.push(tr('{n} 个页面', e.pages.length))
+  return parts.join(' · ') || translate(lang, '里面什么都没有')
 }
 
 // ---------- 第二期：桌面伙伴（动作、台词、形象） ----------

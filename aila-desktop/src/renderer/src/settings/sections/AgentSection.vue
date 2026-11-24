@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /** 编程权限说明、记住的命令、电脑任务的环境说明预览和外部工具（MCP）。 */
-import { t } from '../../i18n'
+import { t, localized } from '../../i18n'
 import { computed, onActivated, ref } from 'vue'
-import { MODE_HINTS, MODE_LABELS, type AgentMode } from '../../../../shared/agent'
+import { MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentMode } from '../../../../shared/agent'
+const MODE_LABELS = localized(MODE_LABELS_RAW)
+const MODE_HINTS = localized(MODE_HINTS_RAW)
 import type { AgentRuleGroup } from '../../../../shared/settings'
 import { loadAgentRules, removeAgentRule } from '../agentRules'
 import { loadComputerContext, loadComputerSettings, saveComputerInventory } from '../computer'

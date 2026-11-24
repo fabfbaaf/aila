@@ -2,6 +2,7 @@
  * 每次开始/停止都换一代：旧进程回调、旧健康请求和旧计时器不能重启已经退出的应用。
  */
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
+import { tm } from './lang'
 
 export interface ServiceCommand {
   executable: string
@@ -41,10 +42,10 @@ const MISSING ='找不到 AI 服务或 Python。在 aila-ai 里运行 py -3.12 -
 /** 日志只记输出；常见密钥和 URL 里的认证信息在进入缓冲前就去掉。 */
 export function cleanServiceLog(text: string): string {
   return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/((?:[A-Z_]*(?:API_KEY|TOKEN|PASSWORD|SECRET)|api[_-]?key|authorization)["']?\s*[=:]\s*["']?)[^\s"',}]+/gi, '$1[已隐藏]')
-    .replace(/\bBearer\s+\S+/gi, 'Bearer [已隐藏]')
-    .replace(/\bsk-[\w-]+/g, '[已隐藏]')
-    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, '$1[已隐藏]@')
+    .replace(/((?:[A-Z_]*(?:API_KEY|TOKEN|PASSWORD|SECRET)|api[_-]?key|authorization)["']?\s*[=:]\s*["']?)[^\s"',}]+/gi, tm('$1[已隐藏]'))
+    .replace(/\bBearer\s+\S+/gi, tm('Bearer [已隐藏]'))
+    .replace(/\bsk-[\w-]+/g, tm('[已隐藏]'))
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, tm('$1[已隐藏]@'))
 }
 
 export class ServiceKeeper {
@@ -81,7 +82,7 @@ export class ServiceKeeper {
   }
 
   restart(): Promise<ServiceResult> {
-    if (this.state.phase === 'external') return Promise.resolve({ ok: false, error: '这个服务是别人开的，艾拉不能替它重启。先去原来的终端停掉它。' })
+    if (this.state.phase === 'external') return Promise.resolve({ ok: false, error: tm('这个服务是别人开的，艾拉不能替它重启。先去原来的终端停掉它。') })
     if (this.restarting) return this.restarting
     this.restarting = this.restartOwned().finally(() => { this.restarting = null })
     return this.restarting
@@ -91,7 +92,7 @@ export class ServiceKeeper {
     const stopped = this.shutdown()
     const generation = this.generation
     await stopped
-    if (this.generation !== generation) return { ok: false, error: '艾拉正在退出，服务没有重启。' }
+    if (this.generation !== generation) return { ok: false, error: tm('艾拉正在退出，服务没有重启。') }
     this.retries = []
     await this.start()
     return this.state.phase === 'failed' || this.state.phase === 'missing'
@@ -143,7 +144,7 @@ export class ServiceKeeper {
   }
 
   private occupied(): void {
-    this.set('failed', `${this.deps.port} 端口被别的程序占了。停掉占用它的程序，或者改用其他端口，再点「重启服务」。`)
+    this.set('failed', tm('{port} 端口被别的程序占了。停掉占用它的程序，或者改用其他端口，再点「重启服务」。', { port: this.deps.port }))
   }
 
   private launch(generation: number): void {
@@ -165,12 +166,12 @@ export class ServiceKeeper {
       const owned = process
       this.cancelStartup = this.deps.later(() => {
         if (this.current(generation) && this.process === owned && this.state.phase === 'starting') {
-          void this.crash(generation, 'AI 服务启动超过 60 秒还没准备好。')
+          void this.crash(generation, tm('AI 服务启动超过 60 秒还没准备好。'))
         }
       }, 60_000)
       this.wait(500, () => { void this.poll(generation, owned) })
     } catch {
-      void this.crash(generation, 'AI 服务没能启动。看看 Python 和服务目录是否还能访问。')
+      void this.crash(generation, tm('AI 服务没能启动。看看 Python 和服务目录是否还能访问。'))
     }
   }
 
@@ -190,11 +191,11 @@ export class ServiceKeeper {
       this.set('ready')
     } else if (this.state.phase === 'starting') {
       if (this.deps.now() - this.startupAt >= 60_000) {
-        await this.crash(generation, 'AI 服务启动超过 60 秒还没准备好。')
+        await this.crash(generation, tm('AI 服务启动超过 60 秒还没准备好。'))
         return
       }
     } else if (++this.missed >= MAX_MISSES) {
-      await this.crash(generation, 'AI 服务快一分钟没有响应，正在重新启动。')
+      await this.crash(generation, tm('AI 服务快一分钟没有响应，正在重新启动。'))
       return
     }
     this.wait(this.state.phase === 'starting' ? 500 : 10_000, () => { void this.poll(generation, process) })
@@ -205,13 +206,13 @@ export class ServiceKeeper {
     const process = this.process
     this.process = null
     this.flush()
-    this.set('crashed', reason || 'AI 服务意外退出。')
+    this.set('crashed', reason || tm('AI 服务意外退出。'))
     if (process) await this.stop(process)
     if (!this.current(generation)) return
     const now = this.deps.now()
     this.retries = this.retries.filter((time) => now - time < 300_000)
     if (this.retries.length >= 3) {
-      this.set('failed', 'AI 服务在 5 分钟内多次停下，已经暂停自动重启。看一下日志，再点「重启服务」。')
+      this.set('failed', tm('AI 服务在 5 分钟内多次停下，已经暂停自动重启。看一下日志，再点「重启服务」。'))
       return
     }
     const delay = [1000, 3000, 9000][this.retries.length]

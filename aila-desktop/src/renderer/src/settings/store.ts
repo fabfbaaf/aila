@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import type { AccountStatus, StoredMemory } from '../../../shared/cloud'
 import type { VoicePrefs } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
+import { t } from '../i18n'
 
 /**
  * 设置窗口里各个分区共用的状态。主进程推过来的变化在这里统一接收（只注册一次监听），
@@ -25,7 +26,7 @@ export async function startStore(): Promise<void> {
   api.onMemoryChanged((list) => (store.memories = list))
   api.onVoiceState((v) => (store.voice = v))
   api.onModelPath((p) => (store.modelPath = p))
-  api.onKnowledgeBusy((n) => (store.knowledgeBusy = n > 1 ? `正在读 ${n} 个文件……` : '正在读……（大文件要等一会儿）'))
+  api.onKnowledgeBusy((n) => (store.knowledgeBusy = n > 1 ? `正在读 ${n} 个文件……` : t('正在读……（大文件要等一会儿）')))
   const [account, memories, voice, modelPath] = await Promise.all([
     api.accountStatus(),
     api.memoryList(),

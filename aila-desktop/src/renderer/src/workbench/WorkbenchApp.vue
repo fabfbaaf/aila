@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t, localized } from '../i18n'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { CodeProject } from '../../../shared/settings'
 import type { ChunkSource, CodeGraph, GraphNode, LibInfo, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../../../shared/workbench'
@@ -46,7 +47,7 @@ let map: StarMap | null = null
 const projects = ref<CodeProject[]>([])
 const projectId = ref('')
 const graph = shallowRef<CodeGraph | null>(null)
-const status = ref('正在读取项目……')
+const status = ref(t('正在读取项目……'))
 const node = ref<GraphNode | null>(null)
 const outline = ref<OutlineItem[]>([])
 const code = ref<ChunkSource | null>(null)
@@ -70,7 +71,7 @@ function onActivity(a: AgentActivity): void {
   const root = projects.value.find((p) => p.id === projectId.value)?.root
   const id = root ? starOf(root, a.cwd, a.file) : null
   if (!id || !map?.touch(id, a.kind)) return
-  activity.value = `她正在${a.kind === 'read' ? '读' : '改'} ${id}`
+  activity.value = t('她正在{verb} {id}', { verb: a.kind === 'read' ? t('读') : t('改'), id })
   clearTimeout(activityTimer)
   activityTimer = window.setTimeout(() => (activity.value = ''), 6000)
 }
@@ -101,7 +102,7 @@ const lib = ref<LibInfo | null>(null)
 const showLibs = ref(true)
 /** 选中文件的 import：引用了谁、谁引用了它、用到哪些第三方库 */
 const imports = computed(() => (node.value && graph.value ? importsOf(graph.value, node.value.id) : null))
-const ECOSYSTEM: Record<string, string> = { npm: 'npm 包', python: 'Python 包', java: 'Java 库' }
+const ECOSYSTEM: Record<string, string> = localized({ npm: 'npm 包', python: 'Python 包', java: 'Java 库' })
 
 function shortPath(id: string): string {
   return id.split('/').slice(-2).join('/')
@@ -119,11 +120,11 @@ const legend = computed(() => (graph.value ? [...groupColors(graph.value.nodes).
 // ---------- 换颜色看项目 ----------
 
 const colorMode = ref<ColorMode>('group')
-const COLOR_MODES: { id: ColorMode; label: string; title: string }[] = [
+const COLOR_MODES: { id: ColorMode; label: string; title: string }[] = localized([
   { id: 'group', label: '按子项目', title: '颜色看属于哪个子项目' },
   { id: 'churn', label: '按改动', title: '最近 300 次提交里改得越多越红：容易出问题的地方' },
   { id: 'tests', label: '按测试', title: '有没有测试：绿的有，橙红的没找到（按测试文件的调用和同名测试估算）' }
-]
+])
 const hot = computed(() => (shown.value ? hottest(shown.value) : []))
 const testStats = computed(() => {
   const g = shown.value
@@ -141,7 +142,7 @@ function applyColors(): void {
 
 watch(colorMode, applyColors)
 const primary = computed(() => (located.value ? highlightFrom(located.value, graph.value ?? { nodes: [], links: [] }).primary : null))
-const kinds: Record<string, string> = { function: '函数', method: '方法', class: '类', template: '界面模板' }
+const kinds: Record<string, string> = localized({ function: '函数', method: '方法', class: '类', template: '界面模板' })
 /** 修改的说明（项目、改了什么、怎么测）和 diff 分开显示 */
 const fixLines = computed(() => {
   const lines = diffLines(fix.value?.detail ?? '')
@@ -155,7 +156,7 @@ async function loadProjects(): Promise<void> {
   try {
     projects.value = await source.projects()
   } catch (err) {
-    status.value = `连不上 AI 服务：${(err as Error).message}`
+    status.value = t('连不上 AI 服务：{why}', { why: (err as Error).message })
     return
   }
   if (!projects.value.length) {
@@ -167,13 +168,13 @@ async function loadProjects(): Promise<void> {
 
 async function loadGraph(): Promise<void> {
   if (!projectId.value || !map) return
-  status.value = '正在画星图……'
+  status.value = t('正在画星图……')
   node.value = null
   code.value = null
   try {
     graph.value = await source.graph(projectId.value)
   } catch (err) {
-    status.value = `读不了这个项目：${(err as Error).message}`
+    status.value = t('读不了这个项目：{why}', { why: (err as Error).message })
     return
   }
   map.setGraph(shown.value!)
@@ -232,11 +233,11 @@ async function applyFocus(f: WorkbenchFocus): Promise<void> {
   if (f.project && f.project !== projectId.value) projectId.value = f.project
   if (!f.error) return
   errorText.value = f.error
-  notice.value = '正在找报错落在哪……'
+  notice.value = t('正在找报错落在哪……')
   const loc = await source.locate(f.error).catch(() => null)
   if (!loc) {
     located.value = null
-    notice.value = '这个报错不在登记的项目里（可能是第三方库的代码）。'
+    notice.value = t('这个报错不在登记的项目里（可能是第三方库的代码）。')
     return
   }
   notice.value = ''
@@ -265,18 +266,18 @@ function clearError(): void {
 // ---------- 问她 ----------
 
 function askFile(): void {
-  if (node.value) source.say(`帮我看看 ${node.value.id} 是做什么的，主要有哪些函数。`)
+  if (node.value) source.say(t('帮我看看 {file} 是做什么的，主要有哪些函数。', { file: node.value.id }))
 }
 
 function askCode(): void {
-  if (code.value) source.say(`帮我讲讲 ${code.value.file} 里的 ${code.value.qname} 是做什么的。`)
+  if (code.value) source.say(t('帮我讲讲 {file} 里的 {name} 是做什么的。', { file: code.value.file, name: code.value.qname }))
 }
 
 /** 让她修：交给工作窗口里的编程 Agent（在报错所在的项目里开任务；改文件之前她会在工作窗口里问你） */
 function askFix(): void {
   const project = located.value?.project ?? projectId.value
   if (!errorText.value || !project) return
-  void source.task(project, lines.fixTask(errorText.value)).then((err) => say(err ? `没开成：${err}` : '交给她了：在任务页里修'))
+  void source.task(project, lines.fixTask(errorText.value)).then((err) => say(err ? t('没开成：{why}', { why: err }) : t('交给她了：在任务页里修')))
 }
 
 // ---------- 手势 ----------
@@ -333,12 +334,12 @@ async function onGesture(ev: GestureEvent): Promise<void> {
 async function onSeal(): Promise<void> {
   if (fix.value) {
     const ok = await source.seal(fix.value.id)
-    say(ok ? '结印确认：她开始修了（先在新分支上跑测试，全过才改到你的代码里）' : '这份修改已经不在等确认了')
+    say(ok ? t('结印确认：她开始修了（先在新分支上跑测试，全过才改到你的代码里）') : t('这份修改已经不在等确认了'))
   } else if (located.value) {
     askFix()
-    say('结印：让她修这个报错')
+    say(t('结印：让她修这个报错'))
   } else {
-    say('现在没有等你确认的修改')
+    say(t('现在没有等你确认的修改'))
   }
 }
 
@@ -407,7 +408,7 @@ async function openReplayPicker(): Promise<void> {
   try {
     replayList.value = sessionsIn(root, await source.sessions())
   } catch (err) {
-    say(`读不了任务列表：${(err as Error).message}`)
+    say(t('读不了任务列表：{why}', { why: (err as Error).message }))
     replayPicking.value = false
   }
 }
@@ -419,7 +420,7 @@ async function startReplay(s: AgentSessionSummary): Promise<void> {
   try {
     const full = await source.session(s.id)
     const steps = buildReplay(full.events, root, full.cwd)
-    if (!steps.length) return say('这个任务里还没有能回放的步骤')
+    if (!steps.length) return say(t('这个任务里还没有能回放的步骤'))
     closePanel()
     replay.value = { title: s.title, steps }
     replayIndex.value = 0
@@ -427,7 +428,7 @@ async function startReplay(s: AgentSessionSummary): Promise<void> {
     applyReplayStep(true)
     playReplay(true)
   } catch (err) {
-    say(`读不了这个任务：${(err as Error).message}`)
+    say(t('读不了这个任务：{why}', { why: (err as Error).message }))
   }
 }
 
@@ -489,24 +490,24 @@ onBeforeUnmount(() => {
     <div ref="canvas" class="canvas"></div>
 
     <header class="top">
-      <div class="title">代码星图</div>
+      <div class="title">{{ t('代码星图') }}</div>
       <select v-if="projects.length > 1" v-model="projectId">
         <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
       </select>
       <span v-else-if="projects.length" class="project">{{ projects[0].name }}</span>
       <div v-if="graph" class="search">
-        <input v-model="query" placeholder="找文件……" spellcheck="false" @keydown.enter="results[0] && pick(results[0])" />
+        <input v-model="query" :placeholder="t('找文件……')" spellcheck="false" @keydown.enter="results[0] && pick(results[0])" />
         <ul v-if="results.length">
           <li v-for="r in results" :key="r.id" @click="pick(r)">{{ r.id }}</li>
         </ul>
       </div>
-      <button v-if="graph" class="ghost" title="拉远看模块，拉近看文件" @click="map?.frameAll()">看全部</button>
+      <button v-if="graph" class="ghost" :title="t('拉远看模块，拉近看文件')" @click="map?.frameAll()">{{ t('看全部') }}</button>
       <div v-if="graph" class="replay-pick">
-        <button class="ghost" :class="{ on: replayPicking || replay }" title="在星图上回放她做过的一个任务：读了哪些文件、改了哪里" @click="openReplayPicker">回放</button>
+        <button class="ghost" :class="{ on: replayPicking || replay }" :title="t('在星图上回放她做过的一个任务：读了哪些文件、改了哪里')" @click="openReplayPicker">{{ t('回放') }}</button>
         <ul v-if="replayPicking">
-          <li v-if="!replayList.length" class="muted">这个项目里还没有做过的任务</li>
+          <li v-if="!replayList.length" class="muted">{{ t('这个项目里还没有做过的任务') }}</li>
           <li v-for="s in replayList.slice(0, 12)" :key="s.id" @click="startReplay(s)">
-            {{ s.title }}<span class="muted"> · {{ s.events }} 条记录</span>
+            {{ s.title }}<span class="muted"> · {{ t('{n} 条记录', { n: s.events }) }}</span>
           </li>
         </ul>
       </div>
@@ -514,19 +515,19 @@ onBeforeUnmount(() => {
         v-if="graph && counts?.tests"
         class="ghost"
         :class="{ on: hideTests }"
-        :title="hideTests ? '把测试文件显示回来（调暗显示）' : '测试文件现在是调暗的，点一下隐藏'"
+        :title="hideTests ? t('把测试文件显示回来（调暗显示）') : t('测试文件现在是调暗的，点一下隐藏')"
         @click="hideTests = !hideTests"
       >
-        {{ hideTests ? '显示测试文件' : '隐藏测试文件' }}
+        {{ hideTests ? t('显示测试文件') : t('隐藏测试文件') }}
       </button>
       <button
         v-if="graph"
         class="ghost"
         :class="{ on: gestures }"
-        :title="gestures ? '关掉手势（摄像头随之关闭）' : '用手势操作星图（会打开摄像头，只在本机识别）'"
+        :title="gestures ? t('关掉手势（摄像头随之关闭）') : t('用手势操作星图（会打开摄像头，只在本机识别）')"
         @click="gestures = !gestures"
       >
-        ✋ 手势{{ gestures ? '开着' : '' }}
+        ✋ {{ t('手势') }}{{ gestures ? t('开着') : '' }}
       </button>
     </header>
 
@@ -540,51 +541,51 @@ onBeforeUnmount(() => {
         <div v-for="[g, c] in legend" :key="g"><i :style="{ background: c }"></i>{{ g }}</div>
       </template>
       <template v-else-if="colorMode === 'churn'">
-        <div class="ramp"><span>没改过</span><b></b><span>改得最多</span></div>
-        <div v-if="!hot.length" class="muted">这个项目没有 git 历史，看不出改动</div>
-        <div v-for="n in hot" :key="n.id" class="hot" :title="n.id" @click="pick(n)">{{ n.id.split('/').slice(-2).join('/') }} · {{ n.churn }} 次</div>
+        <div class="ramp"><span>{{ t('没改过') }}</span><b></b><span>{{ t('改得最多') }}</span></div>
+        <div v-if="!hot.length" class="muted">{{ t('这个项目没有 git 历史，看不出改动') }}</div>
+        <div v-for="n in hot" :key="n.id" class="hot" :title="n.id" @click="pick(n)">{{ n.id.split('/').slice(-2).join('/') }} · {{ t('{n} 次', { n: n.churn ?? 0 }) }}</div>
       </template>
       <template v-else>
-        <div><i :style="{ background: TESTED_COLOR }"></i>有测试（{{ testStats.tested }}）</div>
-        <div><i :style="{ background: UNTESTED_COLOR }"></i>没找到测试（{{ testStats.untested }}）</div>
-        <div><i :style="{ background: TEST_FILE_COLOR }"></i>测试文件</div>
+        <div><i :style="{ background: TESTED_COLOR }"></i>{{ t('有测试（{n}）', { n: testStats.tested }) }}</div>
+        <div><i :style="{ background: UNTESTED_COLOR }"></i>{{ t('没找到测试（{n}）', { n: testStats.untested }) }}</div>
+        <div><i :style="{ background: TEST_FILE_COLOR }"></i>{{ t('测试文件') }}</div>
       </template>
-      <div class="gap"><b class="line"></b>函数调用</div>
-      <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>请求接口（HTTP）</div>
-      <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>进程间消息（IPC）</div>
+      <div class="gap"><b class="line"></b>{{ t('函数调用') }}</div>
+      <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>{{ t('请求接口（HTTP）') }}</div>
+      <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>{{ t('进程间消息（IPC）') }}</div>
       <div v-if="graph.libs?.length" class="libs-toggle">
-        <label><input v-model="showLibs" type="checkbox" />外圈的恒星：用到的第三方库（{{ shown?.libs?.length ?? 0 }}）</label>
+        <label><input v-model="showLibs" type="checkbox" />{{ t('外圈的恒星：用到的第三方库（{n}）', { n: shown?.libs?.length ?? 0 }) }}</label>
       </div>
-      <div class="gap"><i class="bright"></i>亮一点：还没提交的改动</div>
-      <div><i :style="{ background: ERROR_COLOR }"></i>报错的文件</div>
-      <div><i :style="{ background: CHAIN_COLOR }"></i>调用链上的文件</div>
-      <div><i :style="{ background: TOUCH_COLOR }"></i>她这次改过的文件</div>
+      <div class="gap"><i class="bright"></i>{{ t('亮一点：还没提交的改动') }}</div>
+      <div><i :style="{ background: ERROR_COLOR }"></i>{{ t('报错的文件') }}</div>
+      <div><i :style="{ background: CHAIN_COLOR }"></i>{{ t('调用链上的文件') }}</div>
+      <div><i :style="{ background: TOUCH_COLOR }"></i>{{ t('她这次改过的文件') }}</div>
     </div>
 
     <div v-if="tip" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 10}px` }">
-      {{ tip.name }} · {{ tip.lines }} 行
+      {{ tip.name }} · {{ t('{n} 行', { n: tip.lines }) }}
     </div>
     <div v-else-if="libTip" class="tip" :style="{ left: `${libTip.x + 14}px`, top: `${libTip.y + 10}px` }">
-      <b>{{ libTip.lib.name }}</b> · {{ ECOSYSTEM[libTip.lib.ecosystem] }} · {{ libTip.lib.count }} 个文件在用
-      <div class="muted">点一下看是谁在用</div>
+      <b>{{ libTip.lib.name }}</b> · {{ ECOSYSTEM[libTip.lib.ecosystem] }} · {{ t('{n} 个文件在用', { n: libTip.lib.count }) }}
+      <div class="muted">{{ t('点一下看是谁在用') }}</div>
     </div>
     <div v-else-if="moduleTip" class="tip" :style="{ left: `${moduleTip.x + 14}px`, top: `${moduleTip.y + 10}px` }">
-      <b>{{ moduleTip.m.label }}</b> · {{ moduleTip.m.files.length }} 个文件 · {{ moduleTip.m.lines }} 行
-      <div class="muted">{{ moduleTip.m.id }} · 点一下飞过去</div>
+      <b>{{ moduleTip.m.label }}</b> · {{ t('{n} 个文件', { n: moduleTip.m.files.length }) }} · {{ t('{n} 行', { n: moduleTip.m.lines }) }}
+      <div class="muted">{{ moduleTip.m.id }} · {{ t('点一下飞过去') }}</div>
     </div>
 
     <div v-if="located || notice" class="error-bar">
       <template v-if="located && primary">
-        <b>报错在</b> {{ primary.file }} 的 {{ primary.qname }}（第 {{ primary.line }} 行）
-        <span v-if="located.chain.length" class="muted">· 调用链上 {{ located.chain.length }} 个函数所在的文件已标橙</span>
-        <button class="fix" @click="askFix">让她修</button>
-        <button class="ghost" @click="clearError">收起</button>
+        <b>{{ t('报错在') }}</b> {{ t('{file} 的 {name}（第 {line} 行）', { file: primary.file, name: primary.qname ?? '', line: primary.line }) }}
+        <span v-if="located.chain.length" class="muted">· {{ t('调用链上 {n} 个函数所在的文件已标橙', { n: located.chain.length }) }}</span>
+        <button class="fix" @click="askFix">{{ t('让她修') }}</button>
+        <button class="ghost" @click="clearError">{{ t('收起') }}</button>
       </template>
       <template v-else>{{ notice }}</template>
     </div>
 
     <div v-if="fix" class="fix-card">
-      <div class="fix-title">她准备好了一份修改，等你确认</div>
+      <div class="fix-title">{{ t('她准备好了一份修改，等你确认') }}</div>
       <div v-for="(l, i) in fixLines.info" :key="'i' + i" class="fix-info">{{ l.text }}</div>
       <pre v-if="fixLines.diff.length" class="fix-diff"><span
         v-for="(l, i) in fixLines.diff"
@@ -593,8 +594,8 @@ onBeforeUnmount(() => {
       >{{ l.text }}
 </span></pre>
       <div class="fix-hint">
-        {{ gestures ? '双手合十保持一秒确认' : '打开「✋ 手势」后可以双手合十确认' }}，也可以{{
-          fix.source === 'agent' ? '在任务页里按「可以」' : '在她的气泡里点「好」或「不要」'
+        {{ gestures ? t('双手合十保持一秒确认') : t('打开「✋ 手势」后可以双手合十确认') }}{{ t('，也可以') }}{{
+          fix.source === 'agent' ? t('在任务页里按「可以」') : t('在她的气泡里点「好」或「不要」')
         }}
       </div>
     </div>
@@ -612,9 +613,9 @@ onBeforeUnmount(() => {
     <aside v-if="lib && !node" class="panel">
       <div class="head">
         <div class="path">{{ lib.name }}</div>
-        <button class="x" title="关掉" @click="lib = null">×</button>
+        <button class="x" :title="t('关掉')" @click="lib = null">×</button>
       </div>
-      <div class="meta">{{ ECOSYSTEM[lib.ecosystem] }} · {{ lib.count }} 个文件 import 了它</div>
+      <div class="meta">{{ ECOSYSTEM[lib.ecosystem] }} · {{ t('{n} 个文件 import 了它', { n: lib.count }) }}</div>
       <ul class="outline users">
         <li v-for="u in lib.users" :key="u" :title="u" @click="jump(u)">{{ u }}</li>
       </ul>
@@ -623,39 +624,39 @@ onBeforeUnmount(() => {
     <aside v-if="node" class="panel">
       <div class="head">
         <div class="path">{{ node.id }}</div>
-        <button class="x" title="关掉" @click="closePanel">×</button>
+        <button class="x" :title="t('关掉')" @click="closePanel">×</button>
       </div>
       <div class="meta">
-        {{ node.lang }} · {{ node.lines }} 行 · {{ node.functions }} 个函数{{ node.modified ? ' · 有没提交的改动' : '' }}
+        {{ node.lang }} · {{ t('{n} 行', { n: node.lines }) }} · {{ t('{n} 个函数', { n: node.functions }) }}{{ node.modified ? t(' · 有没提交的改动') : '' }}
       </div>
       <div class="actions">
-        <button @click="askFile">问她这个文件</button>
-        <button v-if="code" @click="askCode">问她这段代码</button>
+        <button @click="askFile">{{ t('问她这个文件') }}</button>
+        <button v-if="code" @click="askCode">{{ t('问她这段代码') }}</button>
       </div>
       <div v-if="imports && (imports.out.length || imports.in.length || imports.libs.length)" class="cross">
         <div v-if="imports.out.length" class="cross-row wrap">
-          <span class="dir">引用了</span>
+          <span class="dir">{{ t('引用了') }}</span>
           <a v-for="t in imports.out.slice(0, 12)" :key="'o' + t" class="who" :title="t" @click="jump(t)">{{ shortPath(t) }}</a>
-          <span v-if="imports.out.length > 12" class="via">等 {{ imports.out.length }} 个</span>
+          <span v-if="imports.out.length > 12" class="via">{{ t('等 {n} 个', { n: imports.out.length }) }}</span>
         </div>
         <div v-if="imports.in.length" class="cross-row wrap">
-          <span class="dir">被引用</span>
+          <span class="dir">{{ t('被引用') }}</span>
           <a v-for="t in imports.in.slice(0, 12)" :key="'i' + t" class="who" :title="t" @click="jump(t)">{{ shortPath(t) }}</a>
-          <span v-if="imports.in.length > 12" class="via">等 {{ imports.in.length }} 个</span>
+          <span v-if="imports.in.length > 12" class="via">{{ t('等 {n} 个', { n: imports.in.length }) }}</span>
         </div>
         <div v-if="imports.libs.length" class="cross-row wrap">
-          <span class="dir">用到的库</span>
+          <span class="dir">{{ t('用到的库') }}</span>
           <span v-for="n in imports.libs" :key="n" class="via">{{ n }}</span>
         </div>
       </div>
       <div v-if="cross && (cross.out.length || cross.in.length)" class="cross">
         <div v-for="l in cross.out" :key="'o' + l.target + l.kind" class="cross-row" @click="jump(l.target)">
-          <span class="dir" :style="{ color: l.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR }">{{ l.kind === 'ipc' ? '发消息给' : '请求' }} →</span>
+          <span class="dir" :style="{ color: l.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR }">{{ l.kind === 'ipc' ? t('发消息给') : t('请求') }} →</span>
           <span class="who">{{ l.target }}</span>
           <span class="via">{{ (l.via ?? []).join('、') }}</span>
         </div>
         <div v-for="l in cross.in" :key="'i' + l.source + l.kind" class="cross-row" @click="jump(l.source)">
-          <span class="dir" :style="{ color: l.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR }">← {{ l.kind === 'ipc' ? '收到消息' : '被请求' }}</span>
+          <span class="dir" :style="{ color: l.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR }">← {{ l.kind === 'ipc' ? t('收到消息') : t('被请求') }}</span>
           <span class="who">{{ l.source }}</span>
           <span class="via">{{ (l.via ?? []).join('、') }}</span>
         </div>
@@ -672,50 +673,49 @@ onBeforeUnmount(() => {
         </li>
       </ul>
       <div v-if="code" class="code">
-        <div class="code-title">{{ code.qname }} · 第 {{ code.start }}–{{ code.end }} 行</div>
+        <div class="code-title">{{ code.qname }} · {{ t('第 {a}–{b} 行', { a: code.start, b: code.end }) }}</div>
         <pre><code><span
           v-for="(line, i) in code.lines"
           :key="i"
           :class="{ hit: marked === code.start + i }"
         ><em>{{ code.start + i }}</em>{{ line }}
 </span></code></pre>
-        <div v-if="code.truncated" class="muted">……（太长，只显示前 200 行）</div>
+        <div v-if="code.truncated" class="muted">{{ t('……（太长，只显示前 200 行）') }}</div>
       </div>
     </aside>
 
     <div v-if="!projects.length && !status" class="empty">
-      <p>还没有登记项目。登记以后，项目里的每个文件都会变成一颗星球。</p>
-      <button @click="source.openSettings()">去「设置 → 代码库」添加项目</button>
+      <p>{{ t('还没有登记项目。登记以后，项目里的每个文件都会变成一颗星球。') }}</p>
+      <button @click="source.openSettings()">{{ t('去「设置 → 代码库」添加项目') }}</button>
     </div>
 
     <div v-if="replay" class="replay-bar">
-      <div class="replay-title">回放：{{ replay.title }}</div>
+      <div class="replay-title">{{ t('回放：{title}', { title: replay.title }) }}</div>
       <div class="replay-controls">
-        <button :title="replayPlaying ? '暂停' : '播放'" @click="playReplay(!replayPlaying)">{{ replayPlaying ? '❚❚' : '▶' }}</button>
+        <button :title="replayPlaying ? t('暂停') : t('播放')" @click="playReplay(!replayPlaying)">{{ replayPlaying ? '❚❚' : '▶' }}</button>
         <button v-for="sp in [1, 2, 4]" :key="sp" class="ghost speed" :class="{ on: replaySpeed === sp }" @click="setReplaySpeed(sp)">{{ sp }}×</button>
         <input
           type="range"
           min="0"
           :max="replay.steps.length - 1"
           :value="replayIndex"
-          aria-label="回放进度"
+          :aria-label="t('回放进度')"
           @input="seekReplay(Number(($event.target as HTMLInputElement).value))"
         />
-        <label class="follow"><input v-model="replayFollow" type="checkbox" />镜头跟着走</label>
-        <button class="ghost" title="关掉回放" @click="closeReplay">×</button>
+        <label class="follow"><input v-model="replayFollow" type="checkbox" />{{ t('镜头跟着走') }}</label>
+        <button class="ghost" :title="t('关掉回放')" @click="closeReplay">×</button>
       </div>
       <div v-if="replayStep" class="replay-step" :class="[replayStep.kind, { bad: !replayStep.ok }]">
-        第 {{ replayIndex + 1 }}/{{ replay.steps.length }} 步 · {{ STEP_ICON[replayStep.kind] }} {{ replayStep.label }}
-        <span v-if="!replayStep.ok && replayStep.kind !== 'end'" class="muted">（没成）</span>
+        {{ t('第 {n}/{total} 步', { n: replayIndex + 1, total: replay.steps.length }) }} · {{ STEP_ICON[replayStep.kind] }} {{ replayStep.label }}
+        <span v-if="!replayStep.ok && replayStep.kind !== 'end'" class="muted">{{ t('（没成）') }}</span>
       </div>
     </div>
 
     <footer class="status">
       <template v-if="status">{{ status }}</template>
       <template v-else-if="counts">
-        {{ counts.modules }} 个模块 · {{ counts.files }} 个文件 · {{ counts.calls }} 条调用光线 ·
-        {{ counts.cross }} 条跨进程弧线 · {{ counts.libs }} 个第三方库 ·
-        {{ gestures ? '张开手掌旋转、捏住星球往面前拉看代码' : '拉远看模块、拉近看文件，点模块飞过去，点星球看代码' }}
+        {{ t('{m} 个模块 · {f} 个文件 · {c} 条调用光线 · {x} 条跨进程弧线 · {l} 个第三方库 ·', { m: counts.modules, f: counts.files, c: counts.calls, x: counts.cross, l: counts.libs }) }}
+        {{ gestures ? t('张开手掌旋转、捏住星球往面前拉看代码') : t('拉远看模块、拉近看文件，点模块飞过去，点星球看代码') }}
         <span v-if="activity" class="activity"> · {{ activity }}</span>
       </template>
     </footer>

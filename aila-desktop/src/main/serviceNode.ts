@@ -8,6 +8,7 @@ import { resolve, join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { ServiceKeeper, type Health, type ServiceCommand, type ServiceProcess } from './service'
 import type { ServiceState } from '../shared/service'
+import { tm } from './lang'
 
 export interface ServiceLocation {
   packaged: boolean
@@ -153,8 +154,8 @@ export function createServiceKeeper(options: { locate: () => ServiceCommand | nu
         stream?.on('data', (chunk: Buffer) => output(decoder.write(chunk), source))
         stream?.on('end', () => output(decoder.end(), source))
       }
-      child.once('error', () => exit('AI 服务没能启动。检查 Python 路径和目录是否可访问。'))
-      child.once('close', (code, signal) => exit(`AI 服务退出了（${code === null ? `信号 ${signal ?? '未知'}` : `退出码 ${code}`}）。`))
+      child.once('error', () => exit(tm('AI 服务没能启动。检查 Python 路径和目录是否可访问。')))
+      child.once('close', (code, signal) => exit(tm('AI 服务退出了（{why}）。', { why: code === null ? tm('信号 {s}', { s: signal ?? tm('未知') }) : tm('退出码 {c}', { c: code }) })))
       if (!child.pid) throw new Error('AI 服务没有进程号')
       return { pid: child.pid, child } as OwnedProcess
     },

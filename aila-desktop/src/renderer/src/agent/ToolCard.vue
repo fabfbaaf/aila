@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** 一个工具调用：一行「做什么」+ 结果。要确认的操作，确认按钮就在卡片里 */
+import { t } from '../i18n'
 import { computed, ref, watch } from 'vue'
 import type { ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
@@ -39,10 +40,10 @@ watch(
     screenshotStatus.value = ''
     if (!visible || !name || !sid) return
     if (!load) {
-      screenshotStatus.value = '在艾拉桌面端查看截图。'
+      screenshotStatus.value = t('在艾拉桌面端查看截图。')
       return
     }
-    screenshotStatus.value = '正在读截图…'
+    screenshotStatus.value = t('正在读截图…')
     try {
       const url = await load(sid, name)
       if (current) {
@@ -50,7 +51,7 @@ watch(
         screenshotStatus.value = ''
       }
     } catch (err) {
-      if (current) screenshotStatus.value = err instanceof Error ? err.message : '截图读不到了。'
+      if (current) screenshotStatus.value = err instanceof Error ? err.message : t('截图读不到了。')
     }
   },
   { immediate: true }
@@ -58,14 +59,14 @@ watch(
 
 const summary = computed(() => {
   const c = props.item.content
-  if (!done.value) return { pending: '等着做', asking: '等你确认', running: '正在做…' }[props.item.status] ?? ''
+  if (!done.value) return { pending: t('等着做'), asking: t('等你确认'), running: t('正在做…') }[props.item.status] ?? ''
   if (props.item.name === 'read_file' && props.item.status === 'ok') {
     const n = c.split('\n').filter((l) => /^\s*\d+\t/.test(l)).length
-    return n ? `读了 ${n} 行` : firstLine(c)
+    return n ? t('读了 {n} 行', { n }) : firstLine(c)
   }
   if (isEdit.value && props.item.status === 'ok') return c.match(/（\+\d+ −\d+）/)?.[0] ?? ''
   if (isCommand.value) return firstLine(c)
-  if (isExplore.value && props.item.sub && props.item.status === 'ok') return `${props.item.sub.model} · 查了 ${props.item.sub.steps} 步`
+  if (isExplore.value && props.item.sub && props.item.status === 'ok') return t('{model} · 查了 {n} 步', { model: props.item.sub.model, n: props.item.sub.steps })
   return firstLine(c)
 })
 
@@ -85,18 +86,18 @@ const confirmLines = computed(() => (props.item.confirm?.detail ?? '').split('\n
 const confirmIsDiff = computed(() => props.item.confirm?.kind === 'edit' && confirmLines.value.some((l) => l.startsWith('@@')))
 const rememberLabel = computed(() =>
   props.item.confirm?.kind === 'edit'
-    ? '可以，这个会话里改文件不用再问'
+    ? t('可以，这个会话里改文件不用再问')
     : props.item.confirm?.kind === 'browser_local'
-      ? '可以，这个项目里这个端口以后都不用问'
+      ? t('可以，这个项目里这个端口以后都不用问')
     : props.item.confirm?.kind === 'mcp'
-      ? '可以，这个外部工具以后都不用问'
-      : props.computer ? '可以，这条命令在电脑任务里不用再问' : '可以，这条命令在这个项目里不用再问'
+      ? t('可以，这个外部工具以后都不用问')
+      : props.computer ? t('可以，这条命令在电脑任务里不用再问') : t('可以，这条命令在这个项目里不用再问')
 )
 const answered = computed(() => {
   const c = props.item.confirm
   if (!c?.result) return ''
-  if (c.result === 'approved') return c.remember ? '你同意了（以后都不用问）' : '你同意了'
-  return c.result === 'timeout' ? '一直没等到回答' : '你没同意'
+  if (c.result === 'approved') return c.remember ? t('你同意了（以后都不用问）') : t('你同意了')
+  return c.result === 'timeout' ? t('一直没等到回答') : t('你没同意')
 })
 
 function firstLine(text: string): string {
@@ -119,13 +120,13 @@ function lineClass(line: string): string {
       <span class="action">{{ item.action }}</span>
       <span class="summary" :class="{ bad: failed }">{{ summary }}</span>
       <span v-if="done && (item.content || item.diff || item.screenshot)" class="chev">
-        {{ open ? '收起' : item.screenshot ? '看截图' : '展开' }}
+        {{ open ? t('收起') : item.screenshot ? t('看截图') : t('展开') }}
       </span>
     </button>
 
     <!-- 等你确认 -->
     <div v-if="asking && item.confirm" class="confirm">
-      <div class="q">要{{ item.confirm.action }}，可以吗？</div>
+      <div class="q">{{ t('要{action}，可以吗？', { action: item.confirm.action }) }}</div>
       <div v-if="item.confirm.reason" class="reason">{{ item.confirm.reason }}</div>
       <pre class="detail" :class="{ diff: confirmIsDiff }"><span
         v-for="(line, i) in confirmLines"
@@ -134,27 +135,27 @@ function lineClass(line: string): string {
       >{{ line || ' ' }}
 </span></pre>
       <div class="buttons">
-        <button class="yes" @click="emit('answer', true, false)">可以 <kbd>1</kbd></button>
+        <button class="yes" @click="emit('answer', true, false)">{{ t('可以') }} <kbd>1</kbd></button>
         <button v-if="item.confirm.canRemember" @click="emit('answer', true, true)">{{ rememberLabel }} <kbd>2</kbd></button>
-        <button class="no" @click="emit('answer', false, false)">不要，我来说怎么做 <kbd>Esc</kbd></button>
+        <button class="no" @click="emit('answer', false, false)">{{ t('不要，我来说怎么做') }} <kbd>Esc</kbd></button>
       </div>
     </div>
     <div v-else-if="answered" class="answered">{{ answered }}</div>
 
     <template v-if="done && open">
       <div v-if="item.screenshot" class="screenshot">
-        <img v-if="screenshot" :src="screenshot" alt="编程任务截取的网页" @error="screenshot = ''; screenshotStatus = '截图显示不了。'" />
+        <img v-if="screenshot" :src="screenshot" :alt="t('编程任务截取的网页')" @error="screenshot = ''; screenshotStatus = t('截图显示不了。')" />
         <div v-else role="status">{{ screenshotStatus }}</div>
       </div>
       <template v-else-if="isEdit && item.diff">
         <pre class="diff"><span v-for="(line, i) in diffLines" :key="i" :class="lineClass(line)">{{ line || ' ' }}
 </span></pre>
-        <button v-if="diffMore > 0 && !showAll" class="more" @click="showAll = true">还有 {{ diffMore }} 行，展开全部</button>
+        <button v-if="diffMore > 0 && !showAll" class="more" @click="showAll = true">{{ t('还有 {n} 行，展开全部', { n: diffMore }) }}</button>
       </template>
       <template v-else-if="isCommand">
         <div class="cmd">$ {{ String(item.args.command ?? '') }}</div>
         <pre v-if="output.length" class="output">{{ output.join('\n') }}</pre>
-        <button v-if="outputMore > 0 && !showAll" class="more" @click="showAll = true">前面还有 {{ outputMore }} 行，展开全部</button>
+        <button v-if="outputMore > 0 && !showAll" class="more" @click="showAll = true">{{ t('前面还有 {n} 行，展开全部', { n: outputMore }) }}</button>
       </template>
       <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
       <div v-else-if="isExplore && item.status === 'ok'" class="report" v-html="renderMarkdown(item.content)"></div>

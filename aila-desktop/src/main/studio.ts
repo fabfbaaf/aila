@@ -12,6 +12,7 @@ import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
 import type { ReviewEntry } from '../shared/review'
 import type { ReviewBody } from './weekReview'
 import { attempt, json } from './ai'
+import { tm } from './lang'
 
 const enc = encodeURIComponent
 
@@ -54,11 +55,11 @@ const PREVIEW_PARTITION = 'aila-studio-preview'
 
 /** 打开网页作品：单独的沙盒窗口，只能加载这件作品自己的文件 */
 export async function openWorkPreview(aiUrl: string, id: string, parent: BrowserWindow | null): Promise<AiResult<{ ok: boolean }>> {
-  if (!WORK_ID.test(id)) return { ok: false, error: '没有这件作品' }
+  if (!WORK_ID.test(id)) return { ok: false, error: tm('没有这件作品') }
   const detail = await studio.work(aiUrl, id)
-  if (!detail.ok || !detail.data) return { ok: false, error: detail.error ?? '没有这件作品' }
+  if (!detail.ok || !detail.data) return { ok: false, error: detail.error ?? tm('没有这件作品') }
   const w = detail.data
-  if (!w.entry.endsWith('.html')) return { ok: false, error: '这件作品不是网页，看它的代码和说明就好' }
+  if (!w.entry.endsWith('.html')) return { ok: false, error: tm('这件作品不是网页，看它的代码和说明就好') }
   const base = `${aiUrl}/studio/works/${enc(id)}/raw/`
   const ses = session.fromPartition(PREVIEW_PARTITION)
   // 只放行这件作品自己的文件；别的请求（联网、本机别的接口）一律拦下
@@ -67,7 +68,7 @@ export async function openWorkPreview(aiUrl: string, id: string, parent: Browser
   const win = new BrowserWindow({
     width: 900,
     height: 700,
-    title: `艾拉的作品 · ${w.title}`,
+    title: tm('艾拉的作品 · {title}', { title: w.title }),
     parent: parent ?? undefined,
     autoHideMenuBar: true,
     backgroundColor: '#101218',
@@ -80,12 +81,12 @@ export async function openWorkPreview(aiUrl: string, id: string, parent: Browser
 
 /** 在资源管理器里打开作品文件夹（只认 AI 服务告诉我们的那个） */
 export async function revealWork(aiUrl: string, id: string): Promise<AiResult<{ ok: boolean }>> {
-  if (!WORK_ID.test(id)) return { ok: false, error: '没有这件作品' }
+  if (!WORK_ID.test(id)) return { ok: false, error: tm('没有这件作品') }
   const detail = await studio.work(aiUrl, id)
-  if (!detail.ok || !detail.data) return { ok: false, error: detail.error ?? '没有这件作品' }
+  if (!detail.ok || !detail.data) return { ok: false, error: detail.error ?? tm('没有这件作品') }
   const folder = detail.data.folder
   // 文件夹得是 …/works/<id>：防止 AI 服务那边给出别的地方
-  if (!/[\\/]works[\\/][\w-]{4,64}$/.test(folder) || !folder.endsWith(id)) return { ok: false, error: '作品文件夹不对' }
+  if (!/[\\/]works[\\/][\w-]{4,64}$/.test(folder) || !folder.endsWith(id)) return { ok: false, error: tm('作品文件夹不对') }
   const err = await shell.openPath(folder)
   return err ? { ok: false, error: err } : { ok: true, data: { ok: true } }
 }

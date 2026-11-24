@@ -133,7 +133,7 @@ onDeactivated(() => { ++activation; unsubscribe?.(); clearInterval(logTimer) })
         <span>{{ update?.current ?? '…' }}</span>
         <button class="btn" :disabled="checking" @click="checkUpdate">{{ checking ? t('在查……') : t('检查更新') }}</button>
         <template v-if="update?.checkedAt && !checking">
-          <span v-if="update.error" :class="update.error.startsWith(t('还没有')) ? 'hint' : 'warn-text'" role="status">{{ update.error }}</span>
+          <span v-if="update.error" :class="update.error === t('还没有发布过版本。') ? 'hint' : 'warn-text'" role="status">{{ update.error }}</span>
           <span v-else-if="!update.newer" class="hint">{{ t('已经是最新的了。') }}</span>
         </template>
       </div>

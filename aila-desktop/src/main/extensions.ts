@@ -7,6 +7,7 @@ import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import { BrowserWindow, session } from 'electron'
 import type { AiResult } from '../shared/settings'
+import { tm } from './lang'
 
 const PAGE_PARTITION = 'aila-extension-page'
 
@@ -19,7 +20,7 @@ export async function openExtensionPage(aiUrl: string, extId: string, name: stri
   const win = new BrowserWindow({
     width: 900,
     height: 680,
-    title: `扩展 · ${title}`,
+    title: tm('扩展 · {title}', { title }),
     parent: parent ?? undefined,
     autoHideMenuBar: true,
     backgroundColor: '#101218',
@@ -35,7 +36,7 @@ export async function openExtensionPage(aiUrl: string, extId: string, name: stri
     await win.loadURL(url)
   } catch (err) {
     win.close()
-    return { ok: false, error: `打不开这个页面：${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, error: tm('打不开这个页面：{why}', { why: err instanceof Error ? err.message : String(err) }) }
   }
   return { ok: true, data: { ok: true } }
 }

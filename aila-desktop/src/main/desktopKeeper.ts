@@ -29,6 +29,7 @@ import { decidePresence, FocusWatch } from './presence'
 import { ReminderBook, SitTimer } from './reminders'
 import { reviewDue, type ReviewEntry } from '../shared/review'
 import { reviewBody, type ReviewBody } from './weekReview'
+import { tm } from './lang'
 
 /** 最长隔多久重新排一次闹钟（电脑睡眠后 setTimeout 会不准） */
 const MAX_TIMER_MS = 60 * 60 * 1000
@@ -233,7 +234,7 @@ export class DesktopKeeper {
     // 她藏起来了（全屏、演示、免打扰）或者不方便出声：用系统通知，不会漏
     if (Notification.isSupported()) {
       const when = new Date(reminder.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      new Notification({ title: late ? `艾拉 · 刚才 ${when} 的提醒` : '艾拉 · 提醒', body: reminder.text }).show()
+      new Notification({ title: late ? tm('艾拉 · 刚才 {when} 的提醒', { when }) : tm('艾拉 · 提醒'), body: reminder.text }).show()
     }
   }
 
@@ -384,14 +385,14 @@ export class DesktopKeeper {
     const ms = Date.now()
     // 做上了：排下一件；手上还有没做完的：一小时后再看；别的错误（服务没开、出错）：十分钟后再试
     if (r.ok) this.life.nextWorkAt = nextWorkAt(ms, this.prefs.worksEvery, Math.random())
-    else this.life.nextWorkAt = ms + ((r.error ?? '').includes('还没做完') ? 3_600_000 : 600_000)
+    else this.life.nextWorkAt = ms + (['还没做完', tm('还没做完')].some((k) => (r.error ?? '').includes(k)) ? 3_600_000 : 600_000) // AI 服务的话可能是中文也可能翻好了
     this.saveLife()
   }
 
   /** 作品页里「现在就让她做一件」（可以带你给的点子） */
   async workNow(idea?: StartWorkBody['idea']): Promise<AiResult<Work>> {
     const l = this.o.life
-    if (!l) return { ok: false, error: '还没准备好' }
+    if (!l) return { ok: false, error: tm('还没准备好') }
     const got = await this.o.gather()
     const occasion = occasionOf(new Date(), this.life.firstSeen)
     return l.start({ hints: got ? workHints(got, occasion) : undefined, idea, budget: this.prefs.worksBudget })
@@ -400,9 +401,9 @@ export class DesktopKeeper {
   /** 写这周的回顾。force：这周写过了也重写（作品页里点「重写」） */
   async reviewNow(force: boolean): Promise<AiResult<ReviewEntry>> {
     const l = this.o.life
-    if (!l) return { ok: false, error: '还没准备好' }
+    if (!l) return { ok: false, error: tm('还没准备好') }
     const got = await this.o.gather()
-    if (!got) return { ok: false, error: 'AI 服务没开，过会儿再试。' }
+    if (!got) return { ok: false, error: tm('AI 服务没开，过会儿再试。') }
     const body = reviewBody({ sessions: got.sessions, messages: got.messages, memories: got.memories, reminders: this.book.list(), now: new Date() })
     return l.writeReview({ ...body, force })
   }

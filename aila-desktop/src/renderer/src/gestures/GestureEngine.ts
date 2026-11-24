@@ -6,6 +6,7 @@
  * 连续的手势（旋转、缩放）每帧都给变化量，有个小死区，手抖不会让星图跟着抖。
  */
 import { handsApart, isSeal, type HandPose, type Point } from './classify'
+import { localized } from '../i18n'
 
 export type GestureEvent =
   | { type: 'summon' } // 剑指：唤出全图（镜头拉回来看整个星图）
@@ -33,7 +34,7 @@ export const HOLD_MS: Record<Held, number> = { summon: 600, dismiss: 900, seal: 
 const COOLDOWN_MS = 1200
 const DEADZONE = 0.004 // 手掌每帧移动不到这么多不算
 const PULL = 1.3 // 捏住后手变大到 1.3 倍（离摄像头近了）算往面前拉
-const LABELS: Record<Held | 'rotate' | 'zoom' | 'holding', string> = {
+const LABELS: Record<Held | 'rotate' | 'zoom' | 'holding', string> = localized({
   summon: '剑指 · 唤出全图',
   dismiss: '握拳 · 收起',
   seal: '结印 · 确认',
@@ -41,7 +42,7 @@ const LABELS: Record<Held | 'rotate' | 'zoom' | 'holding', string> = {
   holding: '抓着 · 往面前拉可以展开面板',
   rotate: '张开手掌 · 旋转',
   zoom: '双手 · 缩放'
-}
+})
 
 /** 手很少伸到画面最边上：画面中间这一块就对应整个窗口 */
 export const REACH = 0.7

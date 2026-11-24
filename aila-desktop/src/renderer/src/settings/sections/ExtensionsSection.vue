@@ -4,10 +4,12 @@
  * 导入时文件由主进程弹窗选、AI 服务检查；这里显示的清单（会加什么、会运行什么程序）是代码从说明书算出来的。
  * 密钥类设置只显示填没填，不回显。
  */
-import { t, joinList } from '../../i18n'
+import { t, joinList, localized, lang } from '../../i18n'
 import { onActivated, onMounted, ref } from 'vue'
 import { summarize, type CatalogListing, type ExtensionInfo, type ExtensionPlan, type ExtensionUpdate } from '../../../../shared/extensions'
-import { MCP_STATUS_LABELS } from '../../../../shared/mcp'
+import { MCP_STATUS_LABELS as MCP_RAW } from '../../../../shared/mcp'
+const MCP_STATUS_LABELS = localized(MCP_RAW)
+const summarizeL = (e: Parameters<typeof summarize>[0]): string => summarize(e, lang.value)
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
 import McpCard from './McpCard.vue'
@@ -289,7 +291,7 @@ onActivated(load)
             <Toggle :model-value="e.enabled" @update:model-value="(v) => update(e, { enabled: v }, v ? t('启用了「{name}」，新开的会话里能用。', { name: e.name }) : t('停用了「{name}」：命令、本事、工具都不给她了。', { name: e.name }))" />
             <b>{{ e.name }}</b>
             <span class="ver">{{ e.id }} · {{ e.version }}</span>
-            <span class="sum">{{ summarize(e) }}</span>
+            <span class="sum">{{ summarizeL(e) }}</span>
             <span class="spacer"></span>
             <button class="link" @click="open[e.id] = !open[e.id]">{{ open[e.id] ? t('收起') : t('详细') }}</button>
             <button class="btn danger" :disabled="Boolean(busy)" @click="remove(e)">

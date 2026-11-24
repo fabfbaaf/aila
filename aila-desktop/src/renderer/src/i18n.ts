@@ -12,6 +12,23 @@ export function t(zh: string, params?: Params): string {
   return translate(lang.value, zh, params)
 }
 
+const CJK = /[一-鿿]/
+
+/**
+ * 常量表（列名、动词、状态名……）包一层：读的时候才翻，读到的字符串都是现在的语言。
+ * 表的结构、键都不变，代码照常 TABLE[key]、list.map(...)；只翻带中文的字符串值，别的原样
+ */
+export function localized<T extends object>(table: T): T {
+  return new Proxy(table, {
+    get(target, key, receiver) {
+      const v = Reflect.get(target, key, receiver)
+      if (typeof v === 'string') return CJK.test(v) ? t(v) : v
+      if (v && typeof v === 'object') return localized(v as object)
+      return v
+    }
+  })
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const pad = (n: number): string => String(n).padStart(2, '0')
 

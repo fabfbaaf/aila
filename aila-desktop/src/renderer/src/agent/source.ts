@@ -3,6 +3,7 @@ import { SseParser } from '../../../shared/chat'
 import type { AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
+import { t } from '../i18n'
 
 export interface ProjectChoice {
   name: string
@@ -173,7 +174,7 @@ function web(): AgentSource {
         () => true,
         () => false
       ),
-    pickFolder: async () => window.prompt('项目文件夹的完整路径（浏览器调试时手动输入）')?.trim() || null,
+    pickFolder: async () => window.prompt(t('项目文件夹的完整路径（浏览器调试时手动输入）'))?.trim() || null,
     takeFocus: async () => null,
     projects: async () =>
       (await call<{ name: string; root: string }[]>('GET', '/code/projects').catch(() => [])).map((p) => ({ name: p.name, path: p.root })),

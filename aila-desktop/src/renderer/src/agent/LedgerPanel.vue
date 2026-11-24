@@ -4,6 +4,7 @@
  * 一条横条代表整个上下文窗口：开头固定的几块（每一步都一样，命中缓存）用青色，后面越往后越新；
  * 竖线是压缩线（快满时她会把前面的对话换成交接说明）。下面是每一步的缓存命中，和最占地方的几块。
  */
+import { t } from '../i18n'
 import { computed } from 'vue'
 import type { AgentLedger } from '../../../shared/agent'
 import { compact } from './fold'
@@ -53,40 +54,40 @@ const recentSteps = computed(() => props.steps.slice(-24))
         <div class="fill">
           <i v-for="s in segments" :key="s.key" :style="{ width: s.width, background: s.color }" :title="`${s.label} ${compact(s.tokens)}`"></i>
         </div>
-        <span class="compact-line" :style="{ left: `${ledger.compact_at * 100}%` }" title="压缩线"></span>
+        <span class="compact-line" :style="{ left: `${ledger.compact_at * 100}%` }" :title="t('压缩线')"></span>
       </div>
-      <div class="mix" title="已经用掉的部分由哪几块组成">
+      <div class="mix" :title="t('已经用掉的部分由哪几块组成')">
         <i v-for="s in segments" :key="s.key" :style="{ flex: `${Math.max(s.tokens, 1)} 1 0`, background: s.color }"></i>
       </div>
       <p class="line">
-        下一步输入{{ ledger.estimated ? '约' : '' }} <b>{{ compact(ledger.prompt) }}</b> / {{ compact(ledger.window) }}（{{ used.toFixed(0) }}%）
+        {{ t('下一步输入') }}{{ ledger.estimated ? t('约') : '' }} <b>{{ compact(ledger.prompt) }}</b> / {{ compact(ledger.window) }}（{{ used.toFixed(0) }}%）
       </p>
-      <p class="dim small">到 {{ Math.round(ledger.compact_at * 100) }}% 会压缩；开头固定的 {{ compact(fixedTokens) }} 每一步都一样，命中缓存</p>
+      <p class="dim small">{{ t('到 {pct}% 会压缩；开头固定的 {fixed} 每一步都一样，命中缓存', { pct: Math.round(ledger.compact_at * 100), fixed: compact(fixedTokens) }) }}</p>
       <ul class="parts">
         <li v-for="s in segments" :key="s.key">
           <i :style="{ background: s.color }"></i><span class="name">{{ s.label }}</span><span class="num">{{ compact(s.tokens) }}</span>
         </li>
       </ul>
       <template v-if="ledger.biggest.length">
-        <h4>最占地方的</h4>
+        <h4>{{ t('最占地方的') }}</h4>
         <ul class="parts big">
           <li v-for="(b, i) in ledger.biggest" :key="i"><span class="name" :title="b.label">{{ b.label }}</span><span class="num">{{ compact(b.tokens) }}</span></li>
         </ul>
       </template>
     </template>
-    <p v-else class="dim">还没有</p>
+    <p v-else class="dim">{{ t('还没有') }}</p>
 
     <template v-if="steps.length">
-      <h4>每一步命中缓存</h4>
-      <div class="spark" :title="`上一步命中 ${lastHit}%`">
+      <h4>{{ t('每一步命中缓存') }}</h4>
+      <div class="spark" :title="t('上一步命中 {pct}%', { pct: lastHit })">
         <span v-for="(s, i) in recentSteps" :key="i" class="col">
           <i class="hit" :style="{ height: `${s.prompt ? (s.hit / s.prompt) * 100 : 0}%` }"></i>
         </span>
       </div>
       <p class="line">
-        这个会话：<b>{{ sessionHit }}%</b> 的输入命中缓存{{ totals.estimated ? '（估算）' : '' }}
+        {{ t('这个会话：') }}<b>{{ sessionHit }}%</b>{{ t(' 的输入命中缓存') }}{{ totals.estimated ? t('（估算）') : '' }}
       </p>
-      <p class="dim small">输入 {{ compact(totals.prompt) }} · 命中 {{ compact(totals.hit) }} · 输出 {{ compact(totals.completion) }}</p>
+      <p class="dim small">{{ t('输入 {p} · 命中 {h} · 输出 {o}', { p: compact(totals.prompt), h: compact(totals.hit), o: compact(totals.completion) }) }}</p>
     </template>
   </div>
 </template>

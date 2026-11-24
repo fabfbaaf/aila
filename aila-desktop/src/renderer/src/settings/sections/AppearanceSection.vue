@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { t } from '../../i18n'
+import { t, localized } from '../../i18n'
 import { computed, onMounted, ref } from 'vue'
-import { PERSONA_STYLES, type PersonaStyle } from '../../../../shared/settings'
+import { PERSONA_STYLES as PERSONA_STYLES_RAW, type PersonaStyle } from '../../../../shared/settings'
+const PERSONA_STYLES = localized(PERSONA_STYLES_RAW)
 import { bridge } from '../../platform/bridge'
 import { store } from '../store'
 

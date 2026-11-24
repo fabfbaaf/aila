@@ -7,6 +7,7 @@
  */
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import type { Point } from './classify'
+import { localized } from '../i18n'
 
 export type TrackerError = 'denied' | 'no-camera' | 'busy' | 'model' | 'unknown'
 
@@ -19,13 +20,13 @@ export class TrackerStartError extends Error {
   }
 }
 
-const MESSAGES: Record<TrackerError, string> = {
+const MESSAGES: Record<TrackerError, string> = localized({
   denied: '摄像头没被允许使用：在 Windows「设置 → 隐私和安全性 → 摄像头」里允许桌面应用使用摄像头',
   'no-camera': '没找到摄像头',
   busy: '摄像头被别的程序占着（关掉视频会议之类的软件再试）',
   model: '手势模型没装好：在 aila-desktop 目录运行 npm run setup:gestures',
   unknown: '摄像头打不开'
-}
+})
 
 /** 每秒最多识别这么多次：够跟手了，也不太占电脑 */
 const MAX_FPS = 30

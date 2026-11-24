@@ -4,6 +4,7 @@ import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
 import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, ScreenStatus } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
+import { tm } from './lang'
 
 // ---------- 代码星图 ----------
 
@@ -92,7 +93,7 @@ export async function attempt<T>(fn: () => Promise<T>): Promise<AiResult<T>> {
   try {
     return { ok: true, data: await fn() }
   } catch (err) {
-    const error = err instanceof TypeError ? '连不上 AI 服务，请先启动 aila-ai' : err instanceof Error ? err.message : String(err)
+    const error = err instanceof TypeError ? tm('连不上 AI 服务，请先启动 aila-ai') : err instanceof Error ? err.message : String(err)
     return { ok: false, error }
   }
 }
@@ -155,7 +156,7 @@ export async function addKnowledge(aiUrl: string, paths: string[]): Promise<Know
       })
       result.added.push(await json<KnowledgeDoc>(res))
     } catch (err) {
-      const reason = err instanceof TypeError ? '连不上 AI 服务' : err instanceof Error ? err.message : String(err)
+      const reason = err instanceof TypeError ? tm('连不上 AI 服务') : err instanceof Error ? err.message : String(err)
       result.errors.push(`${name}：${reason}`)
     }
   }

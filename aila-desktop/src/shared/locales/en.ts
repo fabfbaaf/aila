@@ -8,5 +8,9 @@ import { EN3 } from './en3'
 import { EN4 } from './en4'
 import { EN5 } from './en5'
 import { EN6 } from './en6'
+import { EN7 } from './en7'
+import { EN8 } from './en8'
+import { EN9 } from './en9'
+import { EN10 } from './en10'
 
-export const EN: Record<string, string> = { ...EN1, ...EN2, ...EN3, ...EN4, ...EN5, ...EN6 }
+export const EN: Record<string, string> = { ...EN1, ...EN2, ...EN3, ...EN4, ...EN5, ...EN6, ...EN7, ...EN8, ...EN9, ...EN10 }

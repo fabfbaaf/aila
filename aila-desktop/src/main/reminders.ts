@@ -8,6 +8,7 @@
 
 import { randomUUID } from 'crypto'
 import type { Reminder } from '../shared/desktop'
+import { tm } from './lang'
 
 /** 最多记多少条、最远提前多久、内容多长 */
 export const MAX_REMINDERS = 50
@@ -31,11 +32,11 @@ export class ReminderBook {
   add(at: string, text: string, now: number, id: string = randomUUID()): Reminder | string {
     const when = Date.parse(at)
     const clean = text.trim().slice(0, MAX_TEXT)
-    if (!clean) return '提醒的内容是空的'
-    if (Number.isNaN(when)) return '时间看不懂'
-    if (when <= now) return '这个时间已经过了'
-    if (when - now > MAX_AHEAD_MS) return '太远了：最多提前一个月'
-    if (this.items.length >= MAX_REMINDERS) return `提醒太多了（最多 ${MAX_REMINDERS} 条），先删掉几条`
+    if (!clean) return tm('提醒的内容是空的')
+    if (Number.isNaN(when)) return tm('时间看不懂')
+    if (when <= now) return tm('这个时间已经过了')
+    if (when - now > MAX_AHEAD_MS) return tm('太远了：最多提前一个月')
+    if (this.items.length >= MAX_REMINDERS) return tm('提醒太多了（最多 {n} 条），先删掉几条', { n: MAX_REMINDERS })
     const r: Reminder = { id, at: new Date(when).toISOString(), text: clean, createdAt: new Date(now).toISOString() }
     this.items.push(r)
     this.items.sort(byTime)

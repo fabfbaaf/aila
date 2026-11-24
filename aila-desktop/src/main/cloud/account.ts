@@ -20,6 +20,7 @@ import { HistoryStore } from './history'
 import { forAi, MemoryKeeper, type ExtractRequest, type MemoryForAi } from './keeper'
 import { MemoryStore } from './memories'
 import { SyncEngine, type SocketLike } from './sync'
+import { tm } from '../lang'
 
 /** 刷新令牌加密保存（Windows 上是 DPAPI，只有当前系统用户能解开） */
 export interface SecretBox {
@@ -297,13 +298,13 @@ export class Account {
 }
 
 function deviceName(): string {
-  return hostname().slice(0, 100) || '我的电脑'
+  return hostname().slice(0, 100) || tm('我的电脑')
 }
 
 function describe(err: unknown, serverUrl: string): string {
   if (err instanceof ApiError) return err.message
-  if (err instanceof NetworkError) return `连不上同步服务器（${serverUrl}）`
-  return '出了点问题，请稍后再试'
+  if (err instanceof NetworkError) return tm('连不上同步服务器（{url}）', { url: serverUrl })
+  return tm('出了点问题，请稍后再试')
 }
 
 export type { SyncStatus }

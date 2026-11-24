@@ -12,6 +12,12 @@ import type { AgentSessionSummary } from '../shared/agent'
 import type { StoredMemory, StoredMessage } from '../shared/cloud'
 import type { Reminder } from '../shared/desktop'
 import { occasionLine, type Work } from '../shared/studio'
+import { mainLang, tm } from './lang'
+
+/** 英文时句子之间要空格、引号和顿号换成英文的 */
+const en = (): boolean => mainLang() === 'en'
+const quote = (s: string): string => (en() ? `"${s}"` : `「${s}」`)
+const sep = (): string => (en() ? ' ' : '')
 
 export { REPORT_TIMES } from '../shared/desktop'
 
@@ -55,13 +61,14 @@ function touched(s: AgentSessionSummary): number | undefined {
 }
 
 function titles(list: AgentSessionSummary[], max = 2): string {
-  const shown = list.slice(0, max).map((s) => `「${s.title.slice(0, 16)}${s.title.length > 16 ? '…' : ''}」`)
-  return shown.join('、') + (list.length > max ? ` 等 ${list.length} 个` : '')
+  const shown = list.slice(0, max).map((s) => quote(`${s.title.slice(0, 16)}${s.title.length > 16 ? '…' : ''}`))
+  const joined = shown.join(en() ? ', ' : '、')
+  return list.length > max ? tm('{list} 等 {n} 个', { list: joined, n: list.length }) : joined
 }
 
 /** 记忆里的「用户……」换成「你……」，读起来像她在跟你说 */
 function asYou(text: string): string {
-  return text.replace(/^用户/, '你').replace(/。$/, '')
+  return text.replace(/^用户/, tm('你')).replace(/。$/, '')
 }
 
 /** 今天的日程：记忆里有时效的事，今天到期（今天就是那件事的日子） */
@@ -86,10 +93,10 @@ function eventText(m: StoredMemory): string {
 }
 
 function greet(hour: number): string {
-  if (hour >= 5 && hour < 11) return '早上好。'
-  if (hour >= 11 && hour < 14) return '中午好。'
-  if (hour < 5) return '这么晚了……'
-  return '你来啦。'
+  if (hour >= 5 && hour < 11) return tm('早上好。')
+  if (hour >= 11 && hour < 14) return tm('中午好。')
+  if (hour < 5) return tm('这么晚了……')
+  return tm('你来啦。')
 }
 
 /**
@@ -107,31 +114,31 @@ export function morningBriefing(input: BriefingInput, withGreeting = true): { te
   if (occasion) parts.push(occasion)
 
   const done = sessions.filter((s) => sameWorkday(touched(s), yesterday))
-  if (done.length) parts.push(`昨天一起做了 ${done.length} 个任务：${titles(done)}。`)
+  if (done.length) parts.push(tm('昨天一起做了 {n} 个任务：{list}。', { n: done.length, list: titles(done) }))
 
   const open = sessions.filter((s) => s.branch && !sameWorkday(touched(s), today))
-  if (open.length) parts.push(`${titles(open, 1)}还在分支上，没合并。`)
+  if (open.length) parts.push(tm('{list}还在分支上，没合并。', { list: titles(open, 1) }))
 
   // 她自己的作品：昨天（或今天一早）做好的
   const made = (input.works ?? []).filter((w) => w.status === 'done' && [yesterday, today].includes(workday(new Date(w.created * 1000))))
-  if (made.length) parts.push(`昨天我自己做了个小东西「${made[0].title}」，放在「作品」里了。`)
+  if (made.length) parts.push(tm('昨天我自己做了个小东西「{title}」，放在「作品」里了。', { title: made[0].title }))
 
   const events = todaysEvents(input.memories, now)
   const reminders = input.reminders.filter((r) => workday(new Date(r.at)) === today)
   const todayBits = [
     ...events.slice(0, 2).map((m) => asYou(m.content)),
-    ...(reminders.length ? [`${reminders.length} 个提醒`] : [])
+    ...(reminders.length ? [tm('{n} 个提醒', { n: reminders.length })] : [])
   ]
-  if (todayBits.length) parts.push(`今天：${todayBits.join('；')}。`)
+  if (todayBits.length) parts.push(tm('今天：{what}。', { what: todayBits.join(en() ? '; ' : '；') }))
 
   // 记得你的事：明天的日程提前说一声；前一两天的事问问后来怎么样
   const tomorrow = eventsOn(input.memories, shiftDay(now, 1))
-  if (tomorrow.length) parts.push(`明天：${eventText(tomorrow[0])}……准备得怎么样？`)
+  if (tomorrow.length) parts.push(tm('明天：{what}……准备得怎么样？', { what: eventText(tomorrow[0]) }))
   const past = [...eventsOn(input.memories, shiftDay(now, -1)), ...eventsOn(input.memories, shiftDay(now, -2))]
-  if (past.length) parts.push(`之前说的「${eventText(past[0])}」，后来怎么样了？`)
+  if (past.length) parts.push(tm('之前说的「{what}」，后来怎么样了？', { what: eventText(past[0]) }))
 
   // 程序刚启动时她已经打过招呼了（Behavior.greet），这时就不再说「早上好」
-  return { text: (withGreeting ? greet(now.getHours()) : '') + parts.join(''), detail: parts.length > 0 }
+  return { text: [withGreeting ? greet(now.getHours()) : '', ...parts].filter(Boolean).join(sep()), detail: parts.length > 0 }
 }
 
 /** 晚上的日报：今天做了几个任务、几个还在分支上、用了多少 token、命中多少缓存、聊了几句 */
@@ -139,7 +146,7 @@ export function dailyReport(input: BriefingInput): string {
   const today = workday(input.now)
   const tasks = input.sessions.filter((s) => !isStudioSession(s) && sameWorkday(touched(s), today))
   const chats = input.messages.filter((m) => !m.deleted && m.role === 'user' && workday(new Date(m.createdAt)) === today).length
-  if (!tasks.length && !chats) return '今天还没一起做什么……明天见。'
+  if (!tasks.length && !chats) return tm('今天还没一起做什么……明天见。')
 
   const parts: string[] = []
   if (tasks.length) {
@@ -147,22 +154,21 @@ export function dailyReport(input: BriefingInput): string {
     const hit = tasks.reduce((n, s) => n + (s.usage?.cache_hit ?? 0), 0)
     const completion = tasks.reduce((n, s) => n + (s.usage?.completion ?? 0), 0)
     const branches = tasks.filter((s) => s.branch).length
-    let line = `今天一起做了 ${tasks.length} 个任务`
-    if (branches) line += `（${branches} 个还在分支上没合并）`
-    line += '。'
+    parts.push(branches
+      ? tm('今天一起做了 {n} 个任务（{b} 个还在分支上没合并）。', { n: tasks.length, b: branches })
+      : tm('今天一起做了 {n} 个任务。', { n: tasks.length }))
     if (prompt + completion > 0) {
-      line += `用了 ${tokens(prompt + completion)}个 token`
-      if (prompt) line += `，输入里 ${Math.round((hit / prompt) * 100)}% 命中了缓存`
-      line += '。'
+      parts.push(prompt
+        ? tm('用了 {t}个 token，输入里 {pct}% 命中了缓存。', { t: tokens(prompt + completion), pct: Math.round((hit / prompt) * 100) })
+        : tm('用了 {t}个 token。', { t: tokens(prompt + completion) }))
     }
-    parts.push(line)
   }
-  if (chats) parts.push(`和我聊了 ${chats} 句。`)
-  return parts.join('') + '……今天辛苦了。'
+  if (chats) parts.push(tm('和我聊了 {n} 句。', { n: chats }))
+  return [...parts, tm('……今天辛苦了。')].join(sep())
 }
 
 function tokens(n: number): string {
-  if (n >= 10_000) return `${(n / 10_000).toFixed(n >= 100_000 ? 0 : 1)} 万`
+  if (n >= 10_000) return en() ? `${Math.round(n / 1000)}k ` : `${(n / 10_000).toFixed(n >= 100_000 ? 0 : 1)} 万`
   return `${n} `
 }
 
