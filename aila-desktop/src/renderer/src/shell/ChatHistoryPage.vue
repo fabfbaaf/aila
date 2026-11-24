@@ -14,6 +14,7 @@ import type { StoredMessage } from '../../../shared/cloud'
 import { renderMarkdown } from '../agent/markdown'
 import { bridge } from '../platform/bridge'
 import { cleanText, groupHistory, timeOf } from './historyView'
+import { chatQueryRequest } from './intents'
 
 const messages = ref<StoredMessage[]>([])
 const query = ref('')
@@ -72,6 +73,17 @@ function answer(approved: boolean): void {
   const ask = live.value?.ask
   if (ask) bridge?.chatAnswer(ask.id, approved)
 }
+
+// Ctrl+K 里点了一段聊过的话：搜框里填上它
+watch(
+  chatQueryRequest,
+  (q) => {
+    if (!q) return
+    query.value = q
+    chatQueryRequest.value = ''
+  },
+  { immediate: true }
+)
 
 watch(() => live.value?.text, () => {
   if (nearBottom()) void toBottom()

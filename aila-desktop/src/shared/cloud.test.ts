@@ -8,7 +8,7 @@ describe('记忆页里自己加、改的一条', () => {
     })
     const ev = cleanMemoryEdit({ op: 'update', id: 'm1', content: '周五交周报', kind: 'event', expiresAt: '2026-11-27T23:59:59+08:00' })
     expect(ev).toMatchObject({ op: 'update', id: 'm1', kind: 'event' })
-    expect(typeof ev === 'object' && ev.expiresAt).toBe(new Date('2026-11-27T15:59:59Z').toISOString())
+    expect((ev as { expiresAt: string | null }).expiresAt).toBe(new Date('2026-11-27T15:59:59Z').toISOString())
     expect(cleanMemoryEdit({ op: 'add', content: '随便', kind: 'nope' })).toMatchObject({ kind: 'other' })
   })
 
