@@ -9,7 +9,10 @@ import {
   groupColors,
   haloScale,
   highlightFrom,
+  isRelated,
   layerAlpha,
+  relatedFiles,
+  relatedModules,
   labelled,
   linkKey,
   moduleAnchors,
@@ -56,8 +59,8 @@ describe('星图布局', () => {
   })
 
   it('星球大小跟着行数变，但有上下限', () => {
-    expect(nodeRadius(1)).toBeGreaterThanOrEqual(1.4)
-    expect(nodeRadius(100_000)).toBe(9)
+    expect(nodeRadius(1)).toBeGreaterThanOrEqual(1.2)
+    expect(nodeRadius(100_000)).toBe(6)
     expect(nodeRadius(800)).toBeGreaterThan(nodeRadius(100))
   })
 
@@ -260,5 +263,40 @@ describe('星图的分层显示', () => {
     expect(shown.has('under')).toBe(false)
     expect(shown.has('free')).toBe(true)
     expect(shown.has('ui:top')).toBe(false)
+  })
+})
+
+describe('关联高亮', () => {
+  const links = [
+    { source: 'a.ts', target: 'b.ts', kind: 'call' as const },
+    { source: 'a.ts', target: 'c.ts', kind: 'import' as const },
+    { source: 'd.ts', target: 'a.ts', kind: 'call' as const },
+    { source: 'e.ts', target: 'a.ts', kind: 'http' as const },
+    { source: 'b.ts', target: 'c.ts', kind: 'call' as const },
+    { source: 'a.ts', target: 'a.ts', kind: 'call' as const }
+  ]
+
+  it('它用到的、用到它的分开记，连着它的每条线记方向；只看直接相连的一层', () => {
+    const r = relatedFiles(links, 'a.ts')
+    expect([...r.out].sort()).toEqual(['b.ts', 'c.ts'])
+    expect([...r.in].sort()).toEqual(['d.ts', 'e.ts'])
+    expect(r.links.get('a.ts→b.ts:call') ?? r.links.get([...r.links.keys()].find((k) => k.includes('b.ts')) ?? '')).toBe('out')
+    expect([...r.links.values()].filter((v) => v === 'in')).toHaveLength(2)
+    // b → c 不连着 a：不算
+    expect(r.links.size).toBe(4)
+    expect(isRelated(r, 'a.ts') && isRelated(r, 'd.ts')).toBe(true)
+    expect(isRelated(r, 'f.ts')).toBe(false)
+  })
+
+  it('没有关联的文件：只有它自己', () => {
+    const r = relatedFiles(links, 'zzz.ts')
+    expect(r.out.size + r.in.size + r.links.size).toBe(0)
+    expect(isRelated(r, 'zzz.ts')).toBe(true)
+  })
+
+  it('模块之间也分方向', () => {
+    const m = relatedModules([{ source: 'ui', target: 'api' }, { source: 'cli', target: 'ui' }, { source: 'api', target: 'db' }], 'ui')
+    expect([...m.out]).toEqual(['api'])
+    expect([...m.in]).toEqual(['cli'])
   })
 })

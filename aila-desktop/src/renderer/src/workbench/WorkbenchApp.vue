@@ -17,6 +17,8 @@ import {
   testedFiles,
   type ColorMode,
   CHAIN_COLOR,
+  USED_BY_COLOR,
+  USES_COLOR,
   ERROR_COLOR,
   HTTP_COLOR,
   IPC_COLOR,
@@ -583,6 +585,8 @@ onBeforeUnmount(() => {
       <button class="ghost legend-toggle" :aria-expanded="legendOpen" @click="legendOpen = !legendOpen">{{ legendOpen ? t('收起图例') : t('图例') }}</button>
       <template v-if="legendOpen">
       <div class="gap"><b class="line"></b>{{ t('函数调用') }}</div>
+      <div><b class="line" :style="{ borderColor: USES_COLOR }"></b>{{ t('指着一个文件或模块：它用到的') }}</div>
+      <div><b class="line" :style="{ borderColor: USED_BY_COLOR }"></b>{{ t('指着一个文件或模块：用到它的') }}</div>
       <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>{{ t('请求接口（HTTP）') }}</div>
       <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>{{ t('进程间消息（IPC）') }}</div>
       <div v-if="graph.libs?.length" class="libs-toggle">
@@ -748,7 +752,7 @@ onBeforeUnmount(() => {
       <template v-if="status">{{ status }}</template>
       <template v-else-if="counts">
         {{ t('{m} 个模块 · {f} 个文件 · {c} 条调用光线 · {x} 条跨进程弧线 · {l} 个第三方库 ·', { m: counts.modules, f: counts.files, c: counts.calls, x: counts.cross, l: counts.libs }) }}
-        {{ gestures ? t('张开手掌旋转、捏住星球往面前拉看代码') : t('拉远看模块、拉近看文件，点模块飞过去，点星球看代码') }}
+        {{ gestures ? t('张开手掌旋转、捏住星球往面前拉看代码') : t('拉远看模块、拉近看文件，指着看和它有关的，点模块飞过去，点星球看代码') }}
         <span v-if="activity" class="activity"> · {{ activity }}</span>
       </template>
     </footer>
@@ -959,6 +963,11 @@ button.on {
 .legend b.line {
   height: 0;
   border-top: 1px solid #8fa4c8;
+}
+
+/* 关联高亮的两种颜色：线粗一点，看得出颜色 */
+.legend b.line[style] {
+  border-top-width: 2px;
 }
 
 .legend b.arc {

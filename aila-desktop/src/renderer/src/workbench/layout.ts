@@ -11,6 +11,9 @@ export const TOUCH_COLOR = '#4ade80'
 export const READ_COLOR = '#67e8f9'
 /** 跨进程的光线：淡金是 HTTP 接口，淡青是 IPC 消息（和子项目的颜色分得开：都很淡、画成弧线） */
 export const HTTP_COLOR = '#ffe9a8'
+/** 关联高亮时线的颜色：青色是它用到的（它调用、import、请求的），琥珀色是用到它的 */
+export const USES_COLOR = '#4fd8ff'
+export const USED_BY_COLOR = '#ffb45c'
 export const IPC_COLOR = '#b8f0ff'
 
 /**
@@ -34,8 +37,9 @@ export function groupColors(nodes: GraphNode[]): Map<string, string> {
 }
 
 /** 星球半径：按行数的立方根（体积和代码量成正比），夹在一个范围里 */
+/** 星球大小按行数：最大的封顶 6（以前 9，拉近时大文件成了一个个大紫球，挡住线） */
 export function nodeRadius(lines: number): number {
-  return Math.min(9, Math.max(1.4, 0.9 + Math.cbrt(Math.max(1, lines)) * 0.55))
+  return Math.min(6, Math.max(1.2, 0.8 + Math.cbrt(Math.max(1, lines)) * 0.42))
 }
 
 export type Vec3 = [number, number, number]
@@ -417,4 +421,45 @@ export function layerAlpha(zoom: number): LayerAlpha {
 /** 文件光晕多大（是星球半径的几倍）：拉近时小一点，免得一个个光球连成一片 */
 export function haloScale(zoom: number): number {
   return 2.4 + 1.2 * Math.min(1, Math.max(0, zoom))
+}
+
+/**
+ * 和一个文件有关联的（指着或点中它时亮起来）：它用到的（out：它调用、import、请求的文件）、
+ * 用到它的（in），以及连着它的每条线是哪个方向（out / in）。只看直接相连的一层，多了会亮一大片
+ */
+export interface Related {
+  focus: string
+  out: Set<string>
+  in: Set<string>
+  links: Map<string, 'out' | 'in'>
+}
+
+export function relatedFiles(links: Pick<GraphLink, 'source' | 'target' | 'kind'>[], id: string): Related {
+  const r: Related = { focus: id, out: new Set(), in: new Set(), links: new Map() }
+  for (const l of links) {
+    if (l.source === id && l.target !== id) {
+      r.out.add(l.target)
+      r.links.set(linkKey(l), 'out')
+    } else if (l.target === id && l.source !== id) {
+      r.in.add(l.source)
+      r.links.set(linkKey(l), 'in')
+    }
+  }
+  return r
+}
+
+/** 这个文件在不在这次的关联里（它自己、它用到的、用到它的） */
+export function isRelated(r: Related, id: string): boolean {
+  return id === r.focus || r.out.has(id) || r.in.has(id)
+}
+
+/** 模块之间的关联（看全部时指着一个模块）：和它有线连着的模块，分方向 */
+export function relatedModules(links: Pick<ModuleLink, 'source' | 'target'>[], id: string): { focus: string; out: Set<string>; in: Set<string> } {
+  const out = new Set<string>()
+  const inn = new Set<string>()
+  for (const l of links) {
+    if (l.source === id && l.target !== id) out.add(l.target)
+    else if (l.target === id && l.source !== id) inn.add(l.source)
+  }
+  return { focus: id, out, in: inn }
 }
