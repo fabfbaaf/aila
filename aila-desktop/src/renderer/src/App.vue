@@ -19,6 +19,7 @@ import { Conversation, type Voice } from './chat/Conversation'
 import { createTransport } from './chat/transport'
 import { Stage, type HitRegion } from './scene/Stage'
 import { PlaceholderAvatar } from './avatar/PlaceholderAvatar'
+import type { Avatar } from './avatar/types'
 import { loadVrmAvatar } from './avatar/VrmAvatar'
 import { Live2DUnavailable, loadLive2DAvatar } from './avatar/Live2DAvatar'
 import type { LoadedModel } from '../../shared/model'
@@ -743,8 +744,10 @@ const subscriptions: (() => void)[] = []
 /** quiet：启动时加载上次的模型，不用说「换好了」。VRM 和 Live2D 都实现同一个 Avatar 接口 */
 async function useModel(model: LoadedModel, quiet = false): Promise<void> {
   try {
-    const avatar = model.kind === 'live2d' ? await loadLive2DAvatar(model.model) : await loadVrmAvatar(model.data)
+    const avatar: Avatar = model.kind === 'live2d' ? await loadLive2DAvatar(model.model) : await loadVrmAvatar(model.data)
     stage?.setAvatar(avatar)
+    // 挥手、伸懒腰、开心：Live2D 模型播自己做好的动作（VRM 不用）
+    behavior.onGesture = (name) => avatar.gesture?.(name)
     usingPlaceholder = false
     if (quiet) return
     behavior.react('happy')
