@@ -197,4 +197,25 @@ EN3: dict[str, str] = {
     "写文件 {0}": "Write file {0}",
     "命令 {0}": "Command {0}",
     "搜内容「{0}」": 'Search content "{0}"',
+    # 编程任务的联网工具
+    "搜索「{0}」": 'Search the web for "{0}"',
+    "读网页 {0}": "Read web page {0}",
+    "快模型没有回答": "The fast model gave no answer",
+    # 使用说明
+    "正在翻使用说明": "Checking the user guide",
+    "正在打开「{0}」": 'Opening "{0}"',
+    "正在开任务改我自己": "Starting a task to improve myself",
+    # 多智能体
+    "开分支": "Opening a branch",
+    "整理改动": "Collecting changes",
+    "派审查员：{0}": "Send a reviewer: {0}",
+    "派助手：{0}": "Send a helper: {0}",
+    "收回助手 {0} 的改动": "Bring back helper {0}'s changes",
+    "不要助手 {0} 的改动": "Drop helper {0}'s changes",
+    "现在是只读模式，不能派人改代码（可以派 role=review 的审查员）。": "Read-only mode: helpers can't be sent to change code (a role=review reviewer is fine).",
+    "子 Agent 不能用这个工具。": "Helpers can't use this tool.",
+    "子 Agent 不读可能存着密码或密钥的文件（没法问用户）。": "Helpers don't read files that may hold passwords or keys (they can't ask the user).",
+    "这条命令要用户同意，子 Agent 没法问。不要换着法子试，写进报告，主 Agent 收回改动后再跑。": "This command needs the user's OK and helpers can't ask. Don't try workarounds: put it in the report and the main agent will run it after bringing the changes back.",
+    "这条命令{0}，子 Agent 没法问用户，不执行。需要的话写进报告。": "This command {0}; helpers can't ask the user, so it won't run. Put it in the report if needed.",
+    "这条命令会读可能存着密钥的文件，子 Agent 没法问用户，不执行。": "This command would read files that may hold keys; helpers can't ask the user, so it won't run.",
 }

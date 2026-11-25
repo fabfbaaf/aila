@@ -182,6 +182,11 @@ class Renderer:
         self._actions[e["id"]] = e.get("status", e.get("name", ""))
         self.waiting(f"● {e.get('status', '')}…")
 
+    def _on_tool_progress(self, e: Event) -> None:
+        """子 Agent 这会儿在做什么：只更新转圈那一行"""
+        who = f"助手 {e['who']}：" if e.get("who") else ""
+        self.waiting(f"● {who}{e.get('text', '')}…")
+
     def _on_confirm(self, e: Event) -> None:
         self.stop_waiting()
         body: list[Any] = []
@@ -303,6 +308,11 @@ def _action(name: str, args: dict[str, Any]) -> str:
         "run_command": ("后台：" if args.get("background") else "") + str(args.get("description") or args.get("command", ""))[:60],
         "todo_write": "更新待办清单",
         "explore": f"派助手去查「{str(args.get('task', '')).strip()[:30]}」",
+        "web_search": f"搜网页「{str(args.get('query', ''))[:30]}」",
+        "web_fetch": f"读网页 {str(args.get('url', ''))[:60]}",
+        "delegate": f"{'派审查员' if args.get('role') == 'review' else '派助手'}「{str(args.get('title', '')).strip()[:30]}」",
+        "merge_work": f"收回助手 {args.get('id', '')} 的改动",
+        "discard_work": f"不要助手 {args.get('id', '')} 的改动",
         "job_output": f"看后台任务 {args.get('id', '')} 的输出",
         "job_stop": f"停掉后台任务 {args.get('id', '')}",
     }.get(name, name)

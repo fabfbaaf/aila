@@ -33,6 +33,7 @@ from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, project_key, remember_tool
 from ..memory.episodes import coding_context, task_episode
 from ..memory.store import MemoryStore
+from ..tools.search import SearchProvider
 from .planning import MAX_CONTINUES, PLAN_PROMPT, plan_state, plan_title, plan_tools, stage_message
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, ComputerPolicy, Mode, Policy, Rules
@@ -43,6 +44,8 @@ from .session import Event, Session, SessionStore, latest_turn, turn_edits
 from .shell import Shell, find_shell
 from .snapshots import Snapshots
 from .subagent import Explorer
+from .webtools import WebAccess
+from .workers import Workers, open_workers
 from .tools import CodingTools
 from .workspace import ComputerWorkspace, Workspace
 
@@ -85,6 +88,7 @@ class Runtime:
         extensions: ExtensionStore | None = None,
         memory_store: "Callable[[], MemoryStore] | None" = None,
         language: Callable[[], str] = lambda: "zh",
+        web_search: Callable[[], SearchProvider | None] | None = None,
     ) -> None:
         # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
         self.language = language
@@ -112,6 +116,8 @@ class Runtime:
         self.model_factory = model_factory
         # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
         self.fast_factory = fast_factory or model_factory
+        # 联网搜索用哪家（设置里换了就用新的）；没给就是不能搜（测试里不联网）
+        self.web_search: Callable[[], SearchProvider | None] = web_search or (lambda: None)
         self.confirms = confirms or Confirmations(timeout=CONFIRM_TIMEOUT)
         self.shell = shell or find_shell()
         self.config = config or AgentConfig()
@@ -193,14 +199,19 @@ class Runtime:
             policy = ComputerPolicy(session.cwd, self.computer_rules, mode, data_dir=self.data_dir, env_file=ENV_FILE)
         else:
             extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
-            explorer = Explorer(session, workspace.root, self.shell, extra, self.rules, self.fast_factory,
+            # 联网搜索、带着问题读网页（读网页用快模型）；派出去查资料的助手也能用
+            web = WebAccess(self.fast_factory, self.web_search).tools()
+            explorer = Explorer(session, workspace.root, self.shell, [*extra, *web], self.rules, self.fast_factory,
                                 self.config.context_window)
             from .browsertools import BrowserAccess
 
             browser = BrowserAccess(workspace, session.path)
-            extra = [*extra, explorer.tool(), *browser.tools(), *plan_tools(session.events),
-                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
             policy = Policy(session.cwd, self.rules, mode, self.mcp)
+            # 多智能体：派子 Agent 各在自己的分支里做（用编程用的模型），收回、放弃；权限跟着主会话现在的模式
+            workers = Workers(session, workspace.root, self.shell, self.rules, lambda: policy.mode, self.model_factory,
+                              self.work_dir, web, self.config.context_window)
+            extra = [*extra, explorer.tool(), *web, *workers.tools(), *browser.tools(), *plan_tools(session.events),
+                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
         agent = Agent(
             session,
             self.model_factory(),
@@ -280,6 +291,9 @@ class Runtime:
             agent = self._agents.get(sid)
             if agent is not None:
                 await agent.tools.jobs.stop_all()
+            # 还开着的子 Agent 分支（派出去没收回、也没放弃的）
+            for worker in open_workers(session.events).values():
+                await asyncio.to_thread(discard_branch, worker)
             if info := session.branch:
                 await asyncio.to_thread(discard_branch, BranchInfo.of(info))
                 if Path(info["worktree"]).exists():

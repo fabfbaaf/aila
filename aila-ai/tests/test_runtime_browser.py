@@ -164,7 +164,9 @@ async def test_browser_order_tabs_and_delete(harness: tuple[Runtime, FakePool], 
     second = rt.create(str(tmp_path), "auto")
     for session in (first, second):
         names = list(rt.agent(session.id).tools.tools)
-        assert names[names.index("explore") + 1:] == [*BROWSER_TOOLS, "propose_plan", "stage_done", "stage_blocked", "remember", mcp.full_name]  # 浏览器在 explore 和计划工具之间
+        assert names[names.index("explore") + 1:] == ["web_search", "web_fetch", "delegate", "merge_work", "discard_work",
+                                                      *BROWSER_TOOLS, "propose_plan", "stage_done",
+                                                      "stage_blocked", "remember", mcp.full_name]  # 联网、浏览器在 explore 和计划工具之间
     assert (await invoke(rt, first.id, "open", url=LOCAL))[-1]["status"] == "ok"
     assert (await invoke(rt, second.id, "open", url=PUBLIC))[-1]["status"] == "ok"
     own, other = pool.sessions

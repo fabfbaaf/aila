@@ -11,6 +11,9 @@
 - 记项目记忆（以后每个会话都会带上）：只读不让记，先问再改要问，自动模式直接记
 - MCP 外部工具（mcp.py）：服务标了只读的不用问；其他的只读模式不让用，另外两种模式都要问
   （它们在项目以外做事），可以选「这个工具以后都不用问」
+- 联网（web）：搜索、读公网网页，只读，任何模式都不用问（本机和内网地址在读网页时就被拦住）
+- 派子 Agent（delegate，workers.py）：只读模式不让派；其他模式不用问——它只改自己的临时分支，
+  收回到你的代码时按改文件（edit）问，给你看 diff。子 Agent 自己的权限见 workers.WorkerPolicy
 - 浏览器：browser_read 是打开公网网页和查看类操作；browser_get 是普通链接、GET 表单或管理标签页，只读模式不执行。
   browser_local 首次访问本机端口要问，可以按项目记。browser_interact 在本机页面上按权限模式，
   browser_external 在公网页面上做可能产生副作用的操作，任何非只读模式都要问。
@@ -167,7 +170,11 @@ class Policy:
         self.edits_allowed = False  # 这个会话里选过「改文件以后都允许」
 
     def decide(self, kind: str, command: str = "") -> Decision:
-        if kind in ("read", "meta"):
+        if kind in ("read", "meta", "web"):
+            return Decision("allow")
+        if kind == "delegate":
+            if self.mode == "read_only":
+                return Decision("deny", "现在是只读模式，不能派人改代码（可以派 role=review 的审查员）。")
             return Decision("allow")
         if kind == "browser_local":
             if command in self.browser_rules.commands(self.project):

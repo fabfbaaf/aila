@@ -30,7 +30,11 @@ const KIND: Record<string, StepKind> = {
   code_search: 'search',
   code_locate: 'search',
   code_symbol: 'search',
-  explore: 'explore'
+  explore: 'explore',
+  web_search: 'search',
+  web_fetch: 'read',
+  delegate: 'explore',
+  merge_work: 'edit'
 }
 
 const VERB: Record<StepKind, string> = localized({

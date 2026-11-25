@@ -7,6 +7,7 @@
 import json
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from rich.console import Group
 from rich.text import Text
@@ -27,6 +28,11 @@ ACTIONS = {
     "code_locate": lambda a: "按报错定位代码",
     "code_symbol": lambda a: f"看 {str(a.get('name', ''))[:30]} 的调用关系",
     "explore": lambda a: f"派助手去查「{str(a.get('task', '')).strip()[:24]}」",
+    "web_search": lambda a: f"搜网页「{str(a.get('query', ''))[:24]}」",
+    "web_fetch": lambda a: f"读网页 {urlsplit(str(a.get('url', ''))).hostname or ''}",
+    "delegate": lambda a: f"{'派审查员' if a.get('role') == 'review' else '派助手'}「{str(a.get('title', '')).strip()[:24]}」",
+    "merge_work": lambda a: f"收回助手 {a.get('id', '')} 的改动",
+    "discard_work": lambda a: f"不要助手 {a.get('id', '')} 的改动",
     "job_output": lambda a: f"看后台任务 {a.get('id', '')} 的输出",
     "job_stop": lambda a: f"停掉后台任务 {a.get('id', '')}",
 }
