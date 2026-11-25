@@ -12,6 +12,7 @@ import type { AgentProgress } from '../../shared/agent'
 import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
 import { parseMove, shouldStroll } from '../../shared/move'
+import { INTRO_LINES } from '../../shared/intro'
 import { ScreenWatch, helpRequest, type ScreenFinding } from './screen/ScreenWatch'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
@@ -71,10 +72,22 @@ function stopAgentWork(): void {
 }
 /** 任务页里有个操作等你同意：气泡里给「去看看」，点了打开那个任务（同意还是在任务页里点，那里看得到完整的改动） */
 const agentAsk = ref<{ sid: string; action: string } | null>(null)
+/** 开场演出里问「借一下你的鼠标？」（气泡里给「借给你 / 不借」，回答交给主进程的导演） */
+const introAsk = ref(false)
 /** 桌面状态：藏没藏、能不能说话、省不省电、拔没拔电（主进程推过来） */
 const desk = ref<DesktopStatus | null>(null)
 
 const bubbleAsk = computed<BubbleAsk | null>(() => {
+  if (introAsk.value) {
+    return {
+      tag: t(INTRO_LINES.mouseTag),
+      detail: t(INTRO_LINES.mouseDetail),
+      buttons: [
+        { label: t(INTRO_LINES.lend), value: 'lend', primary: true },
+        { label: t(INTRO_LINES.keep), value: 'keep' }
+      ]
+    }
+  }
   if (dropAsk.value && !convAsk.value) {
     const d = dropAsk.value
     return {
@@ -316,6 +329,12 @@ async function startFix(project: string, snippet: string): Promise<void> {
 }
 
 function onAnswer(value: string): void {
+  if (introAsk.value) {
+    introAsk.value = false
+    bubbleVisible.value = false
+    bridge?.introAnswer(value === 'lend' ? 'lend' : 'keep')
+    return
+  }
   if (dropAsk.value && !convAsk.value) void answerDrop(value)
   else if (workAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerWork(value)
   else if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerBriefing(value)
@@ -929,10 +948,23 @@ onMounted(async () => {
       bridge.onChatStop(() => conversation.interrupt())
     )
     subscriptions.push(
-      bridge.onEntrance(({ phase, first }) => {
+      bridge.onEntrance(({ phase, first, quiet }) => {
+        if (phase === 'hide') return void (entrancePhase.value = 'waiting')
         entrancePhase.value = phase
-        behavior.entrance(phase, first)
+        behavior.entrance(phase, first, quiet)
         if (phase === 'land') setTimeout(() => entrancePhase.value === 'land' && (entrancePhase.value = ''), 600)
+      })
+    )
+    // 开场演出（shared/intro.ts）：导演让她说的话、做的动作、问借不借鼠标
+    subscriptions.push(
+      bridge.onIntroCue((c) => {
+        if (c.gesture === 'knock' || c.gesture === 'turn') behavior.introGesture(c.gesture)
+        else if (c.gesture) behavior.gesture(c.gesture)
+        if (!c.askMouse) introAsk.value = false // 导演那边不等了（超时当不借、被跳过）：问题收起来
+        if (c.askMouse) {
+          introAsk.value = true
+          behavior.say(c.say ?? INTRO_LINES.askMouse, 60_000)
+        } else if (c.say) behavior.say(c.say, c.ms ?? 3000)
       })
     )
     // 叫她去的：到了点点头；自己闲逛到的：偶尔伸个懒腰

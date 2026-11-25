@@ -281,7 +281,7 @@ export class Behavior {
    * 出场的各段（主进程挪窗口、页面做缩放，这里配表情和姿态）：
    * 冒出来时有点惊讶又开心；起跳前低头弯一下腰；空中举手；落地点下头再挥手，然后打招呼（第一次见面是自我介绍）
    */
-  entrance(phase: 'emerge' | 'crouch' | 'jump' | 'land', first = false): void {
+  entrance(phase: 'emerge' | 'crouch' | 'jump' | 'land', first = false, quiet = false): void {
     this.lookAtUser()
     this.markActive()
     if (phase === 'emerge') {
@@ -296,9 +296,32 @@ export class Behavior {
         { dur: 0.35, expr: { happy: 0.65 }, pose: { armsUp: 1, headPitch: -0.14 } },
         { dur: 0.75, expr: { happy: 0.6 }, pose: { armsUp: 0.55, headPitch: -0.04 } }
       ])
+    } else if (quiet) {
+      // 开场演出里落地：只缓一下，台词和动作由导演给（main/intro.ts）
+      this.play([{ dur: 0.25, expr: { happy: 0.3 }, pose: { headPitch: 0.18, bodyLean: -0.1 } }, { dur: 0.4, expr: { happy: 0.3 } }])
     } else {
       this.play([{ dur: 0.2, expr: { happy: 0.4 }, pose: { headPitch: 0.18, bodyLean: -0.1 } }, ...GESTURES.wave])
       setTimeout(() => this.say(first ? lines.firstMeet : greeting(new Date().getHours()), first ? 6000 : 3500), 350)
+    }
+  }
+
+  /**
+   * 开场演出里的两个动作：knock 抬手往前敲一下屏幕；turn 停下来、转头直视你（破壁那一下）
+   */
+  introGesture(name: 'knock' | 'turn'): void {
+    this.lookAtUser()
+    this.markActive()
+    if (name === 'knock') {
+      this.play([
+        { dur: 0.12, pose: { armRaise: 0.75, forearmSwing: -0.6, bodyLean: -0.04 } },
+        { dur: 0.1, pose: { armRaise: 0.75, forearmSwing: 1, bodyLean: -0.08 } },
+        { dur: 0.3, pose: { armRaise: 0.3 } }
+      ])
+    } else {
+      this.play([
+        { dur: 0.35, expr: { relaxed: 0.4 }, pose: { headRoll: 0.12, headPitch: 0.05 } },
+        { dur: 1.6, expr: { relaxed: 0.55 }, pose: { headRoll: 0.06 } }
+      ])
     }
   }
 

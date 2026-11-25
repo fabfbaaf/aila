@@ -63,7 +63,9 @@ import { isLangPref, resolveLang, type LangPref } from '../shared/i18n'
 import { mainLang, setMainLang, tm } from './lang'
 import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
-import { ENTRANCE_MS, cardBounds, emergePosition, homePosition, jumpHeight, jumpPoint, shouldEnter, type EntrancePhase, type Point } from '../shared/entrance'
+import { ENTRANCE_MS, cardBounds, emergePosition, homePosition, jumpHeight, jumpPoint, shouldEnter, type Point, type StagePhase } from '../shared/entrance'
+import { introMainBounds, presenterPosition, shouldIntro } from '../shared/intro'
+import { IntroDirector } from './intro'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
@@ -199,6 +201,8 @@ interface Settings {
   update?: { lastCheck?: string; notified?: string }
   /** 界面语言：auto 跟着系统 */
   language?: LangPref
+  /** 开场演出演过了（第一次打开演一遍；设置里能再看一遍） */
+  introDone?: boolean
 }
 
 // ---------- 界面语言（shared/i18n.ts） ----------
@@ -273,9 +277,12 @@ function readModel(path: string | undefined): LoadedModel | null {
 function createWindow(): void {
   const { workArea } = screen.getPrimaryDisplay()
   const home = homePosition(workArea, { width: WIN_WIDTH, height: WIN_HEIGHT })
-  // 出场：她先站在屏幕中间的卡片里（页面地址带 #enter，先不露面，等 character:entrance 再冒出来）
-  const enter = planEntrance()
-  const start = enter ? emergePosition(enter.card, { width: WIN_WIDTH, height: WIN_HEIGHT }) : home
+  // 第一次打开：开场演出（她站在主窗口左边当讲解员，shared/intro.ts）；以后打开：出场（她先站在屏幕中间的卡片里）。
+  // 两种都是页面地址带 #enter，先不露面，等 character:entrance 再冒出来
+  introPending = planIntro()
+  const enter = introPending ? null : planEntrance()
+  const size = { width: WIN_WIDTH, height: WIN_HEIGHT }
+  const start = introPending ? presenterPosition(introMainBounds(workArea), size) : enter ? emergePosition(enter.card, size) : home
 
   win = new BrowserWindow({
     width: WIN_WIDTH,
@@ -302,11 +309,11 @@ function createWindow(): void {
   win.setAlwaysOnTop(true, 'floating')
 
   win.once('ready-to-show', () => {
-    // 出场时等她从卡片里冒出来再露面（runEntrance）
-    if (!enter && (desktop?.presence.visible ?? true)) win?.showInactive()
+    // 出场、开场演出时等她冒出来再露面（runEntrance、IntroDirector）
+    if (!enter && !introPending && (desktop?.presence.visible ?? true)) win?.showInactive()
   })
 
-  loadPage(win, enter ? 'enter' : '')
+  loadPage(win, enter || introPending ? 'enter' : '')
   startCursorFeed()
   if (enter) startEntrance(enter.card, home, workArea)
 
@@ -368,6 +375,11 @@ function startEntrance(cardRect: Electron.Rectangle, home: Point, workArea: Elec
 
 /** 角色页面加载完模型后来报到：在出场就开演，返回 true（页面先别打招呼，落地时再说） */
 function entranceReady(): boolean {
+  if (introPending && intro) {
+    introPending = false
+    void intro.start()
+    return true
+  }
   if (!entrance || entrance.started) return false
   entrance.ready = true
   entrance.started = true
@@ -375,8 +387,95 @@ function entranceReady(): boolean {
   return true
 }
 
-function sendEntrance(phase: EntrancePhase): void {
-  win?.webContents.send('character:entrance', { phase, first: firstMeet })
+/** quiet：落地时不自己打招呼（开场演出里台词由导演给） */
+function sendEntrance(phase: StagePhase, quiet = false): void {
+  win?.webContents.send('character:entrance', { phase, first: firstMeet, quiet })
+}
+
+// ---------- 开场演出（剧本在 shared/intro.ts，导演在 main/intro.ts） ----------
+
+let intro: IntroDirector | null = null
+/** 这次启动要演（角色页面报到时开演） */
+let introPending = false
+
+function planIntro(): boolean {
+  const prefs = desktop?.prefs
+  if (!prefs) return false
+  return shouldIntro({ introDone: !!loadSettings().introDone, showCharacter: prefs.showCharacter, visible: desktop?.presence.visible ?? true })
+}
+
+/** 主窗口打开到这个位置，等页面画好（开场演出用） */
+async function openMainAt(bounds: Electron.Rectangle): Promise<BrowserWindow | null> {
+  const existed = !!mainWin
+  openMain({ page: 'tasks' })
+  const w = mainWin as BrowserWindow | null
+  if (!w) return null
+  w.setBounds(bounds)
+  if (!existed) {
+    await new Promise<void>((r) => {
+      if (!w.webContents.isLoading()) return r()
+      w.webContents.once('did-finish-load', () => r())
+    })
+    await new Promise((r) => setTimeout(r, 700)) // 等页面挂好
+  }
+  w.show()
+  return w
+}
+
+/** 她走到某个位置（带走路动作），走到了返回；被拖住、被藏起来也返回 */
+function walkToPoint(to: Point): Promise<void> {
+  return new Promise((resolve) => {
+    if (!win || !win.isVisible()) return resolve()
+    stopWalk()
+    const b = win.getBounds()
+    const from = { x: b.x, y: b.y }
+    const ms = walkDuration(from, to) * 2.2 // 演出里慢慢走过去（和自己闲逛一样慢），不是「叫她去」那种小跑
+    const start = Date.now()
+    win.webContents.send('character:walking', Math.sign(to.x - from.x))
+    walking = setInterval(() => {
+      if (!win || win.isDestroyed() || !win.isVisible() || drag) {
+        stopWalk()
+        return resolve()
+      }
+      const t = (Date.now() - start) / ms
+      const p = walkPoint(from, to, t)
+      win.setPosition(p.x, p.y)
+      if (t >= 1) {
+        stopWalk()
+        win.webContents.send('character:arrived', 'stroll')
+        resolve()
+      }
+    }, 16)
+  })
+}
+
+function createIntro(): IntroDirector {
+  let escape: (() => void) | null = null
+  return new IntroDirector({
+    pet: () => win,
+    main: () => mainWin,
+    openMain: openMainAt,
+    petSize: { width: WIN_WIDTH, height: WIN_HEIGHT },
+    workArea: () => screen.getPrimaryDisplay().workArea,
+    home: () => homePosition(screen.getPrimaryDisplay().workArea, { width: WIN_WIDTH, height: WIN_HEIGHT }),
+    cue: (c) => win?.webContents.send('intro:cue', c),
+    scene: (s) => mainWin?.webContents.send('intro:scene', s),
+    phase: (p, quiet = true) => sendEntrance(p, quiet),
+    go: (route) => mainWin?.webContents.send('shell:go', route),
+    walk: walkToPoint,
+    dragging: () => !!drag,
+    // 借鼠标那几秒按 Esc 收回：只在这时占着 Esc，借完马上放掉
+    holdEscape: (on, cb) => {
+      if (on && !escape) {
+        escape = cb
+        globalShortcut.register('Escape', () => escape?.())
+      } else if (!on && escape) {
+        globalShortcut.unregister('Escape')
+        escape = null
+      }
+    },
+    markDone: () => saveSettings({ ...loadSettings(), introDone: true })
+  })
 }
 
 async function runEntrance(e: Entrance): Promise<void> {
@@ -1280,6 +1379,16 @@ function registerIpc(): void {
   ipcMain.handle('clipboard:text', (e) => (fromCharacter(e) ? clipboard.readText().slice(0, 20000) : ''))
   // 角色页面加载完模型来报到：要出场的话返回 true，她等落地（character:entrance land）再打招呼
   ipcMain.handle('character:ready', (e) => (fromCharacter(e) ? entranceReady() : false))
+  // 开场演出：跳过（主窗口的按钮、Esc，或者她那边）、借不借鼠标（她的气泡）、再看一遍（设置页）
+  ipcMain.on('intro:skip', (e) => {
+    if (fromMain(e) || fromCharacter(e)) intro?.skip()
+  })
+  ipcMain.on('intro:answer', (e, value: unknown) => {
+    if (fromCharacter(e) && (value === 'lend' || value === 'keep')) intro?.answer(value)
+  })
+  ipcMain.on('intro:replay', (e) => {
+    if (fromMain(e) && intro && !intro.isRunning && win) void intro.start(true)
+  })
   ipcMain.handle('desktop:report-now', (e) => (fromMain(e) ? (desktop?.reportNow() ?? false) : false))
   ipcMain.handle('reminder:delete', (e, id: unknown) =>
     fromMain(e) && typeof id === 'string' && id.length <= 64 ? (desktop?.removeReminder(id) ?? false) : false
@@ -1428,6 +1537,7 @@ app.whenReady().then(() => {
   })
   void serviceKeeper.start()
   firstMeet = !loadSettings().life?.firstSeen // desktop.start() 会记下今天是第一次见面，先看一眼
+  intro = createIntro()
   createWindow()
   createTray()
   desktop.start()

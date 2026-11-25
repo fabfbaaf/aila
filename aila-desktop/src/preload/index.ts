@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
-import type { EntrancePhase } from '../shared/entrance'
+import type { StagePhase } from '../shared/entrance'
+import type { IntroCue, IntroScene } from '../shared/intro'
 import type { UpdateInfo } from '../shared/update'
 import type { Lang, LangPref } from '../shared/i18n'
 import type {
@@ -318,8 +319,18 @@ const api = {
   onArrived: (cb: (target: MoveTarget) => void): Unsubscribe => listen('character:arrived', cb),
   /** 模型加载好了来报到；返回 true 表示要出场（先别打招呼，等落地） */
   characterReady: (): Promise<boolean> => ipcRenderer.invoke('character:ready'),
-  /** 出场的各段：冒出来、蹲、跳、落地（first：第一次见面） */
-  onEntrance: (cb: (e: { phase: EntrancePhase; first: boolean }) => void): Unsubscribe => listen('character:entrance', cb),
+  /** 出场的各段：冒出来、蹲、跳、落地、藏起来（first：第一次见面；quiet：落地时不自己打招呼） */
+  onEntrance: (cb: (e: { phase: StagePhase; first: boolean; quiet: boolean }) => void): Unsubscribe => listen('character:entrance', cb),
+  /** 开场演出（shared/intro.ts）：她要说的话、做的动作、问借不借鼠标 */
+  onIntroCue: (cb: (c: IntroCue) => void): Unsubscribe => listen('intro:cue', cb),
+  /** 开场演出：主窗口要画的画面（幻灯片、故障、裂纹、波纹、打字、收尾清单） */
+  onIntroScene: (cb: (s: IntroScene) => void): Unsubscribe => listen('intro:scene', cb),
+  /** 借不借鼠标：lend / keep */
+  introAnswer: (value: 'lend' | 'keep'): void => ipcRenderer.send('intro:answer', value),
+  /** 跳过开场演出 */
+  introSkip: (): void => ipcRenderer.send('intro:skip'),
+  /** 再看一遍开场（设置 → 桌面） */
+  introReplay: (): void => ipcRenderer.send('intro:replay'),
   /** 在资源管理器里显示 AI 服务的配置、模型、数据文件夹（只认这几个名字，不接受任意路径） */
   revealPath: (key: 'env' | 'models' | 'data' | 'mcp'): void => ipcRenderer.send('ai:reveal', key),
 

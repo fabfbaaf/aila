@@ -8,3 +8,5 @@ import { ref } from 'vue'
 export const newTaskRequest = ref(0)
 /** 对话页的搜框里填上这段（填完清空） */
 export const chatQueryRequest = ref('')
+/** 开场演出里她借你的鼠标在对话框里打字：输入框里的字跟着变（null = 不管；只填不发） */
+export const chatDraftRequest = ref<string | null>(null)

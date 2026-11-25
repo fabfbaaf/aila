@@ -15,7 +15,7 @@ import type { StoredMessage } from '../../../shared/cloud'
 import { renderMarkdown } from '../agent/markdown'
 import { bridge } from '../platform/bridge'
 import { cleanText, groupHistory, timeOf } from './historyView'
-import { chatQueryRequest } from './intents'
+import { chatDraftRequest, chatQueryRequest } from './intents'
 import BrandMark from '../theme/BrandMark.vue'
 
 const messages = ref<StoredMessage[]>([])
@@ -95,6 +95,13 @@ function dayTitle(g: { key: string; label: string }): string {
   const year = y === new Date().getFullYear() ? '' : `, ${y}`
   return `${WEEKDAYS_EN[day.getDay()]}, ${dateText(day)}${year}`
 }
+
+// 开场演出：她在输入框里打字、再删掉（只改输入框，不发）
+watch(chatDraftRequest, (text) => {
+  if (text === null) return
+  draft.value = text
+  chatDraftRequest.value = null
+})
 
 // Ctrl+K 里点了一段聊过的话：搜框里填上它
 watch(
