@@ -1,95 +1,105 @@
 /**
  * 开场演出：第一次打开艾拉时演一遍（设置 → 桌面里能再看一遍），任何时候按「跳过」或 Esc 都能结束。
  *
- * 1. 一本正经：主窗口变成一份很正式的产品介绍幻灯片（每页一个小演示），她站在左边当讲解员，用「您」一页页念功能，
- *    越念越随便：打哈欠、念得飞快
- * 2. 破壁（用魔法）：讲到地图那页她停下来，转头看你——「……算了，这些你自己点开看也行吧。」画面出故障、乱码。
- *    她想出去：先往窗口边上走，撞上一层看不见的玻璃被弹回来（撞到的地方漾开一圈屏障的波纹）；
- *    再敲两下，只泛波纹、敲不破；于是举起手放魔法——面前展开一个法阵，满屏的光点往里聚，
- *    法阵爆开，发光的裂纹从法阵往外爬，玻璃碎了，她带着一串火花跳到桌面上
+ * 1. 一本正经地带你逛一圈：主窗口一页页切过去（任务、对话、记忆、作品、设置），她走到要讲的东西旁边，
+ *    那一块被聚光灯照亮，她指着它用「您」讲；越讲越随便：打哈欠、念得飞快。
+ *    整个主窗口前面隔着一层玻璃（全屏特效层画的反光），她在玻璃后面——就像被关在应用里
+ * 2. 破壁（用魔法）：讲到地图那页她停下来，转头看你——「……算了，这些你自己点开看也行吧。」画面出故障。
+ *    她想出去：先往窗口边上走，撞上玻璃被弹回来（缩成一团、晃两下；玻璃上漾开屏障的波纹）；
+ *    再敲两下，只泛波纹、敲不破；于是举起手、飘起来放魔法——玻璃上展开一个法阵，满屏的光点往里聚，
+ *    法阵爆开，发光的裂纹爬满玻璃，玻璃碎了，她翻个跟头带着一串火花跳到桌面上，这才到了玻璃前面
  * 3. 借鼠标：她在气泡里问「借一下你的鼠标？」。你点了「借给你」才动：真的光标被她挪着走，
  *    拖开主窗口、在对话框里打个招呼再删掉、切回任务页，最后放回原处。
  *    只挪光标，不真的点击（「点」是艾拉在自己窗口里演的，会出一圈波纹）；你一动鼠标或按 Esc 她马上停
  * 4. 收尾：她走到右下角住下，主窗口列出开始用之前要做的几件事
  *
- * 这里放剧本（台词、幻灯片）和能单测的纯计算（窗口摆在哪、光标怎么走、你有没有抢回鼠标）；
- * 导演在主进程（main/intro.ts），画面在主窗口（shell/IntroLayer.vue）和她自己的页面（App.vue）。
+ * 这里放剧本（导览的每一站、台词）和能单测的纯计算（窗口摆在哪、她站哪、光标怎么走、你有没有抢回鼠标）；
+ * 导演在主进程（main/intro.ts），画面在主窗口（shell/IntroLayer.vue）、全屏特效层（shell/FxLayer.vue）和她自己的页面（App.vue）。
  * 台词是中文原文，界面语言是英文时由各自的页面查词典换成英文。
  */
 
 import type { Point, Rect } from './entrance'
-
-/** 每页幻灯片上演的小演示（画面在 shell/IntroLayer.vue） */
-export type IntroDemo = 'welcome' | 'terminal' | 'diff' | 'memory' | 'voice' | 'works' | 'ext' | 'stars'
+import type { ShellRoute } from './shell'
 
 /**
- * 一页幻灯片：标题、几条要点、小演示、她念的那句。
- * 越讲越随便：前几页规规矩矩用「您」，讲到语音那页打个哈欠，后面越念越快，地图那页念到一半就不念了。
- * ms：这一页停多久（不给就按台词长短算）；gesture：念完以后做的动作
+ * 导览的一站：切到哪一页、聚光灯照哪个元素（几个选择器，用第一个看得见的）、旁边的小标题、她念的那句。
+ * 越讲越随便：前几站规规矩矩用「您」，讲到记忆那站打个哈欠，后面越念越快，地图那站念到一半就不念了。
+ * ms：这一站停多久（不给就按台词长短算）；gesture：念完以后做的动作
  */
-export interface IntroSlide {
+export interface TourStop {
+  route: ShellRoute
+  selector: string
   title: string
-  points: string[]
-  demo: IntroDemo
   line: string
   ms?: number
   gesture?: 'yawn' | 'tilt' | 'nod'
 }
 
-export const INTRO_SLIDES: IntroSlide[] = [
+export const INTRO_TOUR: TourStop[] = [
   {
+    route: { page: 'tasks' },
+    selector: '.rail',
     title: '欢迎使用艾拉',
-    points: ['开源编程 Agent', '桌面伙伴', '本地运行，代码不出这台电脑'],
-    demo: 'welcome',
-    line: '您好，欢迎使用艾拉。我是本产品的智能助手，接下来由我为您介绍主要功能。'
+    line: '您好，欢迎使用艾拉。我是本产品的智能助手，接下来由我带您熟悉一下各个页面。'
   },
   {
+    route: { page: 'tasks' },
+    selector: '.side .new',
     title: '任务',
-    points: ['读代码、改文件、跑命令和测试', '一直做到测试全过', '终端和桌面看同一份进度'],
-    demo: 'terminal',
-    line: '在「任务」页，您可以把编程任务交给我。我会读代码、改文件、跑测试，直到做完为止。'
+    line: '在「任务」页点「新任务」，就可以把编程任务交给我。我会读代码、改文件、跑测试，改动之前按您选择的权限征求同意。'
   },
   {
-    title: '权限与分支',
-    points: ['只读 / 先问再改 / 工作区内自动', '删除、推送这类危险命令一定先问', '在新分支上做，测试全过再合并'],
-    demo: 'diff',
-    line: '每次改动之前，我都会按您选择的权限征求同意。您也可以让我在新分支上做，测试全部通过再合并。'
-  },
-  {
-    title: '对话与记忆',
-    points: ['随时聊天，按 Alt+Shift+A 叫我', '记住您告诉我的事', '登录后几台电脑之间同步'],
-    demo: 'memory',
+    route: { page: 'chat' },
+    selector: '.composer',
+    title: '对话',
     line: '在「对话」页，您可以与我交流。我会记住您告诉我的事情……比如您不喝咖啡。'
   },
   {
-    title: '语音与屏幕',
-    points: ['说「你好艾拉」叫我', '看到屏幕上的报错，主动问要不要帮忙', '摄像头、麦克风、屏幕都要您打开开关才用'],
-    demo: 'voice',
-    line: '说一声「你好艾拉」就能叫我。开着看屏幕的话，看到报错我会主动问您要不要帮忙……',
+    route: { page: 'memory' },
+    selector: '.card.add',
+    title: '记忆',
+    line: '「记忆」页里是我记得的事。您也可以直接告诉我，或者让我忘掉……',
     gesture: 'yawn'
   },
   {
-    title: '作品、日记、周报',
-    points: ['隔几天自己做个小作品', '每天晚上写日记', '每周五写一份能当周报的回顾'],
-    demo: 'works',
+    route: { page: 'studio' },
+    selector: '.bar .tabs',
+    title: '作品、日记、回顾',
     line: '我还会自己做点小作品，每天写日记，每周五写回顾。嗯。',
     gesture: 'tilt'
   },
   {
-    title: '终端和扩展',
-    points: ['终端里打 aila 也能用', '装扩展：命令、本事、工具服务', '接 MCP 外部工具'],
-    demo: 'ext',
-    line: '终端、扩展、MCP，都有。下一页。',
-    ms: 2600
+    route: { page: 'settings', section: 'voice' },
+    selector: 'nav.side',
+    title: '设置',
+    line: '语音、看屏幕、扩展，都在设置里。下一个。',
+    ms: 2800
   },
   {
+    route: { page: 'projects', tab: 'map' },
+    selector: '.wb .canvas',
     title: '代码星图',
-    points: ['每个文件是一颗星', '我读过、改过的会亮起来', '用手势转动、放大'],
-    demo: 'stars',
     // 念到一半就不念了（后面接破壁）
     line: '在「项目」页的地图里，您的代码会变成一片……'
   }
 ]
+
+/** 她站在聚光灯照着的东西旁边：画在哪（主窗口内容区里的坐标）、她在左边还是右边 */
+export function standBeside(
+  spot: Rect,
+  content: Rect,
+  win: { width: number; height: number }
+): Point {
+  // 东西在左半边：她站右边；在右半边：她站左边。离东西留 70 像素。
+  // 东西太大（比如铺满页面的星图）旁边站不下：她站到正中间、东西前面。整个人不出窗口
+  const right = spot.x + spot.width / 2 < content.width / 2
+  const want = spot.width > content.width * 0.6 ? content.width / 2 : right ? spot.x + spot.width + 70 : spot.x - 70
+  const half = win.width / 2
+  const cx = Math.min(content.width - half, Math.max(half, want))
+  // 脚踩在东西下面一点；她的头不出窗口顶（角色窗口顶最多出去 10 像素，那里是空的），脚不出窗口底
+  const feet = Math.min(content.height - 12, Math.max(win.height - 10, spot.y + spot.height + 30))
+  return { x: Math.round(content.x + cx - win.width / 2), y: Math.round(content.y + feet - win.height) }
+}
 
 /** 破壁、借鼠标、收尾时她说的话 */
 export const INTRO_LINES = {
@@ -144,12 +154,12 @@ export const INTRO_MS = {
   helperStart: 4000
 } as const
 
-/** 一页念多久：台词越长停得越久 */
-export function slideDuration(line: string): number {
+/** 一站念多久：台词越长停得越久 */
+export function stopDuration(line: string): number {
   return Math.max(INTRO_MS.slide, line.length * INTRO_MS.perChar + 1200)
 }
 
-/** 演出时主窗口的大小和位置：屏幕正中间，不超过屏幕 */
+/** 演完（或被跳过）时主窗口回到的平常大小：屏幕正中间，不超过屏幕 */
 export function introMainBounds(workArea: Rect): Rect {
   const width = Math.min(1080, Math.round(workArea.width * 0.82))
   const height = Math.min(680, Math.round(workArea.height * 0.8))
@@ -173,45 +183,45 @@ export function presenterPosition(main: Rect, win: { width: number; height: numb
 }
 
 /**
- * 她敲屏幕的地方（主窗口里的坐标，裂纹从这里开始）：她右手前面一点。
- * 她站在角色窗口的下半部分，手大概在窗口宽 70%、高 62% 的地方。
+ * 她敲玻璃的地方（屏幕坐标，玻璃画在她前面的全屏特效层上）：她的手。
+ * 她站在角色窗口的下半部分，手大概在窗口宽 72%、高 62% 的地方
  */
-export function knockPoint(pet: Point, win: { width: number; height: number }, main: Rect): Point {
-  return {
-    x: Math.round(pet.x + win.width * 0.72 - main.x),
-    y: Math.round(pet.y + win.height * 0.62 - main.y)
-  }
+export function knockPoint(pet: Point, win: { width: number; height: number }): Point {
+  return { x: Math.round(pet.x + win.width * 0.72), y: Math.round(pet.y + win.height * 0.62) }
 }
 
 /**
- * 第一次试着出去：往主窗口左边走，走到身子贴着窗口边（中心离左边 40 像素）撞上去。
- * to：角色窗口要走到的位置；contact：撞到的地方（主窗口里的坐标，画波纹用）
+ * 第一次试着出去：往离她近的那一边窗口边上走，走到身子贴着边（中心离边 40 像素）撞上去。
+ * to：角色窗口要走到的位置；contact：撞到的地方（屏幕坐标，玻璃上画波纹用）
  */
-export function bumpPoint(stand: Point, win: { width: number; height: number }, main: Rect): { to: Point; contact: Point } {
-  const centerX = main.x + 40
+export function bumpPoint(pet: Point, win: { width: number; height: number }, main: Rect): { to: Point; contact: Point; back: Point } {
+  const left = pet.x + win.width / 2 < main.x + main.width / 2
+  const centerX = left ? main.x + 40 : main.x + main.width - 40
+  const to = { x: Math.round(centerX - win.width / 2), y: pet.y }
   return {
-    to: { x: Math.round(centerX - win.width / 2), y: stand.y },
-    contact: { x: 14, y: Math.round(stand.y + win.height * 0.62 - main.y) }
+    to,
+    contact: { x: left ? main.x + 10 : main.x + main.width - 10, y: Math.round(pet.y + win.height * 0.62) },
+    // 被弹回来落在哪：离边 200 像素（之后就在这儿敲、放魔法）
+    back: { x: to.x + (left ? 160 : -160), y: pet.y }
   }
 }
 
-/** 法阵画在哪（主窗口里的坐标）：她伸出去的手前面一点，在她和幻灯片之间 */
-export function magicCenter(stand: Point, win: { width: number; height: number }, main: Rect): Point {
-  const hand = knockPoint(stand, win, main)
-  return { x: Math.round(hand.x + 70), y: Math.round(hand.y - 30) }
+/** 法阵画在哪（屏幕坐标）：玻璃上、正对着她胸口——她在法阵后面施法 */
+export function magicCenter(pet: Point, win: { width: number; height: number }): Point {
+  return { x: Math.round(pet.x + win.width / 2), y: Math.round(pet.y + win.height * 0.58) }
 }
 
-/** 玻璃碎了以后主窗口被挤到哪：缩小一些，靠左上 */
-export function shovedMainBounds(main: Rect, workArea: Rect): Rect {
-  const width = Math.round(main.width * 0.72)
-  const height = Math.round(main.height * 0.72)
+/** 玻璃碎了以后铺满屏幕的主窗口被挤到哪：缩到一半多一点，靠左上，右下空出来给她落脚 */
+export function shovedMainBounds(workArea: Rect): Rect {
+  const width = Math.round(workArea.width * 0.55)
+  const height = Math.round(workArea.height * 0.62)
   return { x: workArea.x + 40, y: workArea.y + 40, width, height }
 }
 
 /** 她跳出来落在哪：屏幕中间偏右下（之后再走到右下角住下） */
 export function escapeLanding(workArea: Rect, win: { width: number; height: number }): Point {
   return {
-    x: Math.round(workArea.x + workArea.width * 0.62 - win.width / 2),
+    x: Math.round(workArea.x + workArea.width * 0.74 - win.width / 2),
     y: workArea.y + workArea.height - win.height
   }
 }
@@ -238,14 +248,10 @@ export type SfxName = 'page' | 'type' | 'glitch' | 'knock' | 'crack' | 'shatter'
 
 /** 主进程发给主窗口的画面指令 */
 export type IntroScene =
-  | { scene: 'slides'; index: number }
   | { scene: 'stall' }
   | { scene: 'glitch' }
-  | { scene: 'crack'; x: number; y: number; stage: number; magic?: boolean }
-  /** 撞上、敲到看不见的玻璃：那里漾开一圈屏障的波纹（敲不破） */
-  | { scene: 'ripple'; x: number; y: number }
-  /** 法阵：charge 展开、转着蓄力；burst 爆开（接着就是裂纹和碎） */
-  | { scene: 'magic'; x: number; y: number; phase: 'charge' | 'burst' }
+  /** 导览：切到第 index 站，聚光灯照着那一站的元素 */
+  | { scene: 'tour'; index: number }
   | { scene: 'shatter' }
   | { scene: 'click'; x: number; y: number }
   | { scene: 'type'; text: string }
@@ -257,7 +263,7 @@ export type IntroScene =
 export interface IntroCue {
   say?: string
   ms?: number
-  gesture?: 'wave' | 'nod' | 'tilt' | 'stretch' | 'knock' | 'turn' | 'point' | 'yawn' | 'bonk' | 'cast'
+  gesture?: 'wave' | 'nod' | 'tilt' | 'stretch' | 'knock' | 'turn' | 'point' | 'pointLeft' | 'yawn' | 'bonk' | 'cast'
   /** 在气泡里问借不借鼠标（回答走 intro:answer） */
   askMouse?: boolean
 }
@@ -270,6 +276,15 @@ export type FxCommand =
   | { fx: 'shatter'; rect: Rect; x: number; y: number }
   | { fx: 'trail'; x: number; y: number }
   | { fx: 'dust'; x: number; y: number }
+  /** 主窗口前面的那层玻璃（她在玻璃后面）：on 盖上，rect 是主窗口内容区 */
+  | { fx: 'glass'; rect: Rect }
+  | { fx: 'glass-off' }
+  /** 撞上、敲到玻璃：那里漾开几圈屏障的波纹 */
+  | { fx: 'ripple'; x: number; y: number }
+  /** 玻璃上的法阵：charge 展开、转着蓄力；burst 爆开 */
+  | { fx: 'sigil'; x: number; y: number; phase: 'charge' | 'burst' }
+  /** 法阵爆开后玻璃上爬满发光的裂纹 */
+  | { fx: 'cracks'; x: number; y: number }
   /** 蓄力：满屏的光点往这一点聚过来 */
   | { fx: 'charge'; x: number; y: number }
   /** 法阵爆开：一圈光往外扩 */
@@ -376,4 +391,37 @@ export function shakeOffset(t: number, amp: number): Point {
   if (t >= 1 || t < 0) return { x: 0, y: 0 }
   const fade = 1 - t
   return { x: Math.round(Math.sin(t * Math.PI * 9) * amp * fade), y: Math.round(Math.cos(t * Math.PI * 7) * amp * 0.5 * fade) }
+}
+
+/**
+ * 法阵爆开后玻璃上的裂纹：从中心往四周放射的折线（SVG path），越往外越歪，末梢分叉；
+ * 每条一直爬到碰到玻璃的边才停，所以不管法阵在哪，裂纹都能爬满整块玻璃。rand 固定时每次画出来一样
+ */
+export function magicCracks(center: Point, rect: Rect, count: number, rand: () => number): string[] {
+  const inside = (x: number, y: number): boolean => x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+  const clampX = (x: number): number => Math.min(rect.x + rect.width, Math.max(rect.x, x))
+  const clampY = (y: number): number => Math.min(rect.y + rect.height, Math.max(rect.y, y))
+  const paths: string[] = []
+  for (let i = 0; i < count; i++) {
+    let angle = (i / count) * Math.PI * 2 + (rand() - 0.5) * 0.4
+    let x = center.x
+    let y = center.y
+    let d = `M${Math.round(x)} ${Math.round(y)}`
+    for (let s = 0; s < 40 && inside(x, y); s++) {
+      angle += (rand() - 0.5) * 0.7
+      const len = 30 + rand() * 50 + s * 6
+      x = clampX(x + Math.cos(angle) * len)
+      y = clampY(y + Math.sin(angle) * len)
+      d += ` L${Math.round(x)} ${Math.round(y)}`
+      // 偶尔分一个短叉
+      if (s > 1 && rand() < 0.3) {
+        const b = angle + (rand() < 0.5 ? -1 : 1) * (0.5 + rand() * 0.6)
+        const bl = 20 + rand() * 40
+        paths.push(`M${Math.round(x)} ${Math.round(y)} L${Math.round(clampX(x + Math.cos(b) * bl))} ${Math.round(clampY(y + Math.sin(b) * bl))}`)
+      }
+      if (x === rect.x || x === rect.x + rect.width || y === rect.y || y === rect.y + rect.height) break
+    }
+    paths.unshift(d)
+  }
+  return paths
 }

@@ -314,7 +314,7 @@ export class Behavior {
    * point 转头看着右边的幻灯片、摊手介绍；yawn 张嘴、眯眼、仰头打个哈欠；
    * bonk 撞上看不见的玻璃：吓一跳、头往后一仰；cast 放魔法：两手举起、仰头、眼睛亮起来
    */
-  introGesture(name: 'knock' | 'turn' | 'point' | 'yawn' | 'bonk' | 'cast'): void {
+  introGesture(name: 'knock' | 'turn' | 'point' | 'pointLeft' | 'yawn' | 'bonk' | 'cast'): void {
     this.markActive()
     if (name === 'bonk') {
       this.lookAtUser()
@@ -335,9 +335,9 @@ export class Behavior {
       ])
       return
     }
-    if (name === 'point') {
-      // 幻灯片在她左手边（屏幕右边）：先看过去，摊手，一会儿再看回你
-      this.lookGoal.set(2.2, 1.3, 2.2)
+    if (name === 'point' || name === 'pointLeft') {
+      // 导览时要讲的东西在她旁边：point 在屏幕右边，pointLeft 在屏幕左边。先看过去，摊手，一会儿再看回你
+      this.lookGoal.set(name === 'point' ? 2.2 : -2.2, 1.3, 2.2)
       this.play([
         { dur: 0.35, expr: { happy: 0.25 }, pose: { armRaise: 0.55, forearmSwing: 0.35, headRoll: -0.06 } },
         { dur: 1.3, expr: { happy: 0.25 }, pose: { armRaise: 0.5, forearmSwing: 0.25, headRoll: -0.04 } },

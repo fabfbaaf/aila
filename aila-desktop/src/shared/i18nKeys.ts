@@ -32,7 +32,7 @@ export const TABLES: Record<string, string[]> = {
   'src/renderer/src/agent/fold.ts': ['MODE_NOTE'],
   'src/renderer/src/workbench/WorkbenchApp.vue': ['ECOSYSTEM', 'COLOR_MODES', 'kinds'],
   'src/shared/move.ts': ['SPOT_NAMES'],
-  'src/shared/intro.ts': ['INTRO_SLIDES', 'INTRO_LINES'],
+  'src/shared/intro.ts': ['INTRO_TOUR', 'INTRO_LINES'],
   'src/shared/studio.ts': ['WORK_STATUS_TEXT'],
   'src/shared/agent.ts': ['MODE_LABELS', 'MODE_HINTS'],
   'src/shared/mcp.ts': ['MCP_STATUS_LABELS'],

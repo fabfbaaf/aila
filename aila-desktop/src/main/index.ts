@@ -64,7 +64,7 @@ import { mainLang, setMainLang, tm } from './lang'
 import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { ENTRANCE_MS, cardBounds, emergePosition, homePosition, jumpHeight, jumpPoint, shouldEnter, type Point, type StagePhase } from '../shared/entrance'
-import { introMainBounds, presenterPosition, shouldIntro, type FxCommand } from '../shared/intro'
+import { presenterPosition, shouldIntro, type FxCommand } from '../shared/intro'
 import { IntroDirector } from './intro'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
@@ -282,7 +282,7 @@ function createWindow(): void {
   introPending = planIntro()
   const enter = introPending ? null : planEntrance()
   const size = { width: WIN_WIDTH, height: WIN_HEIGHT }
-  const start = introPending ? presenterPosition(introMainBounds(workArea), size) : enter ? emergePosition(enter.card, size) : home
+  const start = introPending ? presenterPosition(workArea, size) : enter ? emergePosition(enter.card, size) : home
 
   win = new BrowserWindow({
     width: WIN_WIDTH,
@@ -477,9 +477,13 @@ function openFx(): Promise<void> {
   })
   loadPage(w, 'fx')
   return new Promise((resolve) => {
-    w.once('ready-to-show', () => {
+    w.once('ready-to-show', async () => {
       w.showInactive()
-      win?.moveTop() // 她在特效上面
+      // 等页面里的 window.__fx 挂好再说开好了，不然紧接着发的指令（比如盖上玻璃）会丢
+      for (let i = 0; i < 40 && !w.isDestroyed(); i++) {
+        if (await w.webContents.executeJavaScript('!!window.__fx').catch(() => false)) break
+        await new Promise((r) => setTimeout(r, 50))
+      }
       resolve()
     })
   })
@@ -488,6 +492,12 @@ function openFx(): Promise<void> {
 function sendFx(c: FxCommand): void {
   if (!fxWin || fxWin.isDestroyed()) return
   void fxWin.webContents.executeJavaScript(`window.__fx && window.__fx(${JSON.stringify(c)})`).catch(() => undefined)
+}
+
+/** 特效窗口压在她上面（玻璃在她前面）还是她在最上面 */
+function fxAbove(on: boolean): void {
+  if (on) fxWin?.moveTop()
+  else win?.moveTop()
 }
 
 function closeFx(): void {
@@ -521,7 +531,7 @@ function createIntro(): IntroDirector {
       }
     },
     markDone: () => saveSettings({ ...loadSettings(), introDone: true }),
-    fx: { open: openFx, send: sendFx, close: closeFx }
+    fx: { open: openFx, send: sendFx, close: closeFx, above: fxAbove }
   })
 }
 
