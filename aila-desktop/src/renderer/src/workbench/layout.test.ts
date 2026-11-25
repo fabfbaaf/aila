@@ -7,7 +7,12 @@ import {
   crossLinks,
   groupAnchors,
   groupColors,
+  haloScale,
   highlightFrom,
+  isRelated,
+  layerAlpha,
+  relatedFiles,
+  relatedModules,
   labelled,
   linkKey,
   moduleAnchors,
@@ -54,8 +59,8 @@ describe('星图布局', () => {
   })
 
   it('星球大小跟着行数变，但有上下限', () => {
-    expect(nodeRadius(1)).toBeGreaterThanOrEqual(1.4)
-    expect(nodeRadius(100_000)).toBe(9)
+    expect(nodeRadius(1)).toBeGreaterThanOrEqual(1.2)
+    expect(nodeRadius(100_000)).toBe(6)
     expect(nodeRadius(800)).toBeGreaterThan(nodeRadius(100))
   })
 
@@ -208,5 +213,90 @@ describe('她干活的文件对到星球上', () => {
     expect(starOf('C:\\code\\shop', 'c:/code/shop/backend', './api/x.py')).toBe('backend/api/x.py')
     expect(starOf('C:\\code\\shop', 'C:\\code\\blog', 'a.py')).toBeNull()
     expect(starOf('C:\\code\\shop', 'C:\\code\\shopping', 'a.py')).toBeNull()
+  })
+})
+
+describe('星图的分层显示', () => {
+  it('看全部时只有模块和模块之间的线，文件之间的线、光点都不画', () => {
+    const far = layerAlpha(1)
+    expect(far.fileLines).toBe(0)
+    expect(far.sparks).toBe(0)
+    expect(far.moduleSuns).toBeGreaterThan(0.5)
+    expect(far.moduleLines).toBeGreaterThan(0.3)
+    expect(far.planets).toBeLessThan(0.4)
+  })
+
+  it('拉近看文件：模块的大星和星云都没了，文件、文件之间的线出来', () => {
+    const near = layerAlpha(0)
+    expect(near.moduleSuns).toBe(0)
+    expect(near.nebula).toBe(0)
+    expect(near.planets).toBe(1)
+    expect(near.fileLines).toBeGreaterThan(0)
+    expect(near.sparks).toBeGreaterThan(0)
+  })
+
+  it('光晕、星云不会糊成一片：都压得很低；跨进程弧线一直很淡', () => {
+    for (const z of [0, 0.25, 0.5, 0.75, 1]) {
+      const a = layerAlpha(z)
+      expect(a.halos).toBeLessThanOrEqual(0.55)
+      expect(a.nebula).toBeLessThanOrEqual(0.05)
+      expect(a.arcs).toBeLessThanOrEqual(0.3)
+    }
+    expect(haloScale(0)).toBeLessThan(haloScale(1))
+  })
+
+  it('越拉近文件之间的线越清楚（不会突然跳）', () => {
+    const steps = [1, 0.8, 0.6, 0.4, 0.2, 0].map((z) => layerAlpha(z).fileLines)
+    for (let i = 1; i < steps.length; i++) expect(steps[i]).toBeGreaterThanOrEqual(steps[i - 1])
+  })
+
+  it('名字不压在工具栏、图例上', () => {
+    const toolbar = { id: 'ui:top', x: 300, y: 30, w: 600, h: 40, priority: 0 }
+    const shown = placeLabels(
+      [
+        { id: 'under', x: 320, y: 32, w: 80, h: 18, priority: 9000 },
+        { id: 'free', x: 320, y: 300, w: 80, h: 18, priority: 1 }
+      ],
+      3,
+      [toolbar]
+    )
+    expect(shown.has('under')).toBe(false)
+    expect(shown.has('free')).toBe(true)
+    expect(shown.has('ui:top')).toBe(false)
+  })
+})
+
+describe('关联高亮', () => {
+  const links = [
+    { source: 'a.ts', target: 'b.ts', kind: 'call' as const },
+    { source: 'a.ts', target: 'c.ts', kind: 'import' as const },
+    { source: 'd.ts', target: 'a.ts', kind: 'call' as const },
+    { source: 'e.ts', target: 'a.ts', kind: 'http' as const },
+    { source: 'b.ts', target: 'c.ts', kind: 'call' as const },
+    { source: 'a.ts', target: 'a.ts', kind: 'call' as const }
+  ]
+
+  it('它用到的、用到它的分开记，连着它的每条线记方向；只看直接相连的一层', () => {
+    const r = relatedFiles(links, 'a.ts')
+    expect([...r.out].sort()).toEqual(['b.ts', 'c.ts'])
+    expect([...r.in].sort()).toEqual(['d.ts', 'e.ts'])
+    expect(r.links.get('a.ts→b.ts:call') ?? r.links.get([...r.links.keys()].find((k) => k.includes('b.ts')) ?? '')).toBe('out')
+    expect([...r.links.values()].filter((v) => v === 'in')).toHaveLength(2)
+    // b → c 不连着 a：不算
+    expect(r.links.size).toBe(4)
+    expect(isRelated(r, 'a.ts') && isRelated(r, 'd.ts')).toBe(true)
+    expect(isRelated(r, 'f.ts')).toBe(false)
+  })
+
+  it('没有关联的文件：只有它自己', () => {
+    const r = relatedFiles(links, 'zzz.ts')
+    expect(r.out.size + r.in.size + r.links.size).toBe(0)
+    expect(isRelated(r, 'zzz.ts')).toBe(true)
+  })
+
+  it('模块之间也分方向', () => {
+    const m = relatedModules([{ source: 'ui', target: 'api' }, { source: 'cli', target: 'ui' }, { source: 'api', target: 'db' }], 'ui')
+    expect([...m.out]).toEqual(['api'])
+    expect([...m.in]).toEqual(['cli'])
   })
 })

@@ -6,6 +6,11 @@
  * - 每个模块外面罩一层淡淡的星云，名字写在星云上；子项目的名字写在星系上方
  * - 跨进程的光线画成弧线：淡金是 HTTP 接口（桌面端 → AI 服务、桌面端 → 云端），淡青是 IPC 消息（预加载 → 主进程）。
  *   函数调用只在同一类语言里连得上，这几条弧线把前后端连起来
+ * - 分层显示（layout.ts 的 layerAlpha）：看全部时只有模块和模块之间的线，拉近才出现文件和文件之间的线；
+ *   光晕、星云拉近时淡下去，不会叠成一片紫雾；跨进程的弧线一直很淡，选中、报错时才亮
+ * - 关联高亮：指着或点中一个文件，它和直接相连的文件亮起来、写出名字，其余暗下去；线分方向上色
+ *   （青色：它用到的，琥珀色：用到它的）。看全部时指着一个模块，和它相连的模块也这样亮
+ * - 第三方库是配角：外圈很淡的小点，不写名字；悬停、选中、选中的文件用到它时才亮、才有名字
  * - 测试文件调暗（也可以在界面上隐藏）
  * - 名字防重叠：每隔几帧按优先级重新摆一遍，挡住的先不显示
  * - 布局：d3-force-3d 力导向。光线把相关的文件拉近，星球之间互相排斥；每个文件被拉向自己模块的中心，
@@ -23,7 +28,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, forceZ, type Simulation } from 'd3-force-3d'
-import type { CodeGraph, GraphNode, LibInfo, LinkKind } from '../../../shared/workbench'
+import type { CodeGraph, GraphLink, GraphNode, LibInfo, LinkKind } from '../../../shared/workbench'
 import {
   CHAIN_COLOR,
   HTTP_COLOR,
@@ -34,7 +39,14 @@ import {
   buildModules,
   groupAnchors,
   groupColors,
+  haloScale,
+  isRelated,
   kindOf,
+  layerAlpha,
+  relatedFiles,
+  relatedModules,
+  USED_BY_COLOR,
+  USES_COLOR,
   labelled,
   linkKey,
   moduleAnchors,
@@ -46,6 +58,7 @@ import {
   zoomLevel,
   type Highlight,
   type LabelBox,
+  type Related,
   type ModuleInfo,
   type ModuleLink,
   type Vec3
@@ -82,6 +95,8 @@ interface Planet {
   lit: boolean
   /** 按选中、报错算出来的透明度；拉远时再乘上淡出的比例 */
   base: { mesh: number; halo: number }
+  /** 拉远时也不往模块中心收（报错、选中、改过的，和选中文件的关联）：指着时的关联只亮不挪，免得鼠标一扫星图就跳 */
+  pinned: boolean
 }
 
 /** 一个模块：拉远时是一颗大星，拉近时只剩一层星云和名字 */
@@ -171,6 +186,14 @@ export class StarMap {
   private moduleLines: THREE.LineSegments | null = null
   /** import（项目里文件之间）：参与布局，拉远时并进模块之间的光线 */
   private imports: Ray[] = []
+  /** 画成直线的：函数调用 + import（import 平时不显示，关联高亮时才亮） */
+  private drawn: Ray[] = []
+  /** 项目里文件之间的全部关系：算关联用 */
+  private graphLinks: Pick<GraphLink, 'source' | 'target' | 'kind'>[] = []
+  /** 指着或点中的文件和它直接相连的文件（有报错高亮时不算） */
+  private related: Related | null = null
+  /** 看全部时指着的模块和与它相连的模块 */
+  private relatedMods: { focus: string; out: Set<string>; in: Set<string> } | null = null
   private libs: LibStar[] = []
   /** 第三方库连到用它的模块的线 */
   private libLines: THREE.LineSegments | null = null
@@ -206,6 +229,8 @@ export class StarMap {
   /** 星球上闪一下的光环（她在读、刚改了这个文件） */
   private flashes: { sprite: THREE.Sprite; start: number; radius: number }[] = []
   private resize: ResizeObserver
+  /** 屏幕上不能压的地方（工具栏、图例、面板，相对画布的像素）：名字摆在上面就不显示 */
+  private reserved: LabelBox[] = []
 
   constructor(private el: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
@@ -230,7 +255,8 @@ export class StarMap {
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
     // 只让亮的东西（星球、光点）发光：门槛太低整个画面会发灰
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.35)
+    // 门槛提高、强度压低：只有真的亮的（选中、报错、光点）才泛光；以前门槛低，拉近时整个画面过曝
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.45, 0.3, 0.6)
     this.composer.addPass(this.bloom)
     this.composer.addPass(new OutputPass())
 
@@ -291,6 +317,8 @@ export class StarMap {
     this.rays = kept.filter((l) => kindOf(l) === 'call').map(toRay)
     this.bridges = kept.filter((l) => kindOf(l) === 'http' || kindOf(l) === 'ipc').map(toRay)
     this.imports = kept.filter((l) => kindOf(l) === 'import').map(toRay)
+    this.drawn = [...this.rays, ...this.imports]
+    this.graphLinks = kept
     // 模块之间：调用和 import 合成一条（同一对模块只画一条）
     const merged = new Map<string, ModuleLink>()
     for (const l of moduleLinks) {
@@ -604,9 +632,9 @@ export class StarMap {
     mesh.scale.setScalar(star.radius)
     mesh.userData.id = star.id
     const halo = this.glowSprite(star.color, 0.55)
-    halo.scale.setScalar(star.radius * 4.2)
+    halo.scale.setScalar(star.radius * haloScale(1))
     this.scene.add(mesh, halo)
-    this.planets.set(star.id, { star, mesh, halo, label: null, lit: false, base: { mesh: 1, halo: 0.55 } })
+    this.planets.set(star.id, { star, mesh, halo, label: null, lit: false, pinned: false, base: { mesh: 1, halo: 0.55 } })
   }
 
   private addCluster(info: ModuleInfo, groupColor: THREE.Color): void {
@@ -616,7 +644,7 @@ export class StarMap {
     sun.userData.module = info.id
     sun.scale.setScalar(radius)
     const halo = this.glowSprite(color, 0)
-    halo.scale.setScalar(radius * 5)
+    halo.scale.setScalar(radius * 3.6)
     // 星云：只是一层很淡的光，不参与泛光（亮度低于泛光门槛）
     const nebula = this.glowSprite(color, 0.07)
     nebula.renderOrder = -1
@@ -634,12 +662,12 @@ export class StarMap {
 
   private addLib(lib: LibInfo): void {
     const color = new THREE.Color(LIB_COLORS[lib.ecosystem] ?? '#fff1c4')
-    const radius = 2.5 + Math.log2(lib.count + 1) * 1.4
+    const radius = 1.4 + Math.log2(lib.count + 1) * 0.45 // 配角：比模块小得多
     const mesh = new THREE.Mesh(this.sphere, new THREE.MeshBasicMaterial({ color, transparent: true }))
     mesh.scale.setScalar(radius)
     mesh.userData.lib = lib.id
-    const halo = this.glowSprite(color, 0.7)
-    halo.scale.setScalar(radius * 6)
+    const halo = this.glowSprite(color, 0.18)
+    halo.scale.setScalar(radius * 4)
     const label = makeModuleLabel(lib.name, `#${color.getHexString()}`)
     label.element.classList.add('lib-label')
     const owners = new Map(this.stars.map((s) => [s.id, s.mod]))
@@ -666,7 +694,7 @@ export class StarMap {
     const additive = { transparent: true, blending: THREE.AdditiveBlending, depthWrite: false } as const
     // 函数调用：一条一段
     this.lines = new THREE.LineSegments(
-      lineGeometry(this.rays.length * 2),
+      lineGeometry(this.drawn.length * 2),
       new THREE.LineBasicMaterial({ vertexColors: true, opacity: 0.5, ...additive })
     )
     // 光点：每条光线一个，调用多的两个，沿调用方向流动
@@ -705,6 +733,13 @@ export class StarMap {
   /** 按现在的选中、悬停、报错高亮，给星球、光线、光点上色；透明度再由远近（applyZoom）决定 */
   private applyStyles(): void {
     const h = this.highlight
+    // 关联高亮：指着的优先，没指着就看点中的；有报错高亮时不算（报错那套颜色优先）
+    const focusId = this.hovered ?? this.selected
+    this.related = !h && focusId ? relatedFiles(this.graphLinks, focusId) : null
+    this.relatedMods = !h && !this.related && this.hoveredModule ? relatedModules(this.moduleRays, this.hoveredModule) : null
+    const rel = this.related
+    const relMods = this.relatedMods
+    const modOn = (mod: string): boolean => !relMods || mod === relMods.focus || relMods.out.has(mod) || relMods.in.has(mod)
     const special = (id: string): boolean =>
       !!h?.error.has(id) || !!h?.chain.has(id) || id === this.selected || this.touched.has(id) || id === this.hovered
     for (const p of this.planets.values()) {
@@ -718,11 +753,15 @@ export class StarMap {
             : p.star.color
       p.mesh.material.color.copy(color)
       p.halo.material.color.copy(color)
-      p.lit = special(id)
-      const on = !h || p.lit
+      const inRel = !!rel && isRelated(rel, id)
+      p.lit = special(id) || inRel
+      // 点中的文件的关联拉远时也散开；只是指着的话只亮不挪
+      p.pinned = special(id) && id !== this.hovered ? true : inRel && rel?.focus === this.selected
+      const on = h ? p.lit : rel ? inRel : modOn(p.star.mod)
       const test = p.star.test && !p.lit ? TEST_DIM : 1
-      p.base.mesh = (on ? 1 : DIM) * test
-      p.base.halo = (on ? (id === this.selected ? 0.95 : 0.55) : DIM * 0.6) * test
+      // 关联高亮时无关的几乎看不见（只留个影子），一眼就看出谁和它有关
+      p.base.mesh = (on ? 1 : rel ? 0.05 : DIM) * test
+      p.base.halo = (on ? (id === this.selected || id === rel?.focus ? 0.95 : 0.55) : rel ? 0 : DIM * 0.6) * test
       if (!p.label && (p.lit || (!h && this.showLabels.has(id)))) {
         p.label = makeLabel(p.star.name)
         p.label.visible = false
@@ -731,15 +770,20 @@ export class StarMap {
       p.label?.element.classList.toggle('error', !!h?.error.has(id))
     }
 
-    const near = (r: Ray): boolean =>
-      !!this.selected && (starId(r.source) === this.selected || starId(r.target) === this.selected)
+    const near = (r: Ray): boolean => !!rel?.links.has(r.key)
+    const dirColor = (r: Ray): THREE.Color | null => {
+      const d = rel?.links.get(r.key)
+      return d ? new THREE.Color(d === 'out' ? USES_COLOR : USED_BY_COLOR) : null
+    }
     if (this.lines) {
       const colors = this.lines.geometry.getAttribute('color') as THREE.BufferAttribute
-      this.rays.forEach((r, i) => {
+      this.drawn.forEach((r, i) => {
         const hot = h?.links.has(r.key)
         const src = this.planets.get(starId(r.source))
-        const c = hot ? new THREE.Color(ERROR_COLOR) : (src?.star.color ?? new THREE.Color('#8fa8ff')).clone()
-        c.multiplyScalar(hot ? 1 : h ? 0.08 : near(r) ? 1 : src?.star.test ? 0.22 : 0.5)
+        const dir = dirColor(r)
+        const c = hot ? new THREE.Color(ERROR_COLOR) : dir ?? (src?.star.color ?? new THREE.Color('#8fa8ff')).clone()
+        // import 平时不画（只参与布局），关联高亮时和调用一样亮
+        c.multiplyScalar(hot ? 1 : dir ? 1 : h || rel ? 0.04 : r.kind === 'import' ? 0 : src?.star.test ? 0.22 : 0.5)
         colors.setXYZ(i * 2, c.r, c.g, c.b)
         colors.setXYZ(i * 2 + 1, c.r, c.g, c.b)
       })
@@ -752,15 +796,16 @@ export class StarMap {
         const r = this.rays[i]
         const hot = h?.links.has(r.key)
         const src = this.planets.get(starId(r.source))
-        const c = hot ? new THREE.Color(CHAIN_COLOR) : (src?.star.color ?? new THREE.Color('#ffffff')).clone()
-        c.multiplyScalar(hot ? 1.2 : h ? 0.1 : src?.star.test ? 0.35 : 0.85)
+        const dir = dirColor(r)
+        const c = hot ? new THREE.Color(CHAIN_COLOR) : dir ?? (src?.star.color ?? new THREE.Color('#ffffff')).clone()
+        c.multiplyScalar(hot ? 1.2 : h ? 0.1 : dir ? 1.3 : rel ? 0.02 : src?.star.test ? 0.2 : 0.45)
         colors.setXYZ(k, c.r, c.g, c.b)
       })
       colors.needsUpdate = true
     }
     const bridgeColor = (r: Ray, boost: number): THREE.Color => {
       const test = this.planets.get(starId(r.source))?.star.test
-      const k = near(r) ? 1.25 : h ? (h.links.has(r.key) ? 1 : 0.12) : test ? 0.1 : 0.62
+      const k = near(r) ? 1.25 : h ? (h.links.has(r.key) ? 1 : 0.12) : rel ? 0.04 : test ? 0.1 : 0.5
       return new THREE.Color(r.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR).multiplyScalar(k * boost)
     }
     if (this.arcs) {
@@ -784,25 +829,29 @@ export class StarMap {
       const colors = this.moduleLines.geometry.getAttribute('color') as THREE.BufferAttribute
       this.moduleRays.forEach((r, i) => {
         const src = this.clusters.get(r.source)
-        const c = (src?.color ?? new THREE.Color('#8fa8ff')).clone()
-        c.multiplyScalar((h ? 0.15 : src?.info.test ? 0.25 : 0.4) + Math.min(0.6, Math.log2(r.weight + 1) * 0.12))
+        // 指着一个模块：连着它的线分方向亮（青：它用到的，琥珀：用到它的），别的几乎看不见
+        const dir = relMods ? (r.source === relMods.focus ? USES_COLOR : r.target === relMods.focus ? USED_BY_COLOR : null) : null
+        const c = dir ? new THREE.Color(dir) : (src?.color ?? new THREE.Color('#8fa8ff')).clone()
+        const strength = Math.min(0.6, Math.log2(r.weight + 1) * 0.12)
+        c.multiplyScalar(dir ? 0.7 + strength : relMods ? 0.04 : (h ? 0.15 : src?.info.test ? 0.25 : 0.4) + strength)
         colors.setXYZ(i * 2, c.r, c.g, c.b)
         colors.setXYZ(i * 2 + 1, c.r, c.g, c.b)
       })
       colors.needsUpdate = true
     }
-    const selectedLibs = new Set(this.libs.filter((l) => this.selected && l.lib.users.includes(this.selected)).map((l) => l.lib.id))
+    // 指着或点中的文件用到的库也亮
+    const selectedLibs = new Set(this.libs.filter((l) => focusId && l.lib.users.includes(focusId)).map((l) => l.lib.id))
     for (const l of this.libs) {
       const hot = l.lib.id === this.selectedLib || l.lib.id === this.hoveredLib || selectedLibs.has(l.lib.id)
-      l.mesh.material.opacity = h ? 0.3 : 1
-      l.halo.material.opacity = h ? 0.15 : hot ? 1 : 0.6
+      l.mesh.material.opacity = h ? 0.2 : hot ? 1 : 0.45
+      l.halo.material.opacity = h ? 0.06 : hot ? 0.8 : 0.16
     }
     if (this.libLines) {
       const colors = this.libLines.geometry.getAttribute('color') as THREE.BufferAttribute
       let k = 0
       for (const l of this.libs) {
         const hot = l.lib.id === this.selectedLib || l.lib.id === this.hoveredLib || selectedLibs.has(l.lib.id)
-        const c = l.color.clone().multiplyScalar(h ? 0.05 : hot ? 0.9 : 0.12)
+        const c = l.color.clone().multiplyScalar(h ? 0.03 : hot ? 0.8 : 0.035)
         for (let i = 0; i < l.modules.length * 2; i++) colors.setXYZ(k++, c.r, c.g, c.b)
       }
       colors.needsUpdate = true
@@ -811,26 +860,43 @@ export class StarMap {
     if (this.sim) this.sync() // 选中、报错的文件拉远时也不收拢：位置马上跟着变
   }
 
-  /** 远近：文件淡下去、模块的大星和模块之间的光线亮起来（中间平滑过渡） */
+  /** 远近：按 layerAlpha 分层（看全部时是模块，拉近是文件）；选中、报错时相关的东西不管远近都亮 */
   private applyZoom(): void {
     const t = this.zoom
-    const fade = 1 - 0.8 * t
+    const L = layerAlpha(t)
+    const focus = !!this.highlight || !!this.selected || !!this.related
+    const hs = haloScale(t)
     for (const p of this.planets.values()) {
-      p.mesh.material.opacity = p.lit ? p.base.mesh : p.base.mesh * fade
-      p.halo.material.opacity = p.lit ? p.base.halo : p.base.halo * fade
+      p.mesh.material.opacity = p.lit ? p.base.mesh : p.base.mesh * L.planets
+      p.halo.material.opacity = p.lit ? p.base.halo : p.base.halo * L.halos
+      p.halo.userData.scale = hs
     }
     const h = this.highlight
     for (const c of this.clusters.values()) {
-      const hot = !h || c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))
-      const k = (hot ? 1 : 0.3) * (c.info.test ? TEST_DIM : 1) * (c.info.id === this.hoveredModule ? 1.3 : 1)
-      c.sun.material.opacity = Math.min(1, 0.95 * t * k)
-      c.halo.material.opacity = Math.min(1, 0.5 * t * k)
-      c.nebula.material.opacity = (0.05 + 0.04 * (1 - t)) * (hot ? 1 : 0.5) * (c.info.test ? 0.6 : 1)
+      const rm = this.relatedMods
+      const rel = this.related
+      const hot = h
+        ? c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))
+        : rm
+          ? c.info.id === rm.focus || rm.out.has(c.info.id) || rm.in.has(c.info.id)
+          : rel
+            ? c.stars.some((s) => isRelated(rel, s.id))
+            : true
+      const k = (hot ? 1 : rm || rel ? 0.18 : 0.3) * (c.info.test ? TEST_DIM : 1) * (c.info.id === this.hoveredModule ? 1.3 : 1)
+      c.sun.material.opacity = Math.min(1, L.moduleSuns * k)
+      c.halo.material.opacity = Math.min(1, L.moduleHalos * k)
+      c.nebula.material.opacity = L.nebula * (hot ? 1 : 0.5) * (c.info.test ? 0.6 : 1)
       c.sun.visible = c.halo.visible = t > 0.02
+      c.nebula.visible = L.nebula > 0.002
     }
-    if (this.lines) (this.lines.material as THREE.LineBasicMaterial).opacity = 0.5 * (1 - 0.85 * t)
-    if (this.sparks) (this.sparks.material as THREE.PointsMaterial).opacity = 1 - 0.9 * t
-    if (this.moduleLines) (this.moduleLines.material as THREE.LineBasicMaterial).opacity = 0.75 * t
+    // 选中、报错时：文件之间的线、光点不管远近都要看得到（颜色里已经把无关的压暗了）
+    if (this.lines) (this.lines.material as THREE.LineBasicMaterial).opacity = focus ? Math.max(0.55, L.fileLines) : L.fileLines
+    if (this.sparks) (this.sparks.material as THREE.PointsMaterial).opacity = focus ? Math.max(0.8, L.sparks) : L.sparks
+    if (this.lines) this.lines.visible = focus || L.fileLines > 0.005
+    if (this.sparks) this.sparks.visible = focus || L.sparks > 0.005
+    if (this.arcs) (this.arcs.material as THREE.LineBasicMaterial).opacity = focus ? 0.8 : L.arcs
+    if (this.arcSparks) (this.arcSparks.material as THREE.PointsMaterial).opacity = focus ? 1 : L.arcs * 2
+    if (this.moduleLines) (this.moduleLines.material as THREE.LineBasicMaterial).opacity = this.relatedMods ? Math.max(0.75, L.moduleLines) : L.moduleLines
   }
 
   // ---------- 每一帧 ----------
@@ -898,7 +964,7 @@ export class StarMap {
       const s = p.star
       const c = this.clusters.get(s.mod)
       const pos = new THREE.Vector3(s.x ?? 0, s.y ?? 0, s.z ?? 0)
-      if (c && !p.lit) pos.lerp(c.center, collapse)
+      if (c && !p.pinned) pos.lerp(c.center, collapse)
       s.at.copy(pos)
       p.mesh.position.copy(pos)
       p.halo.position.copy(pos)
@@ -906,7 +972,7 @@ export class StarMap {
     }
     if (this.lines) {
       const pos = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute
-      this.rays.forEach((r, i) => {
+      this.drawn.forEach((r, i) => {
         const a = (r.source as Star).at
         const b = (r.target as Star).at
         pos.setXYZ(i * 2, a.x, a.y, a.z)
@@ -1045,7 +1111,8 @@ export class StarMap {
       if (this.highlight?.error.has(p.star.id)) k = 1 + 0.18 * Math.sin(t * 6)
       else if (p.star.id === this.selected) k = 1 + 0.06 * Math.sin(t * 2.5)
       p.mesh.scale.setScalar(r * k)
-      p.halo.scale.setScalar(r * 4.2 * (this.highlight?.error.has(p.star.id) ? 1.4 * k : k))
+      const hs = (p.halo.userData.scale as number | undefined) ?? haloScale(this.zoom)
+      p.halo.scale.setScalar(r * (p.lit ? 4.2 : hs) * (this.highlight?.error.has(p.star.id) ? 1.4 * k : k))
     }
   }
 
@@ -1070,9 +1137,12 @@ export class StarMap {
       objects.set(id, obj)
     }
     for (const g of this.galaxies) add(`g:${g.group}`, g.label, g.group, 18, 0, 10_000)
-    if (this.showLibs) for (const l of this.libs) add(`l:${l.lib.id}`, l.label, l.lib.name, 13, 0, 7_000 + l.lib.count)
+    // 第三方库是配角：悬停、选中、选中的文件用到它时才写名字
+    if (this.showLibs) for (const l of this.libs) if (this.libHot(l)) add(`l:${l.lib.id}`, l.label, l.lib.name, 13, 0, 7_000 + l.lib.count)
     for (const c of this.clusters.values()) {
       if (h && !c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))) continue
+      const rm = this.relatedMods
+      if (rm && c.info.id !== rm.focus && !rm.out.has(c.info.id) && !rm.in.has(c.info.id)) continue // 指着模块时只写相连模块的名字
       const size = Math.log10(c.info.lines + 10)
       add(`m:${c.info.id}`, c.label, c.info.label, 13, 0, (far ? 5_000 : 50) + size * (c.info.test ? 1 : 10))
     }
@@ -1083,12 +1153,23 @@ export class StarMap {
       const rank = (p.star.test ? 20 : 100) + Math.log10(p.star.lines + 10) * 10 // 测试文件的名字排在后面
       add(`f:${p.star.id}`, p.label, p.star.name, 12, 10, p.lit ? 9_000 : rank)
     }
-    const shown = placeLabels(boxes)
+    const shown = placeLabels(boxes, 3, this.reserved)
     for (const g of this.galaxies) g.label.visible = false
     for (const l of this.libs) l.label.visible = false
     for (const c of this.clusters.values()) c.label.visible = false
     for (const p of this.planets.values()) if (p.label) p.label.visible = false
     for (const [id, obj] of objects) obj.visible = shown.has(id)
+  }
+
+  /** 这个库现在该不该亮：悬停、选中，或者选中的文件用到它 */
+  private libHot(l: LibStar): boolean {
+    const focusId = this.hovered ?? this.selected
+    return l.lib.id === this.hoveredLib || l.lib.id === this.selectedLib || (!!focusId && l.lib.users.includes(focusId))
+  }
+
+  /** 界面上盖在星图上面的东西（工具栏、图例、面板）在哪：名字避开它们（相对画布的像素） */
+  setReserved(rects: { x: number; y: number; w: number; h: number }[]): void {
+    this.reserved = rects.map((r, i) => ({ id: `ui:${i}`, x: r.x + r.w / 2, y: r.y + r.h / 2, w: r.w, h: r.h, priority: Infinity }))
   }
 
   private flyTo(id: string): void {

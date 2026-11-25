@@ -17,6 +17,8 @@ import {
   testedFiles,
   type ColorMode,
   CHAIN_COLOR,
+  USED_BY_COLOR,
+  USES_COLOR,
   ERROR_COLOR,
   HTTP_COLOR,
   IPC_COLOR,
@@ -100,6 +102,22 @@ const libTip = ref<{ lib: LibInfo; x: number; y: number } | null>(null)
 const lib = ref<LibInfo | null>(null)
 /** 外圈的第三方库显示不显示 */
 const showLibs = ref(true)
+/** 图例的详细说明（光线、第三方库、高亮的颜色）平时收起来，不挡星图；记在这台电脑上 */
+const legendOpen = ref(readLegendOpen())
+function readLegendOpen(): boolean {
+  try {
+    return localStorage.getItem('aila.map.legend') === '1'
+  } catch {
+    return false
+  }
+}
+watch(legendOpen, (on) => {
+  try {
+    localStorage.setItem('aila.map.legend', on ? '1' : '0')
+  } catch {
+    // 存不了就每次收起
+  }
+})
 /** 选中文件的 import：引用了谁、谁引用了它、用到哪些第三方库 */
 const imports = computed(() => (node.value && graph.value ? importsOf(graph.value, node.value.id) : null))
 const ECOSYSTEM: Record<string, string> = localized({ npm: 'npm 包', python: 'Python 包', java: 'Java 库' })
@@ -476,7 +494,21 @@ function closeReplay(): void {
   map?.clearTouched()
 }
 
+/** 盖在星图上的工具栏、图例、面板在哪（相对画布）：告诉星图，名字别摆在下面 */
+function measureReserved(): void {
+  const box = canvas.value?.getBoundingClientRect()
+  const root = canvas.value?.parentElement
+  if (!box || !root || !map) return
+  const rects = [...root.querySelectorAll<HTMLElement>(':scope > .top, :scope > .legend, :scope > .panel, :scope > .error-bar, :scope > .fix-card, :scope > .replay-bar, :scope > .status')]
+    .map((el) => el.getBoundingClientRect())
+    .filter((r) => r.width > 0 && r.height > 0)
+    .map((r) => ({ x: r.left - box.left - 6, y: r.top - box.top - 6, w: r.width + 12, h: r.height + 12 }))
+  map.setReserved(rects)
+}
+const reservedTimer = window.setInterval(measureReserved, 400)
+
 onBeforeUnmount(() => {
+  window.clearInterval(reservedTimer)
   for (const off of unsubscribe.splice(0)) off()
   window.clearInterval(replayTimer)
   clearTimeout(toastTimer)
@@ -550,16 +582,21 @@ onBeforeUnmount(() => {
         <div><i :style="{ background: UNTESTED_COLOR }"></i>{{ t('没找到测试（{n}）', { n: testStats.untested }) }}</div>
         <div><i :style="{ background: TEST_FILE_COLOR }"></i>{{ t('测试文件') }}</div>
       </template>
+      <button class="ghost legend-toggle" :aria-expanded="legendOpen" @click="legendOpen = !legendOpen">{{ legendOpen ? t('收起图例') : t('图例') }}</button>
+      <template v-if="legendOpen">
       <div class="gap"><b class="line"></b>{{ t('函数调用') }}</div>
+      <div><b class="line" :style="{ borderColor: USES_COLOR }"></b>{{ t('指着一个文件或模块：它用到的') }}</div>
+      <div><b class="line" :style="{ borderColor: USED_BY_COLOR }"></b>{{ t('指着一个文件或模块：用到它的') }}</div>
       <div><b class="arc" :style="{ borderColor: HTTP_COLOR }"></b>{{ t('请求接口（HTTP）') }}</div>
       <div><b class="arc" :style="{ borderColor: IPC_COLOR }"></b>{{ t('进程间消息（IPC）') }}</div>
       <div v-if="graph.libs?.length" class="libs-toggle">
-        <label><input v-model="showLibs" type="checkbox" />{{ t('外圈的恒星：用到的第三方库（{n}）', { n: shown?.libs?.length ?? 0 }) }}</label>
+        <label><input v-model="showLibs" type="checkbox" />{{ t('外圈的淡点：用到的第三方库（{n}），悬停看名字', { n: shown?.libs?.length ?? 0 }) }}</label>
       </div>
       <div class="gap"><i class="bright"></i>{{ t('亮一点：还没提交的改动') }}</div>
       <div><i :style="{ background: ERROR_COLOR }"></i>{{ t('报错的文件') }}</div>
       <div><i :style="{ background: CHAIN_COLOR }"></i>{{ t('调用链上的文件') }}</div>
       <div><i :style="{ background: TOUCH_COLOR }"></i>{{ t('她这次改过的文件') }}</div>
+      </template>
     </div>
 
     <div v-if="tip" class="tip" :style="{ left: `${tip.x + 14}px`, top: `${tip.y + 10}px` }">
@@ -715,7 +752,7 @@ onBeforeUnmount(() => {
       <template v-if="status">{{ status }}</template>
       <template v-else-if="counts">
         {{ t('{m} 个模块 · {f} 个文件 · {c} 条调用光线 · {x} 条跨进程弧线 · {l} 个第三方库 ·', { m: counts.modules, f: counts.files, c: counts.calls, x: counts.cross, l: counts.libs }) }}
-        {{ gestures ? t('张开手掌旋转、捏住星球往面前拉看代码') : t('拉远看模块、拉近看文件，点模块飞过去，点星球看代码') }}
+        {{ gestures ? t('张开手掌旋转、捏住星球往面前拉看代码') : t('拉远看模块、拉近看文件，指着看和它有关的，点模块飞过去，点星球看代码') }}
         <span v-if="activity" class="activity"> · {{ activity }}</span>
       </template>
     </footer>
@@ -750,11 +787,17 @@ onBeforeUnmount(() => {
 
 .top {
   position: absolute;
-  top: 14px;
-  left: 16px;
+  top: 12px;
+  left: 14px;
   display: flex;
   gap: 10px;
   align-items: center;
+  /* 半透明底板：星图上的名字、光不会和按钮混在一起 */
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(6, 10, 20, 0.74);
+  border: 1px solid rgba(130, 160, 230, 0.16);
+  backdrop-filter: blur(8px);
 }
 
 .title {
@@ -833,14 +876,31 @@ button.on {
 
 .legend {
   position: absolute;
-  top: 56px;
-  left: 16px;
+  top: 66px;
+  left: 14px;
   display: flex;
   flex-direction: column;
   gap: 3px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(6, 10, 20, 0.7);
+  border: 1px solid rgba(130, 160, 230, 0.14);
+  backdrop-filter: blur(8px);
   color: #8fa4c8;
   font-size: 12px;
   pointer-events: none;
+}
+
+.legend .legend-toggle {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.legend .libs-toggle {
+  pointer-events: auto;
 }
 
 .legend i {
@@ -903,6 +963,11 @@ button.on {
 .legend b.line {
   height: 0;
   border-top: 1px solid #8fa4c8;
+}
+
+/* 关联高亮的两种颜色：线粗一点，看得出颜色 */
+.legend b.line[style] {
+  border-top-width: 2px;
 }
 
 .legend b.arc {
@@ -1100,7 +1165,7 @@ button.on {
   top: 14px;
   right: 14px;
   bottom: 40px;
-  width: 440px;
+  width: min(400px, 36%);
   display: flex;
   flex-direction: column;
   padding: 12px 14px;
