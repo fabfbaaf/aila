@@ -42,8 +42,12 @@ export interface ToolItem {
   exitCode?: number | null
   screenshot?: string
   confirm?: ConfirmState
-  /** explore：派出去的助手用的模型、查了几步（报告在 content 里） */
+  /** explore、delegate：派出去的助手用的模型、走了几步（报告在 content 里） */
   sub?: { model: string; steps: number }
+  /** 跑得久的工具（子 Agent）这会儿在做什么：谁、在做什么。做完就清掉 */
+  progress?: { who: string; text: string }
+  /** delegate：子 Agent 在自己的分支上改了哪些文件（「M 路径」） */
+  files?: string[]
 }
 
 export interface EndItem {
@@ -120,6 +124,14 @@ export function actionOf(name: string, args: Record<string, unknown>): string {
       return t('看 {name} 的调用关系', { name: s('name').slice(0, 30) })
     case 'explore':
       return t('派助手去查「{task}」', { task: s('task').trim().slice(0, 30) })
+    case 'delegate':
+      return args.role === 'review'
+        ? t('派审查员「{title}」', { title: s('title').trim().slice(0, 30) })
+        : t('派助手做「{title}」', { title: s('title').trim().slice(0, 30) })
+    case 'merge_work':
+      return t('收回助手 {id} 的改动', { id: s('id') })
+    case 'discard_work':
+      return t('不要助手 {id} 的改动', { id: s('id') })
     case 'web_search':
       return t('搜网页「{q}」', { q: s('query').slice(0, 40) })
     case 'web_fetch':
@@ -309,10 +321,17 @@ export class Transcript {
         if (e.status) tool.action = String(e.status)
         break
       }
+      case 'tool_progress': {
+        const tool = this.tools.get(`${this.turnNo}:${String(e.id)}`)
+        if (tool && tool.status === 'running') tool.progress = { who: String(e.who ?? ''), text: String(e.text ?? '') }
+        break
+      }
       case 'tool': {
         const tool = this.tool(String(e.id), String(e.name ?? ''))
         tool.status = String(e.status ?? 'ok')
         tool.content = String(e.content ?? '')
+        tool.progress = undefined
+        if (Array.isArray(e.files) && tool.name === 'delegate') tool.files = e.files.map(String)
         if (tool.name === 'browser_screenshot' && tool.status === 'ok' && isAgentScreenshotName(e.screenshot)) {
           tool.screenshot = e.screenshot
         }

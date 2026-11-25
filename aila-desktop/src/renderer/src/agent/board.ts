@@ -55,6 +55,8 @@ const VERBS: Record<string, string> = localized({
   explore: '派助手查',
   web_search: '搜网页',
   web_fetch: '读网页',
+  delegate: '派助手做',
+  merge_work: '收回改动',
   todo_write: '更新待办',
   code_search: '按意思搜',
   code_locate: '按报错定位',

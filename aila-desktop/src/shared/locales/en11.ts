@@ -117,5 +117,14 @@ export const EN11: Record<string, string> = {
   读网页: 'Read page',
   '搜网页「{q}」': 'Search the web for "{q}"',
   '读网页 {url}': 'Read {url}',
-  '可以不填：不填时读必应的搜索结果页，偶尔不稳': "Optional: without a key she reads Bing's results page, which is a bit less reliable"
+  '可以不填：不填时读必应的搜索结果页，偶尔不稳': "Optional: without a key she reads Bing's results page, which is a bit less reliable",
+  // 多智能体
+  '派审查员「{title}」': 'Send a reviewer: "{title}"',
+  '派助手做「{title}」': 'Send a helper: "{title}"',
+  '收回助手 {id} 的改动': "Bring back helper {id}'s changes",
+  '不要助手 {id} 的改动': "Drop helper {id}'s changes",
+  '{model} · {steps} 步 · 改了 {n} 个文件': '{model} · {steps} steps · changed {n} files',
+  '{model} · {steps} 步': '{model} · {steps} steps',
+  派助手做: 'Send helpers',
+  收回改动: 'Bring back changes'
 }

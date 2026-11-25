@@ -10,12 +10,17 @@
   memory   记项目记忆（memory.py）     只读不让记，先问再改要问，自动模式直接记
   mcp      MCP 外部工具（mcp.py）      只读模式不让用，其他模式要问（可以以后都不问）
   mcp_read 服务标了只读的 MCP 工具     不用问
+  web      联网搜索、读公网网页（webtools.py）  不用问
+  delegate 派子 Agent 在自己的分支里改（workers.py）  只读模式不让派，其他模式不用问（收回改动时按 edit 问）
+
+跑得久的工具（子 Agent）可以用 report_progress 报一句进度：界面上实时显示，不写进日志。
 """
 
 import difflib
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +29,18 @@ from ..llm import Usage
 from .shell import BackgroundJobs, DEFAULT_TIMEOUT, Job, JobLimitError, MAX_TIMEOUT, Shell, run
 from .snapshots import Snapshots
 from .workspace import ComputerWorkspace, Workspace, WorkspaceError, decode_text, glob_match, read_text
+
+# 这个工具调用的进度往哪报（loop.py 在开始跑工具前设好；不在工具里调用时什么也不做）
+PROGRESS: ContextVar[Callable[[str, str], None] | None] = ContextVar("aila_tool_progress", default=None)
+
+
+def report_progress(text: str, who: str = "") -> None:
+    """跑得久的工具报一句现在在做什么。who：谁在做（比如「1 写 a」这个子 Agent），text：在做什么（「改 a.txt」）。
+    分开报是为了英文界面能按模板翻 text"""
+    report = PROGRESS.get()
+    if report is not None and text.strip():
+        report(text.strip()[:200], who.strip()[:60])
+
 
 READ_LINES = 2000
 LINE_CHARS = 2000

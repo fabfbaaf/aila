@@ -235,6 +235,30 @@ describe('工作窗口：事件折叠', () => {
     expect(t.steps).toEqual([{ prompt: 1000, hit: 900 }])
     expect(t.usage.prompt).toBe(1500)
   })
+
+  it('派几个子 Agent 一起改：各自的卡片实时显示在做什么，做完列出改了哪些文件；收回的那张卡等你确认', () => {
+    const t = new Transcript()
+    t.apply(ev('user', { seq: 1, text: '加两个页面', t: 1 }))
+    const calls = [
+      { id: 'a', name: 'delegate', arguments: '{"title":"写登录页","task":"……"}' },
+      { id: 'b', name: 'delegate', arguments: '{"title":"看改动","task":"……","role":"review"}' }
+    ]
+    t.apply(ev('assistant', { seq: 2, text: '分头做。', tool_calls: calls }))
+    t.apply(ev('tool_start', { id: 'a', name: 'delegate' }))
+    t.apply(ev('tool_start', { id: 'b', name: 'delegate' }))
+    t.apply(ev('tool_progress', { id: 'a', who: '1 写登录页', text: '改 login.vue' }))
+    t.apply(ev('tool_progress', { id: 'b', who: '审查 看改动', text: 'git diff' }))
+    const cards = t.items.filter((i): i is ToolItem => i.kind === 'tool')
+    expect(cards.map((c) => c.action)).toEqual(['派助手做「写登录页」', '派审查员「看改动」'])
+    expect(cards[0].progress).toEqual({ who: '1 写登录页', text: '改 login.vue' })
+    expect(cards[1].progress?.text).toBe('git diff')
+    t.apply(ev('tool', { seq: 3, id: 'a', name: 'delegate', status: 'ok', content: '助手 1 做完了。', worker: '1', files: ['A login.vue', 'M router.ts'], sub: 's1', model: 'deepseek', steps: 6 }))
+    expect(cards[0].progress).toBeUndefined()
+    expect(cards[0].files).toEqual(['A login.vue', 'M router.ts'])
+    // 做完以后再来的进度不算
+    t.apply(ev('tool_progress', { id: 'a', who: '1', text: '晚到的' }))
+    expect(cards[0].progress).toBeUndefined()
+  })
 })
 
 describe('工作窗口：Markdown', () => {

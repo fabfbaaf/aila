@@ -45,6 +45,7 @@ from .shell import Shell, find_shell
 from .snapshots import Snapshots
 from .subagent import Explorer
 from .webtools import WebAccess
+from .workers import Workers, open_workers
 from .tools import CodingTools
 from .workspace import ComputerWorkspace, Workspace
 
@@ -205,9 +206,12 @@ class Runtime:
             from .browsertools import BrowserAccess
 
             browser = BrowserAccess(workspace, session.path)
-            extra = [*extra, explorer.tool(), *web, *browser.tools(), *plan_tools(session.events),
-                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
             policy = Policy(session.cwd, self.rules, mode, self.mcp)
+            # 多智能体：派子 Agent 各在自己的分支里做（用编程用的模型），收回、放弃；权限跟着主会话现在的模式
+            workers = Workers(session, workspace.root, self.shell, self.rules, lambda: policy.mode, self.model_factory,
+                              self.work_dir, web, self.config.context_window)
+            extra = [*extra, explorer.tool(), *web, *workers.tools(), *browser.tools(), *plan_tools(session.events),
+                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
         agent = Agent(
             session,
             self.model_factory(),
@@ -287,6 +291,9 @@ class Runtime:
             agent = self._agents.get(sid)
             if agent is not None:
                 await agent.tools.jobs.stop_all()
+            # 还开着的子 Agent 分支（派出去没收回、也没放弃的）
+            for worker in open_workers(session.events).values():
+                await asyncio.to_thread(discard_branch, worker)
             if info := session.branch:
                 await asyncio.to_thread(discard_branch, BranchInfo.of(info))
                 if Path(info["worktree"]).exists():

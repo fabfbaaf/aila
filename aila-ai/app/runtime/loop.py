@@ -30,7 +30,7 @@ from ..llm import CoderModel, Reasoning, ToolCall, Usage, classify_error
 from .permissions import Policy
 from .prompt import SYSTEM_PROMPT
 from .session import Event, Session
-from .tools import CodingTool, CodingTools, Outcome
+from .tools import PROGRESS, CodingTool, CodingTools, Outcome
 from .workspace import WorkspaceError
 
 log = logging.getLogger("aila.runtime")
@@ -274,9 +274,40 @@ class Agent:
 
         await self.hooks.emit("pre_tool", session=self.session, call=call, args=args)
         yield {"type": "tool_start", "id": call.id, "name": call.name, "status": tool.status(args)}
-        outcome = await self._execute(call, tool, args)
+        progress: asyncio.Queue[Event] = asyncio.Queue()
+        job = self._start(call, tool, args, progress)
+        try:
+            async for e in self._drain(job, progress):
+                yield e
+            outcome = job.result()
+        finally:
+            job.cancel()  # 被打断：工具一起停
         for e in await self._finish_tool(call, args, outcome):
             yield e
+
+    def _start(self, call: ToolCall, tool: CodingTool, args: dict[str, Any],
+               progress: "asyncio.Queue[Event]") -> "asyncio.Task[Outcome]":
+        """开始跑一个工具：它报的进度进 progress 队列（任务创建时带走当时的上下文，所以先设好再创建）"""
+        token = PROGRESS.set(lambda text, who: progress.put_nowait({"type": "tool_progress", "id": call.id, "who": who, "text": text}))
+        try:
+            return asyncio.ensure_future(self._execute(call, tool, args))
+        finally:
+            PROGRESS.reset(token)
+
+    @staticmethod
+    async def _drain(job: "asyncio.Task[Outcome]", progress: "asyncio.Queue[Event]") -> AsyncIterator[Event]:
+        """等 job 跑完，期间把报上来的进度转出去（只推给界面，不写日志）"""
+        while not job.done():
+            getter = asyncio.ensure_future(progress.get())
+            try:
+                done, _ = await asyncio.wait({job, getter}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                if not getter.done():
+                    getter.cancel()
+            if getter in done:
+                yield getter.result()
+        while not progress.empty():
+            yield progress.get_nowait()
 
     def _parallel_batch(self, calls: list[ToolCall], i: int) -> list[ToolCall]:
         """从第 i 个开始，连着的、可以一起跑、而且不用问用户的调用（最多 MAX_PARALLEL 个）"""
@@ -294,14 +325,17 @@ class Agent:
     async def _run_parallel(self, batch: list[ToolCall]) -> AsyncIterator[Event]:
         """一起跑：先都开始，再按调用的顺序记结果（日志里的顺序和模型要求的一样，前缀稳定）"""
         jobs = []
+        progress: asyncio.Queue[Event] = asyncio.Queue()
         for call in batch:
             tool, args = self.tools.tools[call.name], _parse(call.arguments) or {}
             await self.hooks.emit("pre_tool", session=self.session, call=call, args=args)
             yield {"type": "tool_start", "id": call.id, "name": call.name, "status": tool.status(args)}
-            jobs.append((call, args, asyncio.ensure_future(self._execute(call, tool, args))))
+            jobs.append((call, args, self._start(call, tool, args, progress)))
         try:
             for call, args, job in jobs:
-                outcome = await job
+                async for e in self._drain(job, progress):  # 等这一个的时候，别的报的进度也转出去
+                    yield e
+                outcome = job.result()
                 for e in await self._finish_tool(call, args, outcome):
                     yield e
         finally:

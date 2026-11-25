@@ -53,6 +53,7 @@ def localize(text: str, lang: str | None = None) -> str:
 # 事件里哪些字段是给人看的（别的字段、她说的话、工具结果都不动）
 EVENT_FIELDS = {
     "tool_start": ("status",),
+    "tool_progress": ("text",),
     "confirm": ("action", "detail", "reason"),
     "status": ("text",),
     "error": ("message",),

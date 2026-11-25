@@ -22,7 +22,8 @@ const done = computed(() => !['pending', 'asking', 'running'].includes(props.ite
 const failed = computed(() => ['error', 'denied', 'rejected', 'timeout', 'skipped', 'interrupted'].includes(props.item.status))
 const isEdit = computed(() => props.item.name === 'edit_file' || props.item.name === 'write_file')
 const isCommand = computed(() => props.item.name === 'run_command')
-const isExplore = computed(() => props.item.name === 'explore')
+/** 派出去的助手（查资料的 explore、改代码或审查的 delegate）：结果是一份报告 */
+const isExplore = computed(() => props.item.name === 'explore' || props.item.name === 'delegate')
 const asking = computed(() => !!props.item.confirm && !props.item.confirm.result && props.item.status === 'asking')
 
 /** 默认展开：改文件（看 diff）、命令（看输出）、出错、待办、助手的报告；读文件、搜索这些只看一行 */
@@ -66,6 +67,12 @@ const summary = computed(() => {
   }
   if (isEdit.value && props.item.status === 'ok') return c.match(/（\+\d+ −\d+）/)?.[0] ?? ''
   if (isCommand.value) return firstLine(c)
+  if (props.item.name === 'delegate' && props.item.sub && props.item.status === 'ok') {
+    const n = props.item.files?.length ?? 0
+    return n
+      ? t('{model} · {steps} 步 · 改了 {n} 个文件', { model: props.item.sub.model, steps: props.item.sub.steps, n })
+      : t('{model} · {steps} 步', { model: props.item.sub.model, steps: props.item.sub.steps })
+  }
   if (isExplore.value && props.item.sub && props.item.status === 'ok') return t('{model} · 查了 {n} 步', { model: props.item.sub.model, n: props.item.sub.steps })
   return firstLine(c)
 })
@@ -141,6 +148,11 @@ function lineClass(line: string): string {
       </div>
     </div>
     <div v-else-if="answered" class="answered">{{ answered }}</div>
+    <!-- 子 Agent 这会儿在做什么（同一步派了几个时，各自的卡片各自更新） -->
+    <div v-if="!done && item.progress" class="live" role="status">
+      <span class="spin" aria-hidden="true"></span>
+      <b v-if="item.progress.who">{{ item.progress.who }}</b>{{ item.progress.text }}
+    </div>
 
     <template v-if="done && open">
       <div v-if="item.screenshot" class="screenshot">
@@ -157,8 +169,13 @@ function lineClass(line: string): string {
         <pre v-if="output.length" class="output">{{ output.join('\n') }}</pre>
         <button v-if="outputMore > 0 && !showAll" class="more" @click="showAll = true">{{ t('前面还有 {n} 行，展开全部', { n: outputMore }) }}</button>
       </template>
-      <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
-      <div v-else-if="isExplore && item.status === 'ok'" class="report" v-html="renderMarkdown(item.content)"></div>
+      <template v-else-if="isExplore && item.status === 'ok'">
+        <ul v-if="item.files?.length" class="files">
+          <li v-for="f in item.files" :key="f"><span class="st" :class="f[0]">{{ f[0] }}</span>{{ f.slice(2) }}</li>
+        </ul>
+        <!-- eslint-disable-next-line vue/no-v-html：renderMarkdown 先整段转义，只插入固定的几种标签 -->
+        <div class="report" v-html="renderMarkdown(item.content)"></div>
+      </template>
       <ul v-else-if="item.todos" class="todos">
         <li v-for="(t, i) in item.todos" :key="i" :class="t.status">
           <span class="box">{{ t.status === 'completed' ? '☑' : t.status === 'in_progress' ? '◐' : '☐' }}</span>{{ t.content }}
@@ -342,6 +359,68 @@ pre span {
   background: transparent;
   color: var(--accent);
   cursor: pointer;
+}
+
+/* 子 Agent 正在做的事：一行，跟着更新 */
+.live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px 30px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.live b {
+  color: var(--ui-accent-hi, var(--text));
+  font-weight: 600;
+}
+
+.live .spin {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--line-strong, var(--line));
+  border-top-color: var(--ui-accent, #a78bfa);
+  border-radius: 50%;
+  animation: live-spin 0.8s linear infinite;
+}
+
+@keyframes live-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 子 Agent 改了哪些文件 */
+.files {
+  margin: 0;
+  padding: 4px 12px 0 30px;
+  list-style: none;
+  font-family: var(--mono, Consolas, monospace);
+  font-size: 12px;
+}
+
+.files li {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.files .st {
+  width: 12px;
+  font-weight: 700;
+}
+
+.files .st.A {
+  color: var(--ui-ok, #4ade80);
+}
+
+.files .st.M {
+  color: var(--ui-warn, #facc15);
+}
+
+.files .st.D {
+  color: var(--ui-bad, #f87171);
 }
 
 .report {
