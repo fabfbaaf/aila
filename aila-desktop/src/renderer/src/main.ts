@@ -8,5 +8,7 @@ const load = (): Promise<{ default: Component }> => (location.hash.startsWith('#
 
 // 启动卡片（#launch）：透明的小窗口，只有字标，没有预加载接口，也不用定语言
 if (location.hash === '#launch') void import('./shell/LaunchCard.vue').then((m) => createApp(m.default).mount('#app'))
+// 开场演出的全屏特效（#fx）：同样是透明窗口，只画画
+else if (location.hash === '#fx') void import('./shell/FxLayer.vue').then((m) => createApp(m.default).mount('#app'))
 // 先定下语言再画，不然会先闪一下中文
 else void Promise.all([load(), initLang()]).then(([m]) => createApp(m.default).mount('#app'))

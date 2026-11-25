@@ -306,11 +306,31 @@ export class Behavior {
   }
 
   /**
-   * 开场演出里的两个动作：knock 抬手往前敲一下屏幕；turn 停下来、转头直视你（破壁那一下）
+   * 开场演出里的动作：knock 抬手往前敲一下屏幕；turn 停下来、转头直视你（破壁那一下）；
+   * point 转头看着右边的幻灯片、摊手介绍；yawn 张嘴、眯眼、仰头打个哈欠
    */
-  introGesture(name: 'knock' | 'turn'): void {
-    this.lookAtUser()
+  introGesture(name: 'knock' | 'turn' | 'point' | 'yawn'): void {
     this.markActive()
+    if (name === 'point') {
+      // 幻灯片在她左手边（屏幕右边）：先看过去，摊手，一会儿再看回你
+      this.lookGoal.set(2.2, 1.3, 2.2)
+      this.play([
+        { dur: 0.35, expr: { happy: 0.25 }, pose: { armRaise: 0.55, forearmSwing: 0.35, headRoll: -0.06 } },
+        { dur: 1.3, expr: { happy: 0.25 }, pose: { armRaise: 0.5, forearmSwing: 0.25, headRoll: -0.04 } },
+        { dur: 0.4, pose: { armRaise: 0 } }
+      ])
+      setTimeout(() => this.lookAtUser(), 1700)
+      return
+    }
+    this.lookAtUser()
+    if (name === 'yawn') {
+      this.play([
+        { dur: 0.5, expr: { aa: 0.7, blink: 0.6, relaxed: 0.3 }, pose: { headPitch: -0.2, armsUp: 0.4, bodyLean: 0.05 } },
+        { dur: 1.0, expr: { aa: 0.95, blink: 0.85, relaxed: 0.5 }, pose: { headPitch: -0.24, armsUp: 0.55, bodyLean: 0.07 } },
+        { dur: 0.6, expr: { relaxed: 0.5, blink: 0.3 }, pose: { headPitch: 0.04, armsUp: 0 } }
+      ])
+      return
+    }
     if (name === 'knock') {
       this.play([
         { dur: 0.12, pose: { armRaise: 0.75, forearmSwing: -0.6, bodyLean: -0.04 } },

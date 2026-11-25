@@ -958,13 +958,17 @@ onMounted(async () => {
     // 开场演出（shared/intro.ts）：导演让她说的话、做的动作、问借不借鼠标
     subscriptions.push(
       bridge.onIntroCue((c) => {
-        if (c.gesture === 'knock' || c.gesture === 'turn') behavior.introGesture(c.gesture)
+        if (c.gesture === 'knock' || c.gesture === 'turn' || c.gesture === 'point' || c.gesture === 'yawn') behavior.introGesture(c.gesture)
         else if (c.gesture) behavior.gesture(c.gesture)
         if (!c.askMouse) introAsk.value = false // 导演那边不等了（超时当不借、被跳过）：问题收起来
         if (c.askMouse) {
           introAsk.value = true
           behavior.say(c.say ?? INTRO_LINES.askMouse, 60_000)
-        } else if (c.say) behavior.say(c.say, c.ms ?? 3000)
+        } else if (c.say) {
+          // 开着「说话」的话真的念出来（气泡、声音、口型一起），没开就只冒气泡
+          if (voice.enabled) conversation.announce(c.say)
+          else behavior.say(c.say, c.ms ?? 3000)
+        }
       })
     )
     // 叫她去的：到了点点头；自己闲逛到的：偶尔伸个懒腰

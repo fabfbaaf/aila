@@ -64,7 +64,7 @@ import { mainLang, setMainLang, tm } from './lang'
 import { RELEASES_API, dueForCheck, isReleaseUrl, parseRelease, type UpdateInfo } from '../shared/update'
 import { SPOT_NAMES, SPOTS, isMoveTarget, targetPosition, walkDuration, walkPoint, type MoveTarget } from '../shared/move'
 import { ENTRANCE_MS, cardBounds, emergePosition, homePosition, jumpHeight, jumpPoint, shouldEnter, type Point, type StagePhase } from '../shared/entrance'
-import { introMainBounds, presenterPosition, shouldIntro } from '../shared/intro'
+import { introMainBounds, presenterPosition, shouldIntro, type FxCommand } from '../shared/intro'
 import { IntroDirector } from './intro'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
@@ -449,6 +449,52 @@ function walkToPoint(to: Point): Promise<void> {
   })
 }
 
+/** 开场演出的全屏特效窗口（shell/FxLayer.vue）：铺满工作区、透明、点不到；没有预加载接口，指令直接调页面里的 window.__fx */
+let fxWin: BrowserWindow | null = null
+
+function openFx(): Promise<void> {
+  if (fxWin && !fxWin.isDestroyed()) return Promise.resolve()
+  const wa = screen.getPrimaryDisplay().workArea
+  const w = new BrowserWindow({
+    ...wa,
+    transparent: true,
+    backgroundColor: '#00000000',
+    frame: false,
+    resizable: false,
+    movable: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    webPreferences: { contextIsolation: true, sandbox: true }
+  })
+  w.setIgnoreMouseEvents(true)
+  w.setAlwaysOnTop(true, 'floating')
+  fxWin = w
+  w.on('closed', () => {
+    if (fxWin === w) fxWin = null
+  })
+  loadPage(w, 'fx')
+  return new Promise((resolve) => {
+    w.once('ready-to-show', () => {
+      w.showInactive()
+      win?.moveTop() // 她在特效上面
+      resolve()
+    })
+  })
+}
+
+function sendFx(c: FxCommand): void {
+  if (!fxWin || fxWin.isDestroyed()) return
+  void fxWin.webContents.executeJavaScript(`window.__fx && window.__fx(${JSON.stringify(c)})`).catch(() => undefined)
+}
+
+function closeFx(): void {
+  if (fxWin && !fxWin.isDestroyed()) fxWin.destroy()
+  fxWin = null
+}
+
 function createIntro(): IntroDirector {
   let escape: (() => void) | null = null
   return new IntroDirector({
@@ -474,7 +520,8 @@ function createIntro(): IntroDirector {
         escape = null
       }
     },
-    markDone: () => saveSettings({ ...loadSettings(), introDone: true })
+    markDone: () => saveSettings({ ...loadSettings(), introDone: true }),
+    fx: { open: openFx, send: sendFx, close: closeFx }
   })
 }
 
