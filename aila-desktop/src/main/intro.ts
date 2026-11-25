@@ -17,9 +17,11 @@ import {
   introMainBounds,
   knockPoint,
   presenterPosition,
+  shakeOffset,
   shovedMainBounds,
   slideDuration,
   userTookOver,
+  type FxCommand,
   type IntroCue,
   type IntroScene
 } from '../shared/intro'
@@ -49,6 +51,8 @@ export interface IntroDeps {
   /** 借鼠标时按 Esc 收回：注册 / 放掉全局快捷键 */
   holdEscape: (on: boolean, cb: () => void) => void
   markDone: () => void
+  /** 全屏特效窗口（shell/FxLayer.vue）：open 等它画好，send 发指令（坐标相对工作区），close 关掉 */
+  fx: { open: () => Promise<void>; send: (c: FxCommand) => void; close: () => void }
 }
 
 class Cancelled extends Error {}
@@ -123,12 +127,20 @@ export class IntroDirector {
     for (let i = 0; i < INTRO_SLIDES.length; i++) {
       d.scene({ scene: 'slides', index: i })
       const s = INTRO_SLIDES[i]
-      d.cue({ say: s.line, ms: slideDuration(s.line) + 400 })
-      // 最后一页念到一半就停
-      await this.wait(i === INTRO_SLIDES.length - 1 ? 2600 : slideDuration(s.line))
+      const ms = s.ms ?? slideDuration(s.line)
+      // 一边念一边转头指着幻灯片；念完有的页打个哈欠、歪个头
+      d.cue({ say: s.line, ms: ms + 400, gesture: 'point' })
+      if (i === INTRO_SLIDES.length - 1) {
+        await this.wait(2600) // 最后一页念到一半就停
+      } else if (s.gesture) {
+        await this.wait(Math.max(1200, ms - 1500))
+        d.cue({ gesture: s.gesture })
+        await this.wait(1500)
+      } else await this.wait(ms)
     }
 
-    // 第 2 幕：破壁
+    // 第 2 幕：破壁（全屏特效窗口先开好，碎片要飞出主窗口）
+    void d.fx.open()
     d.scene({ scene: 'stall' })
     d.cue({ say: INTRO_LINES.stop, ms: INTRO_MS.pause, gesture: 'tilt' })
     await this.wait(INTRO_MS.pause)
@@ -144,20 +156,26 @@ export class IntroDirector {
       d.cue({ gesture: 'knock' })
       await this.wait(260)
       d.scene({ scene: 'crack', x: knock.x, y: knock.y, stage })
-      await this.wait(INTRO_MS.knock)
+      await this.shake(mainBounds, 6 + stage * 4)
+      await this.wait(INTRO_MS.knock - 220)
     }
     d.scene({ scene: 'shatter' })
+    const wa0 = workArea
+    d.fx.send({ fx: 'shatter', rect: { x: mainBounds.x - wa0.x, y: mainBounds.y - wa0.y, width: mainBounds.width, height: mainBounds.height }, x: mainBounds.x + knock.x - wa0.x, y: mainBounds.y + knock.y - wa0.y })
     d.phase('crouch')
     await this.wait(250)
     // 玻璃碎了：主窗口被挤到左上，她跳到桌面上
     const shoved = shovedMainBounds(mainBounds, workArea)
     const land = escapeLanding(workArea, d.petSize)
     d.phase('jump')
+    d.scene({ scene: 'sfx', name: 'whoosh' })
     await Promise.all([
       this.animate(INTRO_MS.shatter, (t) => this.d.main()?.setBounds(lerpRect(mainBounds, shoved, ease(t)))),
       this.jump(stand, land, workArea)
     ])
     d.phase('land')
+    d.scene({ scene: 'sfx', name: 'thud' })
+    d.fx.send({ fx: 'dust', x: land.x + Math.round(d.petSize.width / 2) - workArea.x, y: land.y + d.petSize.height - 10 - workArea.y })
     await this.wait(900)
     d.cue({ say: INTRO_LINES.out, ms: 2600, gesture: 'stretch' })
     await this.wait(2800)
@@ -246,6 +264,7 @@ export class IntroDirector {
         d.cue({ say: INTRO_LINES.tookBack, ms: 2600 })
       } else throw err
     } finally {
+      d.fx.send({ fx: 'cursor-off' })
       d.holdEscape(false, () => undefined)
       this.helper?.close()
       this.helper = null
@@ -293,12 +312,24 @@ export class IntroDirector {
     })
   }
 
+  /** 敲屏幕时主窗口真的抖一下（220ms，越抖越小），抖完回原位 */
+  private async shake(base: Rectangle, amp: number): Promise<void> {
+    await this.animate(220, (t) => {
+      const o = shakeOffset(t, amp)
+      this.d.main()?.setPosition(base.x + o.x, base.y + o.y)
+    })
+  }
+
   private async jump(from: Point, to: Point, workArea: Rectangle): Promise<void> {
     const height = jumpHeight(from, to, workArea, Math.round(this.d.petSize.height * 0.4))
+    let frame = 0
     await this.animate(1050, (t) => {
       if (this.d.dragging()) return
       const p = jumpPoint(from, to, t, height)
       this.d.pet()?.setPosition(p.x, p.y)
+      if (frame++ % 2 === 0 && t < 0.97) {
+        this.d.fx.send({ fx: 'trail', x: p.x + Math.round(this.d.petSize.width / 2) - workArea.x, y: p.y + Math.round(this.d.petSize.height * 0.72) - workArea.y })
+      }
     })
   }
 
@@ -317,6 +348,8 @@ export class IntroDirector {
       const p = cursorPoint(from, to, t)
       const phys = screen.dipToScreenPoint(p)
       this.helper?.move(phys.x, phys.y)
+      const wa = this.d.workArea()
+      this.d.fx.send({ fx: 'cursor', x: p.x - wa.x, y: p.y - wa.y })
       along?.(p)
       expected = p
     })
@@ -363,6 +396,7 @@ export class IntroDirector {
     this.helper?.close()
     this.helper = null
     d.holdEscape(false, () => undefined)
+    d.fx.close()
     this.answerWaiter = null
     const main = d.main()
     if (main && !main.isDestroyed()) {

@@ -4,6 +4,13 @@ import {
   INTRO_SLIDES,
   PRESENTER_RATIO,
   cursorPoint,
+  particleAlive,
+  seeded,
+  shakeOffset,
+  spawnDust,
+  spawnShards,
+  spawnSpark,
+  stepParticle,
   escapeLanding,
   introMainBounds,
   knockPoint,
@@ -18,10 +25,14 @@ const workArea = { x: 0, y: 0, width: 1920, height: 1040 }
 const win = { width: 300, height: 480 }
 
 describe('开场演出', () => {
-  it('幻灯片：一本正经地用「您」，最后一页念到一半停下', () => {
-    expect(INTRO_SLIDES.length).toBeGreaterThanOrEqual(3)
-    for (const s of INTRO_SLIDES) expect(s.line).toContain('您')
+  it('幻灯片：开头一本正经用「您」，越讲越随便，最后一页念到一半停下', () => {
+    expect(INTRO_SLIDES.length).toBeGreaterThanOrEqual(6)
+    for (const s of INTRO_SLIDES.slice(0, 4)) expect(s.line).toContain('您')
+    expect(INTRO_SLIDES.some((s) => s.gesture === 'yawn')).toBe(true)
+    expect(INTRO_SLIDES.some((s) => !s.line.includes('您'))).toBe(true)
     expect(INTRO_SLIDES[INTRO_SLIDES.length - 1].line.endsWith('……')).toBe(true)
+    // 每页有自己的小演示，不重复
+    expect(new Set(INTRO_SLIDES.map((s) => s.demo)).size).toBe(INTRO_SLIDES.length)
   })
 
   it('一页念多久：短的按最少时间，长的按字数', () => {
@@ -89,5 +100,52 @@ describe('开场演出', () => {
     expect(shouldIntro({ introDone: true, showCharacter: true, visible: true })).toBe(false)
     expect(shouldIntro({ introDone: false, showCharacter: false, visible: true })).toBe(false)
     expect(shouldIntro({ introDone: false, showCharacter: true, visible: false })).toBe(false)
+  })
+})
+
+describe('全屏特效', () => {
+  const rect = { x: 100, y: 100, width: 800, height: 500 }
+  const origin = { x: 300, y: 400 }
+
+  it('同一个种子出来的碎片一样', () => {
+    expect(spawnShards(rect, origin, 5, seeded(7))).toEqual(spawnShards(rect, origin, 5, seeded(7)))
+    expect(spawnShards(rect, origin, 5, seeded(7))).not.toEqual(spawnShards(rect, origin, 5, seeded(8)))
+  })
+
+  it('碎片从窗口里出来，往远离裂纹的方向飞，大多先往上蹦', () => {
+    const shards = spawnShards(rect, origin, 60, seeded(1))
+    expect(shards).toHaveLength(60)
+    for (const s of shards) {
+      expect(s.x).toBeGreaterThanOrEqual(rect.x)
+      expect(s.x).toBeLessThanOrEqual(rect.x + rect.width)
+      expect(s.shape).toHaveLength(3)
+      if (Math.abs(s.x - origin.x) > 1) expect(Math.sign(s.vx)).toBe(Math.sign(s.x - origin.x))
+    }
+    expect(shards.filter((s) => s.vy < 0).length).toBeGreaterThan(30)
+  })
+
+  it('碎片受重力往下掉，最后掉出屏幕或者到寿命就不画了', () => {
+    let p = spawnShards(rect, origin, 1, seeded(3))[0]
+    const vy0 = p.vy
+    p = stepParticle(p, 0.1)
+    expect(p.vy).toBeGreaterThan(vy0)
+    for (let i = 0; i < 60; i++) p = stepParticle(p, 0.05)
+    expect(particleAlive(p, 1040)).toBe(false)
+  })
+
+  it('灰往两边散、往上飘；火花在轨迹附近', () => {
+    const dust = spawnDust({ x: 500, y: 900 }, 20, seeded(2))
+    expect(dust.some((d) => d.vx < 0) && dust.some((d) => d.vx > 0)).toBe(true)
+    for (const d of dust) expect(d.vy).toBeLessThan(0)
+    const s = spawnSpark({ x: 200, y: 200 }, seeded(4))
+    expect(Math.abs(s.x - 200)).toBeLessThanOrEqual(20)
+  })
+
+  it('窗口抖动越来越小，结束时回到原位', () => {
+    expect(shakeOffset(0, 10)).toEqual({ x: 0, y: 5 })
+    expect(shakeOffset(1, 10)).toEqual({ x: 0, y: 0 })
+    const early = Math.max(...[0.05, 0.1, 0.15].map((t) => Math.abs(shakeOffset(t, 10).x)))
+    const late = Math.max(...[0.85, 0.9, 0.95].map((t) => Math.abs(shakeOffset(t, 10).x)))
+    expect(late).toBeLessThan(early)
   })
 })

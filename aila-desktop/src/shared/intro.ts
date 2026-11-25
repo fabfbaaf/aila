@@ -1,7 +1,8 @@
 /**
  * 开场演出：第一次打开艾拉时演一遍（设置 → 桌面里能再看一遍），任何时候按「跳过」或 Esc 都能结束。
  *
- * 1. 一本正经：主窗口变成一份很正式的产品介绍幻灯片，她站在左边当讲解员，用「您」一页页念功能
+ * 1. 一本正经：主窗口变成一份很正式的产品介绍幻灯片（每页一个小演示），她站在左边当讲解员，用「您」一页页念功能，
+ *    越念越随便：打哈欠、念得飞快
  * 2. 破壁：讲到地图那页她停下来，转头看你——「……算了，这些你自己点开看也行吧。」画面出故障、乱码，
  *    她敲敲屏幕，玻璃裂开碎掉，主窗口被挤到一边，她从窗口里跳到桌面上
  * 3. 借鼠标：她在气泡里问「借一下你的鼠标？」。你点了「借给你」才动：真的光标被她挪着走，
@@ -16,32 +17,73 @@
 
 import type { Point, Rect } from './entrance'
 
-/** 一页幻灯片：标题、几条要点、她念的那句（念的时候故意用「您」，一本正经） */
+/** 每页幻灯片上演的小演示（画面在 shell/IntroLayer.vue） */
+export type IntroDemo = 'welcome' | 'terminal' | 'diff' | 'memory' | 'voice' | 'works' | 'ext' | 'stars'
+
+/**
+ * 一页幻灯片：标题、几条要点、小演示、她念的那句。
+ * 越讲越随便：前几页规规矩矩用「您」，讲到语音那页打个哈欠，后面越念越快，地图那页念到一半就不念了。
+ * ms：这一页停多久（不给就按台词长短算）；gesture：念完以后做的动作
+ */
 export interface IntroSlide {
   title: string
   points: string[]
+  demo: IntroDemo
   line: string
+  ms?: number
+  gesture?: 'yawn' | 'tilt' | 'nod'
 }
 
 export const INTRO_SLIDES: IntroSlide[] = [
   {
     title: '欢迎使用艾拉',
     points: ['开源编程 Agent', '桌面伙伴', '本地运行，代码不出这台电脑'],
+    demo: 'welcome',
     line: '您好，欢迎使用艾拉。我是本产品的智能助手，接下来由我为您介绍主要功能。'
   },
   {
     title: '任务',
-    points: ['读代码、改文件、跑命令和测试', '改动之前按您选择的权限征求同意', '可以在新分支上做，测试全过再合并'],
-    line: '在「任务」页，您可以把编程任务交给我。我会读代码、改文件、跑测试，改动之前按您选择的权限征求同意。'
+    points: ['读代码、改文件、跑命令和测试', '一直做到测试全过', '终端和桌面看同一份进度'],
+    demo: 'terminal',
+    line: '在「任务」页，您可以把编程任务交给我。我会读代码、改文件、跑测试，直到做完为止。'
+  },
+  {
+    title: '权限与分支',
+    points: ['只读 / 先问再改 / 工作区内自动', '删除、推送这类危险命令一定先问', '在新分支上做，测试全过再合并'],
+    demo: 'diff',
+    line: '每次改动之前，我都会按您选择的权限征求同意。您也可以让我在新分支上做，测试全部通过再合并。'
   },
   {
     title: '对话与记忆',
-    points: ['随时聊天，按 Alt+Shift+A 叫我', '记住您告诉我的事', '每周五写一份回顾'],
-    line: '在「对话」页，您可以与我交流。我会记住您告诉我的事情，在合适的时候用上。'
+    points: ['随时聊天，按 Alt+Shift+A 叫我', '记住您告诉我的事', '登录后几台电脑之间同步'],
+    demo: 'memory',
+    line: '在「对话」页，您可以与我交流。我会记住您告诉我的事情……比如您不喝咖啡。'
+  },
+  {
+    title: '语音与屏幕',
+    points: ['说「你好艾拉」叫我', '看到屏幕上的报错，主动问要不要帮忙', '摄像头、麦克风、屏幕都要您打开开关才用'],
+    demo: 'voice',
+    line: '说一声「你好艾拉」就能叫我。开着看屏幕的话，看到报错我会主动问您要不要帮忙……',
+    gesture: 'yawn'
+  },
+  {
+    title: '作品、日记、周报',
+    points: ['隔几天自己做个小作品', '每天晚上写日记', '每周五写一份能当周报的回顾'],
+    demo: 'works',
+    line: '我还会自己做点小作品，每天写日记，每周五写回顾。嗯。',
+    gesture: 'tilt'
+  },
+  {
+    title: '终端和扩展',
+    points: ['终端里打 aila 也能用', '装扩展：命令、本事、工具服务', '接 MCP 外部工具'],
+    demo: 'ext',
+    line: '终端、扩展、MCP，都有。下一页。',
+    ms: 2600
   },
   {
     title: '代码星图',
     points: ['每个文件是一颗星', '我读过、改过的会亮起来', '用手势转动、放大'],
+    demo: 'stars',
     // 念到一半就不念了（后面接破壁）
     line: '在「项目」页的地图里，您的代码会变成一片……'
   }
@@ -164,6 +206,9 @@ export function shouldIntro(o: { introDone: boolean; showCharacter: boolean; vis
   return !o.introDone && o.showCharacter && o.visible
 }
 
+/** 音效（主窗口里用 Web Audio 现合成，shell/introSfx.ts） */
+export type SfxName = 'page' | 'type' | 'glitch' | 'knock' | 'crack' | 'shatter' | 'whoosh' | 'thud' | 'click' | 'chime'
+
 /** 主进程发给主窗口的画面指令 */
 export type IntroScene =
   | { scene: 'slides'; index: number }
@@ -173,6 +218,7 @@ export type IntroScene =
   | { scene: 'shatter' }
   | { scene: 'click'; x: number; y: number }
   | { scene: 'type'; text: string }
+  | { scene: 'sfx'; name: SfxName }
   | { scene: 'checklist' }
   | { scene: 'end' }
 
@@ -180,7 +226,104 @@ export type IntroScene =
 export interface IntroCue {
   say?: string
   ms?: number
-  gesture?: 'wave' | 'nod' | 'tilt' | 'stretch' | 'knock' | 'turn'
+  gesture?: 'wave' | 'nod' | 'tilt' | 'stretch' | 'knock' | 'turn' | 'point' | 'yawn'
   /** 在气泡里问借不借鼠标（回答走 intro:answer） */
   askMouse?: boolean
+}
+
+// ---------- 全屏特效（玻璃碎片飞出窗口、跳跃的轨迹、落地的灰、借鼠标时光标外的光圈） ----------
+// 特效窗口铺满整个工作区、透明、点不到（shell/FxLayer.vue），坐标都是相对工作区左上角的
+
+/** 主进程发给特效窗口的指令 */
+export type FxCommand =
+  | { fx: 'shatter'; rect: Rect; x: number; y: number }
+  | { fx: 'trail'; x: number; y: number }
+  | { fx: 'dust'; x: number; y: number }
+  | { fx: 'cursor'; x: number; y: number }
+  | { fx: 'cursor-off' }
+  | { fx: 'clear' }
+
+/** 一个粒子：碎片（三角形）、火花、灰 */
+export interface Particle {
+  kind: 'shard' | 'spark' | 'dust'
+  x: number
+  y: number
+  vx: number
+  vy: number
+  rot: number
+  vr: number
+  /** 还剩几秒 */
+  life: number
+  max: number
+  size: number
+  /** 碎片的三个角（相对中心） */
+  shape?: [number, number][]
+}
+
+/** 有种子的随机数（mulberry32）：同一个种子出来的碎片一样，测试和每次播放都稳定 */
+export function seeded(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** 玻璃碎了：窗口范围里散出一堆三角碎片，从裂纹中心往外飞、先往上蹦一下再掉下去 */
+export function spawnShards(rect: Rect, origin: Point, count: number, rand: () => number): Particle[] {
+  const out: Particle[] = []
+  for (let i = 0; i < count; i++) {
+    const x = rect.x + rand() * rect.width
+    const y = rect.y + rand() * rect.height
+    const dx = x - origin.x
+    const dy = y - origin.y
+    const d = Math.hypot(dx, dy) || 1
+    const speed = 380 + rand() * 820
+    const size = 14 + rand() * 46
+    const shape: [number, number][] = [0, 1, 2].map((k) => {
+      const a = (k / 3) * Math.PI * 2 + rand() * 1.4
+      const r = size * (0.5 + rand() * 0.6)
+      return [Math.cos(a) * r, Math.sin(a) * r]
+    })
+    const life = 1.6 + rand() * 1.2
+    out.push({ kind: 'shard', x, y, vx: (dx / d) * speed, vy: (dy / d) * speed - 260 - rand() * 380, rot: rand() * Math.PI, vr: (rand() - 0.5) * 12, life, max: life, size, shape })
+  }
+  return out
+}
+
+/** 落地时脚边扬起的一小撮灰：往两边散开、慢慢往上飘、变淡 */
+export function spawnDust(at: Point, count: number, rand: () => number): Particle[] {
+  return Array.from({ length: count }, () => {
+    const side = rand() < 0.5 ? -1 : 1
+    const life = 0.5 + rand() * 0.5
+    return { kind: 'dust' as const, x: at.x + side * rand() * 30, y: at.y - rand() * 6, vx: side * (60 + rand() * 160), vy: -(20 + rand() * 70), rot: 0, vr: 0, life, max: life, size: 6 + rand() * 12 }
+  })
+}
+
+/** 跳跃轨迹上的一颗火花：原地闪一下、往下掉一点就没了 */
+export function spawnSpark(at: Point, rand: () => number): Particle {
+  const life = 0.45 + rand() * 0.35
+  return { kind: 'spark', x: at.x + (rand() - 0.5) * 40, y: at.y + (rand() - 0.5) * 40, vx: (rand() - 0.5) * 60, vy: 20 + rand() * 60, rot: 0, vr: 0, life, max: life, size: 2 + rand() * 4 }
+}
+
+/** 往前走 dt 秒：碎片受重力掉得快，灰几乎不受重力，火花轻轻往下掉 */
+export function stepParticle(p: Particle, dt: number): Particle {
+  const gravity = p.kind === 'shard' ? 1700 : p.kind === 'spark' ? 220 : -30
+  const drag = p.kind === 'dust' ? Math.pow(0.15, dt) : 1
+  return { ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vx: p.vx * drag, vy: p.vy * drag + gravity * dt, rot: p.rot + p.vr * dt, life: p.life - dt }
+}
+
+/** 还要不要画：没到寿命、没掉出屏幕底下太多 */
+export function particleAlive(p: Particle, height: number): boolean {
+  return p.life > 0 && p.y < height + 120
+}
+
+/** 敲屏幕时窗口抖一下：第 t（0~1）时刻偏多少，越抖越小 */
+export function shakeOffset(t: number, amp: number): Point {
+  if (t >= 1 || t < 0) return { x: 0, y: 0 }
+  const fade = 1 - t
+  return { x: Math.round(Math.sin(t * Math.PI * 9) * amp * fade), y: Math.round(Math.cos(t * Math.PI * 7) * amp * 0.5 * fade) }
 }

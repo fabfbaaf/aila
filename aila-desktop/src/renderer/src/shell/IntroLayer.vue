@@ -9,6 +9,8 @@
  * - 打字：交给对话页的输入框（intents.chatDraftRequest），只填不发
  * - 收尾清单：开始用之前要做的几件事，你自己关
  *
+ * - 每页一个小演示（IntroDemo.vue），翻页、打字、故障、敲、碎、点都有音效（introSfx.ts，右上角能静音）
+ *
  * 任何时候点「跳过介绍」或按 Esc 都告诉导演结束。
  */
 import { t } from '../i18n'
@@ -16,6 +18,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { INTRO_SLIDES, PRESENTER_RATIO, type IntroScene } from '../../../shared/intro'
 import { bridge } from '../platform/bridge'
 import BrandMark from '../theme/BrandMark.vue'
+import IntroDemo from './IntroDemo.vue'
+import { IntroSfx } from './introSfx'
 import { chatDraftRequest, newTaskRequest } from './intents'
 import type { ShellRoute } from '../../../shared/shell'
 
@@ -30,6 +34,12 @@ const ripples = ref<{ id: number; x: number; y: number }[]>([])
 /** 故障时的乱码标题（null = 正常标题） */
 const garbled = ref<string | null>(null)
 let rippleId = 0
+const sfx = new IntroSfx()
+const muted = ref(sfx.muted)
+function toggleMute(): void {
+  sfx.setMuted(!muted.value)
+  muted.value = sfx.muted
+}
 let glitchTimer = 0
 const offs: (() => void)[] = []
 
@@ -86,6 +96,7 @@ const shards = computed(() => {
 function onScene(s: IntroScene): void {
   switch (s.scene) {
     case 'slides':
+      if (mode.value !== 'slides' || index.value !== s.index) sfx.play('page')
       mode.value = 'slides'
       index.value = s.index
       crack.value = null
@@ -96,6 +107,7 @@ function onScene(s: IntroScene): void {
       break
     case 'glitch': {
       mode.value = 'glitch'
+      sfx.play('glitch')
       const title = t(slide.value.title)
       const begin = Date.now()
       clearInterval(glitchTimer)
@@ -107,24 +119,33 @@ function onScene(s: IntroScene): void {
     }
     case 'crack':
       clearInterval(glitchTimer)
+      sfx.play('knock')
+      window.setTimeout(() => sfx.play('crack'), 60)
       crack.value = { x: s.x, y: s.y, stage: s.stage }
       shaking.value = false
       requestAnimationFrame(() => (shaking.value = true))
       break
     case 'shatter':
+      sfx.play('shatter')
       mode.value = 'shatter'
       window.setTimeout(() => mode.value === 'shatter' && (mode.value = null), 1200)
       break
     case 'click': {
+      sfx.play('click')
       const id = ++rippleId
       ripples.value.push({ id, x: s.x, y: s.y })
       window.setTimeout(() => (ripples.value = ripples.value.filter((r) => r.id !== id)), 700)
       break
     }
     case 'type':
+      sfx.play('type')
       chatDraftRequest.value = s.text
       break
+    case 'sfx':
+      sfx.play(s.name)
+      break
     case 'checklist':
+      sfx.play('chime')
       mode.value = 'checklist'
       break
     case 'end':
@@ -177,12 +198,14 @@ onBeforeUnmount(() => {
         <header class="head">
           <BrandMark :size="34" />
           <span class="org">{{ t('艾拉 · 产品介绍') }}</span>
+          <button class="mute" :title="muted ? t('打开声音') : t('静音')" @click="toggleMute">{{ muted ? '🔇' : '🔊' }}</button>
           <button class="skip" @click="skip">{{ t('跳过介绍') }}</button>
         </header>
         <h1 :key="index">{{ garbled ?? t(slide.title) }}</h1>
-        <ul :key="`p${index}`">
+        <ul :key="`p${index}`" class="points">
           <li v-for="(p, i) in slide.points" :key="p" :style="{ animationDelay: `${0.25 + i * 0.18}s` }">{{ mode === 'glitch' ? garble(t(p), 0.35) : t(p) }}</li>
         </ul>
+        <IntroDemo :key="`d${index}`" :demo="slide.demo" @sfx="(n) => sfx.play(n)" />
         <footer class="foot">
           <span>{{ index + 1 }} / {{ INTRO_SLIDES.length }}</span>
           <span class="bar"><i :style="{ width: `${((index + 1) / INTRO_SLIDES.length) * 100}%` }"></i></span>
@@ -283,8 +306,17 @@ onBeforeUnmount(() => {
   letter-spacing: 0.04em;
 }
 
-.skip {
+.mute {
   margin-left: auto;
+  padding: 5px 9px;
+  border: 1px solid #cfd3df;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.skip {
   padding: 6px 14px;
   border: 1px solid #cfd3df;
   border-radius: 6px;
@@ -300,8 +332,8 @@ onBeforeUnmount(() => {
 }
 
 h1 {
-  margin: 12vh 0 28px;
-  font-size: 40px;
+  margin: 5vh 0 14px;
+  font-size: 36px;
   font-weight: 700;
   letter-spacing: 0.02em;
   animation: rise 0.5s ease-out both;
@@ -311,14 +343,15 @@ ul {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: grid;
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
 }
 
 li {
   position: relative;
-  padding-left: 22px;
-  font-size: 19px;
+  padding-left: 16px;
+  font-size: 15px;
   color: #3a4155;
   animation: rise 0.45s ease-out both;
 }
@@ -328,8 +361,8 @@ li::before {
   position: absolute;
   left: 0;
   top: 0.55em;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 2px;
   background: #4f6bed;
 }
