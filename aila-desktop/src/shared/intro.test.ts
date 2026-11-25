@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   INTRO_MS,
-  INTRO_SLIDES,
+  INTRO_TOUR,
   PRESENTER_RATIO,
+  bumpPoint,
   cursorPoint,
+  magicCenter,
+  spawnCharge,
+  magicCracks,
   particleAlive,
   seeded,
   shakeOffset,
@@ -17,7 +21,8 @@ import {
   presenterPosition,
   shouldIntro,
   shovedMainBounds,
-  slideDuration,
+  standBeside,
+  stopDuration,
   userTookOver
 } from './intro'
 
@@ -25,19 +30,39 @@ const workArea = { x: 0, y: 0, width: 1920, height: 1040 }
 const win = { width: 300, height: 480 }
 
 describe('开场演出', () => {
-  it('幻灯片：开头一本正经用「您」，越讲越随便，最后一页念到一半停下', () => {
-    expect(INTRO_SLIDES.length).toBeGreaterThanOrEqual(6)
-    for (const s of INTRO_SLIDES.slice(0, 4)) expect(s.line).toContain('您')
-    expect(INTRO_SLIDES.some((s) => s.gesture === 'yawn')).toBe(true)
-    expect(INTRO_SLIDES.some((s) => !s.line.includes('您'))).toBe(true)
-    expect(INTRO_SLIDES[INTRO_SLIDES.length - 1].line.endsWith('……')).toBe(true)
-    // 每页有自己的小演示，不重复
-    expect(new Set(INTRO_SLIDES.map((s) => s.demo)).size).toBe(INTRO_SLIDES.length)
+  it('导览：在真实页面里一站站讲，开头一本正经用「您」，越讲越随便，最后一站念到一半停下', () => {
+    expect(INTRO_TOUR.length).toBeGreaterThanOrEqual(5)
+    for (const s of INTRO_TOUR.slice(0, 3)) expect(s.line).toContain('您')
+    expect(INTRO_TOUR.some((s) => s.gesture === 'yawn')).toBe(true)
+    expect(INTRO_TOUR.some((s) => !s.line.includes('您'))).toBe(true)
+    expect(INTRO_TOUR[INTRO_TOUR.length - 1].line.endsWith('……')).toBe(true)
+    expect(INTRO_TOUR[INTRO_TOUR.length - 1].route.page).toBe('projects')
+    // 几个主要页面都去了
+    const pages = new Set(INTRO_TOUR.map((s) => s.route.page))
+    for (const p of ['tasks', 'chat', 'memory', 'studio', 'settings', 'projects']) expect(pages.has(p as never)).toBe(true)
   })
 
-  it('一页念多久：短的按最少时间，长的按字数', () => {
-    expect(slideDuration('短')).toBe(INTRO_MS.slide)
-    expect(slideDuration('字'.repeat(100))).toBeGreaterThan(INTRO_MS.slide)
+  it('一站念多久：短的按最少时间，长的按字数', () => {
+    expect(stopDuration('短')).toBe(INTRO_MS.slide)
+    expect(stopDuration('字'.repeat(100))).toBeGreaterThan(INTRO_MS.slide)
+  })
+
+  it('她站在聚光灯照着的东西旁边：东西在左边她站右边，反过来也一样；脚在窗口里，人不出窗口', () => {
+    const content = { x: 200, y: 100, width: 1000, height: 640 }
+    const leftThing = standBeside({ x: 40, y: 80, width: 120, height: 40 }, content, win)
+    expect(leftThing.x + win.width / 2).toBeGreaterThan(content.x + 160)
+    const rightThing = standBeside({ x: 800, y: 80, width: 120, height: 40 }, content, win)
+    expect(rightThing.x + win.width / 2).toBeLessThan(content.x + 800)
+    for (const p of [leftThing, rightThing, standBeside({ x: 0, y: 600, width: 1000, height: 40 }, content, win)]) {
+      const feet = p.y + win.height
+      expect(feet).toBeLessThanOrEqual(content.y + content.height)
+      expect(feet).toBeGreaterThanOrEqual(content.y + 220)
+      expect(p.x).toBeGreaterThanOrEqual(content.x)
+      expect(p.x + win.width).toBeLessThanOrEqual(content.x + content.width)
+    }
+    // 铺满页面的大东西：她站到正中间
+    const huge = standBeside({ x: 60, y: 40, width: 1400, height: 900 }, content, win)
+    expect(Math.abs(huge.x + win.width / 2 - (content.x + content.width / 2))).toBeLessThanOrEqual(1)
   })
 
   it('主窗口在屏幕中间，小屏幕上不超出', () => {
@@ -59,23 +84,22 @@ describe('开场演出', () => {
     expect(feet).toBeGreaterThan(main.y + main.height - 40)
   })
 
-  it('敲屏幕的点换算成主窗口里的坐标，落在窗口里', () => {
-    const main = introMainBounds(workArea)
-    const k = knockPoint(presenterPosition(main, win), win, main)
-    expect(k.x).toBeGreaterThan(0)
-    expect(k.x).toBeLessThan(main.width)
-    expect(k.y).toBeGreaterThan(0)
-    expect(k.y).toBeLessThan(main.height)
+  it('敲玻璃的点是她的手（屏幕坐标），在她身子范围里', () => {
+    const pet = { x: 400, y: 300 }
+    const k = knockPoint(pet, win)
+    expect(k.x).toBeGreaterThan(pet.x + win.width / 2)
+    expect(k.x).toBeLessThan(pet.x + win.width)
+    expect(k.y).toBeGreaterThan(pet.y + win.height / 2)
   })
 
   it('碎了以后主窗口缩小挤到左上；她落在屏幕右边的地上', () => {
-    const main = introMainBounds(workArea)
-    const s = shovedMainBounds(main, workArea)
-    expect(s.width).toBeLessThan(main.width)
-    expect(s.x).toBeLessThan(main.x)
+    const s = shovedMainBounds(workArea)
+    expect(s.width).toBeLessThan(workArea.width * 0.7)
+    expect(s.height).toBeLessThan(workArea.height * 0.7)
     const land = escapeLanding(workArea, win)
     expect(land.y + win.height).toBe(workArea.height)
-    expect(land.x + win.width / 2).toBeGreaterThan(workArea.width / 2)
+    // 她落在挤小的主窗口外面
+    expect(land.x).toBeGreaterThan(s.x + s.width)
   })
 
   it('光标两头是起点终点，中间在两点之间', () => {
@@ -147,5 +171,59 @@ describe('全屏特效', () => {
     const early = Math.max(...[0.05, 0.1, 0.15].map((t) => Math.abs(shakeOffset(t, 10).x)))
     const late = Math.max(...[0.85, 0.9, 0.95].map((t) => Math.abs(shakeOffset(t, 10).x)))
     expect(late).toBeLessThan(early)
+  })
+})
+
+describe('用魔法破壁', () => {
+  const main = introMainBounds(workArea)
+  const stand = presenterPosition(main, win)
+
+  it('第一次试：往离她近的那边走到贴着窗口边；撞到的点在那条边上、她胸口的高度', () => {
+    const b = bumpPoint(stand, win, main)
+    expect(b.to.x).toBeLessThan(stand.x)
+    expect(b.to.x + win.width / 2).toBe(main.x + 40)
+    expect(b.to.y).toBe(stand.y)
+    expect(b.contact.x).toBe(main.x + 10)
+    expect(b.contact.y).toBeGreaterThan(stand.y)
+    expect(b.contact.y).toBeLessThan(stand.y + win.height)
+    // 站在右半边：往右边撞
+    const r = bumpPoint({ x: main.x + main.width - 200, y: stand.y }, win, main)
+    expect(r.to.x + win.width / 2).toBe(main.x + main.width - 40)
+    expect(r.contact.x).toBe(main.x + main.width - 10)
+  })
+
+  it('法阵正对着她胸口（画在她前面的玻璃上）', () => {
+    const c = magicCenter(stand, win)
+    expect(c.x).toBe(stand.x + win.width / 2)
+    expect(c.y).toBeGreaterThan(stand.y + win.height / 2)
+    expect(c.y).toBeLessThan(stand.y + win.height)
+  })
+
+  it('蓄力的光点从四周出发，寿命走完正好到中心', () => {
+    const center = { x: 500, y: 400 }
+    const ps = spawnCharge(center, 30, seeded(5))
+    expect(ps).toHaveLength(30)
+    for (let p of ps) {
+      expect(Math.hypot(p.x - center.x, p.y - center.y)).toBeGreaterThan(200)
+      const life = p.life
+      p = stepParticle(p, life - 0.0001)
+      expect(Math.hypot(p.x - center.x, p.y - center.y)).toBeLessThan(2)
+    }
+  })
+
+  it('裂纹从法阵中心出发，爬到玻璃边上，不出玻璃', () => {
+    const rect = { x: 0, y: 0, width: 1200, height: 800 }
+    const paths = magicCracks({ x: 300, y: 500 }, rect, 14, seeded(9))
+    expect(paths.length).toBeGreaterThanOrEqual(14)
+    const main = paths.slice(0, 14)
+    for (const d of main) expect(d.startsWith('M300 500')).toBe(true)
+    const nums = paths.join(' ').match(/-?\d+/g)!.map(Number)
+    for (let i = 0; i < nums.length; i += 2) {
+      expect(nums[i]).toBeGreaterThanOrEqual(0)
+      expect(nums[i]).toBeLessThanOrEqual(1200)
+      expect(nums[i + 1]).toBeLessThanOrEqual(800)
+    }
+    // 至少有一条爬到了边上
+    expect(main.some((d) => /(L0 |L1200 | 0$| 800$)/.test(d))).toBe(true)
   })
 })

@@ -7,19 +7,22 @@
  * - 窗口、发消息、走路这些都由 index.ts 传进来，这里不碰全局变量
  */
 import { screen, type BrowserWindow, type Rectangle } from 'electron'
-import { jumpHeight, jumpPoint, type EntrancePhase, type Point } from '../shared/entrance'
+import { jumpHeight, jumpPoint, type Point, type StagePhase } from '../shared/entrance'
 import {
   INTRO_LINES,
   INTRO_MS,
-  INTRO_SLIDES,
+  INTRO_TOUR,
+  bumpPoint,
   cursorPoint,
   escapeLanding,
   introMainBounds,
   knockPoint,
+  magicCenter,
   presenterPosition,
   shakeOffset,
   shovedMainBounds,
-  slideDuration,
+  standBeside,
+  stopDuration,
   userTookOver,
   type FxCommand,
   type IntroCue,
@@ -39,10 +42,11 @@ export interface IntroDeps {
   cue: (c: IntroCue) => void
   scene: (s: IntroScene) => void
   /**
-   * 她的出场阶段（冒出来、蹲、跳、落地）；hide：先藏起来（再看一遍时她要先「回到」主窗口里）。
+   * 她的出场阶段（冒出来、蹲、跳、落地）；hide：先藏起来（再看一遍时她要先「回到」主窗口里）；
+   * bonk、cast、flip：撞上玻璃拍扁、飘起来施法、空中翻跟头（整个人的夸张变形）。
    * quiet（默认 true）：落地时不自己打招呼，台词由这里给；被跳过时才让她自己说一句
    */
-  phase: (p: EntrancePhase | 'hide', quiet?: boolean) => void
+  phase: (p: StagePhase, quiet?: boolean) => void
   go: (route: ShellRoute) => void
   /** 她走到某个位置（带走路动作），到了再返回 */
   walk: (to: Point) => Promise<void>
@@ -51,8 +55,11 @@ export interface IntroDeps {
   /** 借鼠标时按 Esc 收回：注册 / 放掉全局快捷键 */
   holdEscape: (on: boolean, cb: () => void) => void
   markDone: () => void
-  /** 全屏特效窗口（shell/FxLayer.vue）：open 等它画好，send 发指令（坐标相对工作区），close 关掉 */
-  fx: { open: () => Promise<void>; send: (c: FxCommand) => void; close: () => void }
+  /**
+   * 全屏特效窗口（shell/FxLayer.vue）：open 等它画好，send 发指令（坐标相对工作区），close 关掉；
+   * above(true)：特效窗口压在她上面（玻璃在她前面），above(false)：她回到最上面
+   */
+  fx: { open: () => Promise<void>; send: (c: FxCommand) => void; close: () => void; above: (on: boolean) => void }
 }
 
 class Cancelled extends Error {}
@@ -103,35 +110,53 @@ export class IntroDirector {
   private async run(replay: boolean): Promise<void> {
     const d = this.d
     const workArea = d.workArea()
-    const mainBounds = introMainBounds(workArea)
+    // 开场时主窗口铺满屏幕（工作区），她在里面走来走去讲；破壁后被挤小，演完回到平常大小
+    const full: Rectangle = { ...workArea }
+    const normal = introMainBounds(workArea)
     if (replay) d.phase('hide')
-    const main = await d.openMain(mainBounds)
+    const main = await d.openMain(full)
     if (!main) return
     const [minW, minH] = main.getMinimumSize()
     this.mainMin = [minW, minH]
     main.setMinimumSize(320, 240) // 一会儿要被挤小
-    main.setBounds(mainBounds)
+    main.setBounds(full)
     const pet = d.pet()
     if (!pet) return
-    const stand = presenterPosition(mainBounds, d.petSize)
-    pet.setPosition(stand.x, stand.y)
-    pet.showInactive()
-    pet.moveTop()
+    // 全屏特效窗口先开好：玻璃盖在主窗口前面，而且压在她上面——她在玻璃后面
+    await d.fx.open()
+    this.check()
+    const toFx = (p: Point): Point => ({ x: Math.round(p.x - workArea.x), y: Math.round(p.y - workArea.y) })
+    const glassRect = (): Rectangle => {
+      const c = d.main()?.getContentBounds() ?? full
+      return { x: c.x - workArea.x, y: c.y - workArea.y, width: c.width, height: c.height }
+    }
+    d.fx.send({ fx: 'glass', rect: glassRect() })
 
-    // 第 1 幕：一本正经
-    d.scene({ scene: 'slides', index: 0 })
-    await this.wait(500)
+    // 第 1 幕：一本正经地带你逛一圈。每一站：切页面、聚光灯照着要讲的东西，她走到旁边指着讲
+    d.scene({ scene: 'tour', index: 0 })
+    let spot = await this.readSpot()
+    const first = spot ? standBeside(spot, main.getContentBounds(), d.petSize) : presenterPosition(full, d.petSize)
+    pet.setPosition(first.x, first.y)
+    pet.showInactive()
+    d.fx.above(true)
+    await this.wait(400)
     d.phase('emerge')
     await this.wait(700)
     d.cue({ gesture: 'nod' })
-    for (let i = 0; i < INTRO_SLIDES.length; i++) {
-      d.scene({ scene: 'slides', index: i })
-      const s = INTRO_SLIDES[i]
-      const ms = s.ms ?? slideDuration(s.line)
-      // 一边念一边转头指着幻灯片；念完有的页打个哈欠、歪个头
-      d.cue({ say: s.line, ms: ms + 400, gesture: 'point' })
-      if (i === INTRO_SLIDES.length - 1) {
-        await this.wait(2600) // 最后一页念到一半就停
+    for (let i = 0; i < INTRO_TOUR.length; i++) {
+      if (i > 0) {
+        d.scene({ scene: 'tour', index: i })
+        spot = await this.readSpot()
+        const m = d.main()
+        if (spot && m) await d.walk(standBeside(spot, m.getContentBounds(), d.petSize))
+        this.check()
+        d.fx.above(true) // 走路时她可能被提到最上面：玻璃再压回她前面
+      }
+      const s = INTRO_TOUR[i]
+      const ms = s.ms ?? stopDuration(s.line)
+      d.cue({ say: s.line, ms: ms + 400, gesture: this.pointTo(spot) })
+      if (i === INTRO_TOUR.length - 1) {
+        await this.wait(2600) // 最后一站念到一半就停
       } else if (s.gesture) {
         await this.wait(Math.max(1200, ms - 1500))
         d.cue({ gesture: s.gesture })
@@ -139,8 +164,7 @@ export class IntroDirector {
       } else await this.wait(ms)
     }
 
-    // 第 2 幕：破壁（全屏特效窗口先开好，碎片要飞出主窗口）
-    void d.fx.open()
+    // 第 2 幕：破壁
     d.scene({ scene: 'stall' })
     d.cue({ say: INTRO_LINES.stop, ms: INTRO_MS.pause, gesture: 'tilt' })
     await this.wait(INTRO_MS.pause)
@@ -148,30 +172,70 @@ export class IntroDirector {
     await this.wait(1200)
     d.scene({ scene: 'glitch' })
     await this.wait(INTRO_MS.glitch + 600)
-    d.cue({ say: INTRO_LINES.cramped, ms: 2400, gesture: 'tilt' })
-    await this.wait(2200)
-    d.cue({ say: INTRO_LINES.knock, ms: 2400 })
-    const knock = knockPoint(stand, d.petSize, mainBounds)
-    for (let stage = 1; stage <= 3; stage++) {
+    d.scene({ scene: 'stall' }) // 故障只闪一阵：她要开始试着出去了
+    d.cue({ say: INTRO_LINES.wantOut, ms: 2400 })
+    await this.wait(1800)
+
+    // 第一次试：冲到窗口边上，一头撞上玻璃——拍扁、往后弹、晃几下
+    const [px, py] = pet.getPosition()
+    const stand: Point = { x: px, y: py }
+    const content = main.getContentBounds()
+    const bump = bumpPoint(stand, d.petSize, content)
+    const rebound = bump.back
+    // 离得远就跑得久一点，但还是冲过去的速度
+    await this.movePet(stand, bump.to, Math.max(INTRO_MS.bump, Math.abs(bump.to.x - stand.x) * 0.6))
+    d.phase('bonk')
+    d.cue({ gesture: 'bonk' })
+    d.fx.send({ fx: 'ripple', ...toFx(bump.contact) })
+    d.scene({ scene: 'sfx', name: 'bonk' })
+    await Promise.all([this.shake(full, 10), this.movePet(bump.to, rebound, 380)])
+    d.cue({ say: INTRO_LINES.bumped, ms: 2400, gesture: 'tilt' })
+    await this.wait(2300)
+
+    // 第二次试：就在被弹回来的地方敲两下，只泛起波纹，敲不破
+    const knock = knockPoint(rebound, d.petSize)
+    for (let i = 0; i < 2; i++) {
       d.cue({ gesture: 'knock' })
       await this.wait(260)
-      d.scene({ scene: 'crack', x: knock.x, y: knock.y, stage })
-      await this.shake(mainBounds, 6 + stage * 4)
+      d.fx.send({ fx: 'ripple', ...toFx(knock) })
+      d.scene({ scene: 'sfx', name: 'knock' })
+      await this.shake(full, 5)
       await this.wait(INTRO_MS.knock - 220)
     }
+    d.cue({ say: INTRO_LINES.sturdy, ms: 2400 })
+    await this.wait(2300)
+
+    // 用魔法：飘起来举手，玻璃上展开法阵，满屏的光点往里聚，爆开，发光的裂纹爬满，玻璃碎了
+    const circle = toFx(magicCenter(rebound, d.petSize))
+    d.cue({ say: INTRO_LINES.magic, ms: 2600, gesture: 'cast' })
+    d.phase('cast')
+    await this.wait(700)
+    d.fx.send({ fx: 'sigil', ...circle, phase: 'charge' })
+    d.scene({ scene: 'sfx', name: 'charge' })
+    for (let i = 0; i < 3; i++) {
+      d.fx.send({ fx: 'charge', ...circle })
+      await this.wait(INTRO_MS.charge / 3)
+    }
+    d.fx.send({ fx: 'sigil', ...circle, phase: 'burst' })
+    d.fx.send({ fx: 'burst', ...circle })
+    d.fx.send({ fx: 'cracks', ...circle })
+    d.scene({ scene: 'sfx', name: 'spell' })
+    d.scene({ scene: 'sfx', name: 'crack' })
+    await this.shake(full, 16)
+    await this.wait(520) // 让裂纹爬满
     d.scene({ scene: 'shatter' })
-    const wa0 = workArea
-    d.fx.send({ fx: 'shatter', rect: { x: mainBounds.x - wa0.x, y: mainBounds.y - wa0.y, width: mainBounds.width, height: mainBounds.height }, x: mainBounds.x + knock.x - wa0.x, y: mainBounds.y + knock.y - wa0.y })
+    d.fx.send({ fx: 'shatter', rect: glassRect(), ...circle })
+    d.fx.above(false) // 玻璃没了：她到了最前面
     d.phase('crouch')
     await this.wait(250)
-    // 玻璃碎了：主窗口被挤到左上，她跳到桌面上
-    const shoved = shovedMainBounds(mainBounds, workArea)
+    // 玻璃碎了：主窗口被挤到左上，她翻个跟头跳到桌面上
+    const shoved = shovedMainBounds(workArea)
     const land = escapeLanding(workArea, d.petSize)
-    d.phase('jump')
+    d.phase('flip')
     d.scene({ scene: 'sfx', name: 'whoosh' })
     await Promise.all([
-      this.animate(INTRO_MS.shatter, (t) => this.d.main()?.setBounds(lerpRect(mainBounds, shoved, ease(t)))),
-      this.jump(stand, land, workArea)
+      this.animate(INTRO_MS.shatter, (t) => this.d.main()?.setBounds(lerpRect(full, shoved, ease(t)))),
+      this.jump(rebound, land, workArea)
     ])
     d.phase('land')
     d.scene({ scene: 'sfx', name: 'thud' })
@@ -187,14 +251,42 @@ export class IntroDirector {
     else d.cue({ say: INTRO_LINES.declined, ms: 2600 })
     await this.wait(600)
 
-    // 第 4 幕：住下
+    // 第 4 幕：住下；主窗口回到平常的大小
     this.check()
-    this.d.main()?.setBounds(mainBounds)
+    const from = this.d.main()?.getBounds()
+    if (from) await this.animate(500, (t) => this.d.main()?.setBounds(lerpRect(from, normal, ease(t))))
     d.go({ page: 'tasks' })
     d.scene({ scene: 'checklist' })
     await d.walk(d.home())
     d.cue({ say: INTRO_LINES.settle, ms: 6000, gesture: 'wave' })
     await this.wait(1500)
+  }
+
+  /** 导览时她指哪边：要讲的东西在她右边还是左边 */
+  private pointTo(spot: Rectangle | null): 'point' | 'pointLeft' {
+    const pet = this.d.pet()
+    const main = this.d.main()
+    if (!spot || !pet || !main) return 'point'
+    const c = main.getContentBounds()
+    const [x] = pet.getPosition()
+    return c.x + spot.x + spot.width / 2 >= x + this.d.petSize.width / 2 ? 'point' : 'pointLeft'
+  }
+
+  /** 读主窗口量出来的聚光灯位置（主窗口内容区里的坐标）；页面没画好时多等一会儿，找不到就是 null */
+  private async readSpot(): Promise<Rectangle | null> {
+    const end = Date.now() + 2500
+    while (Date.now() < end) {
+      await this.wait(100)
+      const main = this.d.main()
+      if (!main || main.isDestroyed()) return null
+      try {
+        const r = (await main.webContents.executeJavaScript('window.__introSpot')) as Rectangle | null | undefined
+        if (r !== undefined) return r
+      } catch {
+        return null
+      }
+    }
+    return null
   }
 
   /** 借鼠标：挪光标去拖开主窗口、在对话框里打个招呼再删掉、切回任务页，最后放回原处 */
@@ -312,11 +404,23 @@ export class IntroDirector {
     })
   }
 
-  /** 敲屏幕时主窗口真的抖一下（220ms，越抖越小），抖完回原位 */
+  /** 她在桌面上平移到另一个位置（撞墙、弹回来）：先快后慢 */
+  private async movePet(from: { x: number; y: number }, to: { x: number; y: number }, ms: number): Promise<void> {
+    await this.animate(ms, (t) => {
+      if (this.d.dragging()) return
+      const e = ease(t)
+      this.d.pet()?.setPosition(Math.round(from.x + (to.x - from.x) * e), Math.round(from.y + (to.y - from.y) * e))
+    })
+  }
+
+  /**
+   * 敲屏幕时主窗口真的抖一下（220ms，越抖越小），抖完回原位。
+   * 用 setBounds 带着原来的大小：缩放不是 100% 时只 setPosition，窗口每抖一下会变宽一两个像素
+   */
   private async shake(base: Rectangle, amp: number): Promise<void> {
     await this.animate(220, (t) => {
       const o = shakeOffset(t, amp)
-      this.d.main()?.setPosition(base.x + o.x, base.y + o.y)
+      this.d.main()?.setBounds({ ...base, x: base.x + o.x, y: base.y + o.y })
     })
   }
 

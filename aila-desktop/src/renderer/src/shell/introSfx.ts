@@ -8,6 +8,7 @@
  * - 碎掉：一阵玻璃碎（噪声 + 一串高音「叮」）
  * - 起跳：「呼」（噪声扫上去）；落地：「噗」（低频一下）
  * - 借鼠标时点一下：「嗒」；收尾：两个音的「叮——」
+ * - 撞上看不见的玻璃：闷「咚」加一声往上弹的「嘣」；法阵蓄力：越来越高的嗡声加闪闪的沙沙；施法：一串亮的「叮」加一阵风
  *
  * 音量整体压得很低（主音量 0.35），右上角能静音（记在这台电脑上）。
  */
@@ -65,6 +66,18 @@ export class IntroSfx {
         return this.tone(now, 0.22, 'sine', 110, 45, 0.6)
       case 'click':
         return this.tone(now, 0.04, 'square', 1800, 1200, 0.08)
+      case 'bonk':
+        this.tone(now, 0.16, 'sine', 160, 70, 0.6)
+        return this.tone(now + 0.04, 0.28, 'triangle', 260, 520, 0.16)
+      case 'charge':
+        this.tone(now, 2.6, 'sawtooth', 110, 880, 0.05)
+        this.tone(now, 2.6, 'sine', 220, 1760, 0.08)
+        for (let i = 0; i < 12; i++) this.noise(now + i * 0.2, 0.12, { type: 'bandpass', from: 4000 + i * 300, to: 6000, q: 4 }, 0.05 + i * 0.006)
+        return
+      case 'spell':
+        this.noise(now, 0.6, { type: 'bandpass', from: 600, to: 3000, q: 0.8 }, 0.35)
+        for (const [k, f] of [1046.5, 1318.5, 1568, 2093].entries()) this.tone(now + k * 0.05, 0.9, 'sine', f, f, 0.12)
+        return
       case 'chime':
         this.tone(now, 0.6, 'sine', 880, 880, 0.18)
         return this.tone(now + 0.16, 0.9, 'sine', 1318.5, 1318.5, 0.16)

@@ -13,6 +13,7 @@ import { pendingFixOf, type LocatedError } from '../../shared/workbench'
 import { confirmIntent } from './chat/confirmIntent'
 import { parseMove, shouldStroll } from '../../shared/move'
 import { INTRO_LINES } from '../../shared/intro'
+import type { StagePhase } from '../../shared/entrance'
 import { ScreenWatch, helpRequest, type ScreenFinding } from './screen/ScreenWatch'
 import { Behavior } from './behavior/Behavior'
 import { Conversation, type Voice } from './chat/Conversation'
@@ -36,7 +37,7 @@ import { clipboardMessage, fileMessage, fileTask, mentionsClipboard, type DropIn
 
 const stageEl = ref<HTMLDivElement>()
 /** 出场（shared/entrance.ts）：地址带 #enter 时先不露面，主进程说冒出来再出来；各段的缩放动画在下面的样式里 */
-const entrancePhase = ref<'' | 'waiting' | 'emerge' | 'crouch' | 'jump' | 'land'>(location.hash === '#enter' ? 'waiting' : '')
+const entrancePhase = ref<'' | 'waiting' | Exclude<StagePhase, 'hide'>>(location.hash === '#enter' ? 'waiting' : '')
 const fileInput = ref<HTMLInputElement>()
 const chatInput = ref<InstanceType<typeof ChatInput>>()
 const bubbleText = ref('')
@@ -954,6 +955,9 @@ onMounted(async () => {
       bridge.onEntrance(({ phase, first, quiet }) => {
         if (phase === 'hide') return void (entrancePhase.value = 'waiting')
         entrancePhase.value = phase
+        // 开场演出里夸张的几下（撞扁、飘起来施法、翻跟头）只是整个人的变形，表情动作由 intro:cue 给
+        if (phase === 'bonk') return void setTimeout(() => entrancePhase.value === 'bonk' && (entrancePhase.value = ''), 900)
+        if (phase === 'cast' || phase === 'flip') return
         behavior.entrance(phase, first, quiet)
         if (phase === 'land') setTimeout(() => entrancePhase.value === 'land' && (entrancePhase.value = ''), 600)
       })
@@ -961,7 +965,7 @@ onMounted(async () => {
     // 开场演出（shared/intro.ts）：导演让她说的话、做的动作、问借不借鼠标
     subscriptions.push(
       bridge.onIntroCue((c) => {
-        if (c.gesture === 'knock' || c.gesture === 'turn' || c.gesture === 'point' || c.gesture === 'yawn') behavior.introGesture(c.gesture)
+        if (c.gesture === 'knock' || c.gesture === 'turn' || c.gesture === 'point' || c.gesture === 'pointLeft' || c.gesture === 'yawn' || c.gesture === 'bonk' || c.gesture === 'cast') behavior.introGesture(c.gesture)
         else if (c.gesture) behavior.gesture(c.gesture)
         if (!c.askMouse) introAsk.value = false // 导演那边不等了（超时当不借、被跳过）：问题收起来
         if (c.askMouse) {
@@ -1106,6 +1110,69 @@ body,
 
 .stage.land {
   animation: land 0.55s ease-out both;
+}
+
+/* 开场演出：撞上玻璃——一下拍扁、往后仰、晃几下才站稳 */
+.stage.bonk {
+  animation: bonk 0.85s ease-out both;
+}
+
+/* 施法：慢慢飘起来、上下浮着，身上一圈光 */
+.stage.cast {
+  animation: levitate 1.6s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 10px rgba(103, 232, 249, 0.85)) drop-shadow(0 0 26px rgba(167, 139, 250, 0.7));
+  transition: filter 0.6s ease;
+}
+
+/* 破窗跳出来：空中翻一整圈（绕身体中间转，不是绕脚） */
+.stage.flip {
+  transform-origin: 50% 60%;
+  animation: flip 1.05s cubic-bezier(0.3, 0.1, 0.3, 1) both;
+}
+
+@keyframes bonk {
+  0% {
+    transform: scale(1.18, 0.78) rotate(0deg);
+  }
+  18% {
+    transform: scale(0.9, 1.1) rotate(-9deg);
+  }
+  36% {
+    transform: scale(1.05, 0.95) rotate(7deg);
+  }
+  54% {
+    transform: rotate(-5deg);
+  }
+  72% {
+    transform: rotate(3deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes levitate {
+  from {
+    transform: translateY(-4%) scale(1.02);
+  }
+  to {
+    transform: translateY(-9%) scale(1.04);
+  }
+}
+
+@keyframes flip {
+  0% {
+    transform: scale(1.05, 0.9) rotate(0deg);
+  }
+  15% {
+    transform: scale(0.92, 1.1) rotate(0deg);
+  }
+  80% {
+    transform: scale(0.95, 1.05) rotate(360deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes emerge {

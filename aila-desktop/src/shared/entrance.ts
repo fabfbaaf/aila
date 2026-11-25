@@ -91,5 +91,8 @@ export function shouldEnter(o: { entrance: boolean; showCharacter: boolean; visi
 
 /** 主进程发给角色页面的出场阶段 */
 export type EntrancePhase = 'emerge' | 'crouch' | 'jump' | 'land'
-/** 开场演出（shared/intro.ts）里还会让她先藏起来 */
-export type StagePhase = EntrancePhase | 'hide'
+/**
+ * 开场演出（shared/intro.ts）里还有：hide 先藏起来；bonk 撞上玻璃缩成一团晃两下；
+ * cast 施法时飘起来、身上发光；flip 跳出来时在空中翻个跟头（都是她页面上的整体动画，见 App.vue）
+ */
+export type StagePhase = EntrancePhase | 'hide' | 'bonk' | 'cast' | 'flip'

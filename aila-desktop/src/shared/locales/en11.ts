@@ -15,11 +15,23 @@ export const EN11: Record<string, string> = {
   '我读过、改过的会亮起来': "Files I've read or changed light up",
   '用手势转动、放大': 'Rotate and zoom with hand gestures',
   '在「项目」页的地图里，您的代码会变成一片……': 'In the map on the Projects page, your code becomes a field of...',
+  // 导览（在真的页面上讲，聚光灯照着）
+  '作品、日记、回顾': 'Works, diary, reviews',
+  '您好，欢迎使用艾拉。我是本产品的智能助手，接下来由我带您熟悉一下各个页面。':
+    'Good day, and welcome to Aila. I am the intelligent assistant of this product, and I will now show you around each page.',
+  '在「任务」页点「新任务」，就可以把编程任务交给我。我会读代码、改文件、跑测试，改动之前按您选择的权限征求同意。':
+    'On the Tasks page, click "New task" to hand me a coding job. I read code, edit files and run tests, and I ask before changing anything, according to the permissions you choose.',
+  '「记忆」页里是我记得的事。您也可以直接告诉我，或者让我忘掉……':
+    'The Memory page lists what I remember. You can also just tell me things, or have me forget them...',
+  '语音、看屏幕、扩展，都在设置里。下一个。': 'Voice, screen watching, extensions: all in Settings. Next.',
   // 破壁、借鼠标、住下
   '……算了。这些你自己点开看也行吧。': "...Never mind. You can just click around and see for yourself.",
   '这个窗口，好挤啊。': 'This window is so cramped.',
-  '……让一下。': '...Excuse me.',
-  '……呼。外面宽敞多了。': "...Phew. It's much roomier out here.",
+  '……我想出去看看。': '...I want to go out and look around.',
+  '……诶？出不去？': "...Huh? I can't get out?",
+  '这层玻璃……有点结实。': 'This glass is... pretty sturdy.',
+  '那就——用魔法吧。': 'Fine then. Magic it is.',
+  '……成功了。外面宽敞多了。': "...It worked. It's much roomier out here.",
   '对了——借一下你的鼠标？': 'Oh, right. Can I borrow your mouse?',
   借鼠标: 'Borrow mouse',
   '只挪光标，不会点你别的程序。你一动鼠标或者按 Esc，我就停。':
