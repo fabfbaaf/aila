@@ -197,4 +197,8 @@ EN3: dict[str, str] = {
     "写文件 {0}": "Write file {0}",
     "命令 {0}": "Command {0}",
     "搜内容「{0}」": 'Search content "{0}"',
+    # 编程任务的联网工具
+    "搜索「{0}」": 'Search the web for "{0}"',
+    "读网页 {0}": "Read web page {0}",
+    "快模型没有回答": "The fast model gave no answer",
 }

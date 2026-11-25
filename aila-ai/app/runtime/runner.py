@@ -33,6 +33,7 @@ from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, project_key, remember_tool
 from ..memory.episodes import coding_context, task_episode
 from ..memory.store import MemoryStore
+from ..tools.search import SearchProvider
 from .planning import MAX_CONTINUES, PLAN_PROMPT, plan_state, plan_title, plan_tools, stage_message
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, ComputerPolicy, Mode, Policy, Rules
@@ -43,6 +44,7 @@ from .session import Event, Session, SessionStore, latest_turn, turn_edits
 from .shell import Shell, find_shell
 from .snapshots import Snapshots
 from .subagent import Explorer
+from .webtools import WebAccess
 from .tools import CodingTools
 from .workspace import ComputerWorkspace, Workspace
 
@@ -85,6 +87,7 @@ class Runtime:
         extensions: ExtensionStore | None = None,
         memory_store: "Callable[[], MemoryStore] | None" = None,
         language: Callable[[], str] = lambda: "zh",
+        web_search: Callable[[], SearchProvider | None] | None = None,
     ) -> None:
         # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
         self.language = language
@@ -112,6 +115,8 @@ class Runtime:
         self.model_factory = model_factory
         # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
         self.fast_factory = fast_factory or model_factory
+        # 联网搜索用哪家（设置里换了就用新的）；没给就是不能搜（测试里不联网）
+        self.web_search: Callable[[], SearchProvider | None] = web_search or (lambda: None)
         self.confirms = confirms or Confirmations(timeout=CONFIRM_TIMEOUT)
         self.shell = shell or find_shell()
         self.config = config or AgentConfig()
@@ -193,12 +198,14 @@ class Runtime:
             policy = ComputerPolicy(session.cwd, self.computer_rules, mode, data_dir=self.data_dir, env_file=ENV_FILE)
         else:
             extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
-            explorer = Explorer(session, workspace.root, self.shell, extra, self.rules, self.fast_factory,
+            # 联网搜索、带着问题读网页（读网页用快模型）；派出去查资料的助手也能用
+            web = WebAccess(self.fast_factory, self.web_search).tools()
+            explorer = Explorer(session, workspace.root, self.shell, [*extra, *web], self.rules, self.fast_factory,
                                 self.config.context_window)
             from .browsertools import BrowserAccess
 
             browser = BrowserAccess(workspace, session.path)
-            extra = [*extra, explorer.tool(), *browser.tools(), *plan_tools(session.events),
+            extra = [*extra, explorer.tool(), *web, *browser.tools(), *plan_tools(session.events),
                      remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
             policy = Policy(session.cwd, self.rules, mode, self.mcp)
         agent = Agent(

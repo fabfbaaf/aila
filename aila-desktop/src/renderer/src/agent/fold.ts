@@ -120,6 +120,10 @@ export function actionOf(name: string, args: Record<string, unknown>): string {
       return t('看 {name} 的调用关系', { name: s('name').slice(0, 30) })
     case 'explore':
       return t('派助手去查「{task}」', { task: s('task').trim().slice(0, 30) })
+    case 'web_search':
+      return t('搜网页「{q}」', { q: s('query').slice(0, 40) })
+    case 'web_fetch':
+      return t('读网页 {url}', { url: s('url').replace(/^https?:\/\//, '').slice(0, 60) })
     case 'job_output':
       return t('看后台任务 {id} 的输出', { id: s('id') })
     case 'job_stop':

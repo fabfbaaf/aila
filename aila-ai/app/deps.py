@@ -41,7 +41,7 @@ from .tools.computer import computer_skill, computer_task_skill
 from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
-from .tools.search import BochaSearch, MockSearch, SearchProvider, TavilySearch
+from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
 from .tools.web import web_skill
 from .tools.x_browser import x_browser_skill
 
@@ -103,7 +103,8 @@ def get_runtime() -> Runtime:
     runtime = Runtime(settings.data_dir, lambda: get_coder_model(), config=config, code_projects=lambda: get_code_projects(),
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
                       computer_inventory=settings.computer_inventory, extensions=get_extensions(),
-                      memory_store=lambda: get_memory_store(), language=lambda: settings.language)
+                      memory_store=lambda: get_memory_store(), language=lambda: settings.language,
+                      web_search=search_provider)
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     return runtime
 
@@ -193,7 +194,8 @@ def get_memory_store() -> MemoryStore:
 digester = Digester()
 
 
-def _search_provider() -> SearchProvider | None:
+def search_provider() -> SearchProvider | None:
+    """联网搜索用哪家：填了密钥用博查或 Tavily；没填用免费搜索（读必应结果页）；SEARCH_PROVIDER=none 是关掉联网搜索"""
     if settings.search_provider == "none":
         return None
     if settings.search_api_key:
@@ -203,7 +205,7 @@ def _search_provider() -> SearchProvider | None:
         return providers[settings.search_provider](settings.search_api_key, http_client)
     if settings.mock:
         return MockSearch()  # 假模型配假搜索，整条链路不联网也能调
-    return None
+    return FreeSearch(http_client)
 
 
 # 已经连上的外部 MCP 服务：重建技能包时（改了搜索设置）要重新加进去
@@ -246,8 +248,8 @@ def get_browser() -> BrowserSession:
 
 @lru_cache
 def get_registry() -> SkillRegistry:
-    search = _search_provider()
-    log.info("联网搜索：%s", search.name if search else "未配置（只能读用户给的链接）")
+    search = search_provider()
+    log.info("联网搜索：%s", search.name if search else "关掉了（只能读用户给的链接）")
     registry = SkillRegistry([
         web_skill(http_client, search), knowledge_skill(get_knowledge()), code_skill(get_code_projects()),
         browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()), reminder_skill(),

@@ -13,26 +13,32 @@ SEARCH_COUNT = 5
 SNIPPET_CHARS = 300
 
 
+async def search_text(search: SearchProvider, query: str, count: int = SEARCH_COUNT) -> str:
+    """搜一次，排成交给大模型的文字（对话和编程任务共用）。出错抛 ToolError"""
+    query = query.strip()
+    if not query:
+        return "搜索关键词是空的。"
+    try:
+        results = await search.search(query, count)
+    except httpx.HTTPStatusError as err:
+        raise ToolError(f"请求失败（HTTP {err.response.status_code}）") from err
+    except httpx.HTTPError as err:
+        raise ToolError(f"网络出错：{type(err).__name__}") from err
+    hint = getattr(search, "HINT", "")
+    if not results:
+        return f"搜索「{query}」没有找到结果。{hint}"
+    lines = [f"搜索「{query}」的结果。{UNTRUSTED_NOTE}"]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r.title}\n   {r.url}\n   {r.snippet[:SNIPPET_CHARS]}")
+    return "\n".join(lines)
+
+
 def web_skill(client: httpx.AsyncClient, search: SearchProvider | None, resolve: Resolver | None = None) -> Skill:
     resolve = resolve or make_resolver(client)
 
     async def web_search(args: dict[str, Any]) -> str:
         assert search is not None
-        query = str(args.get("query", "")).strip()
-        if not query:
-            return "搜索关键词是空的。"
-        try:
-            results = await search.search(query, SEARCH_COUNT)
-        except httpx.HTTPStatusError as err:
-            raise ToolError(f"请求失败（HTTP {err.response.status_code}）") from err
-        except httpx.HTTPError as err:
-            raise ToolError(f"网络出错：{type(err).__name__}") from err
-        if not results:
-            return f"搜索「{query}」没有找到结果。"
-        lines = [f"搜索「{query}」的结果。{UNTRUSTED_NOTE}"]
-        for i, r in enumerate(results, 1):
-            lines.append(f"{i}. {r.title}\n   {r.url}\n   {r.snippet[:SNIPPET_CHARS]}")
-        return "\n".join(lines)
+        return await search_text(search, str(args.get("query", "")))
 
     async def read_page(args: dict[str, Any]) -> str:
         try:

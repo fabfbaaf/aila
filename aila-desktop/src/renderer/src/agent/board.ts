@@ -53,6 +53,8 @@ const VERBS: Record<string, string> = localized({
   list_files: '找文件',
   search: '搜',
   explore: '派助手查',
+  web_search: '搜网页',
+  web_fetch: '读网页',
   todo_write: '更新待办',
   code_search: '按意思搜',
   code_locate: '按报错定位',

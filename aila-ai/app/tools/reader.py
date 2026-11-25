@@ -113,7 +113,10 @@ async def check_public_url(url: str, resolve: Resolver = resolve_host) -> None:
             raise PageError("不能访问本机或内网地址")
 
 
-async def fetch_page(url: str, client: httpx.AsyncClient, resolve: Resolver = resolve_host) -> Page:
+async def fetch_page(
+    url: str, client: httpx.AsyncClient, resolve: Resolver = resolve_host, max_chars: int = MAX_CHARS
+) -> Page:
+    """读一个公网网页的正文。max_chars：正文最多留多长（编程任务带着问题读网页时交给快模型，可以长一些）"""
     current = url
     for _ in range(MAX_REDIRECTS + 1):
         await check_public_url(current, resolve)  # 每一跳都检查，防止先跳到公网再跳回内网
@@ -142,11 +145,11 @@ async def fetch_page(url: str, client: httpx.AsyncClient, resolve: Resolver = re
                 body += chunk
                 if len(body) >= MAX_BYTES:
                     break  # 超长页面只看前面一部分
-            return extract_page(bytes(body), str(resp.url), content_type)
+            return extract_page(bytes(body), str(resp.url), content_type, max_chars)
     raise PageError("网页跳转次数太多")
 
 
-def extract_page(raw: bytes, url: str, content_type: str = "text/html") -> Page:
+def extract_page(raw: bytes, url: str, content_type: str = "text/html", max_chars: int = MAX_CHARS) -> Page:
     """提取正文，去掉导航、页脚、广告。编码交给 trafilatura 判断（中文网站常见 GBK）。"""
     if "text/plain" in content_type:
         title, text = "", raw.decode("utf-8", errors="replace")
@@ -161,5 +164,5 @@ def extract_page(raw: bytes, url: str, content_type: str = "text/html") -> Page:
     text = text.strip()
     if not text:
         raise PageError("这个网页没有能读的正文（可能需要登录，或者内容是脚本动态加载的）")
-    truncated = len(text) > MAX_CHARS
-    return Page(url=url, title=title.strip(), text=text[:MAX_CHARS], truncated=truncated)
+    truncated = len(text) > max_chars
+    return Page(url=url, title=title.strip(), text=text[:max_chars], truncated=truncated)

@@ -170,7 +170,7 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
           v-model="searchKey"
           type="password"
           autocomplete="off"
-          :placeholder="settings.search.apiKeySet ? t('已设置（不显示）。要换就填新的') : t('还没有设置——没有密钥时她不能自己搜')"
+          :placeholder="settings.search.apiKeySet ? t('已设置（不显示）。要换就填新的') : t('可以不填：不填时读必应的搜索结果页，偶尔不稳')"
         />
       </div>
       <div class="actions">

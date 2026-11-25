@@ -111,5 +111,11 @@ export const EN11: Record<string, string> = {
   扩展: 'Extensions',
   打开声音: 'Sound on',
   静音: 'Mute',
-  再看一遍开场: 'Replay the intro'
+  再看一遍开场: 'Replay the intro',
+  // 联网：不用密钥也能搜、编程任务里搜网页读网页
+  搜网页: 'Search web',
+  读网页: 'Read page',
+  '搜网页「{q}」': 'Search the web for "{q}"',
+  '读网页 {url}': 'Read {url}',
+  '可以不填：不填时读必应的搜索结果页，偶尔不稳': "Optional: without a key she reads Bing's results page, which is a bit less reliable"
 }

@@ -303,6 +303,8 @@ def _action(name: str, args: dict[str, Any]) -> str:
         "run_command": ("后台：" if args.get("background") else "") + str(args.get("description") or args.get("command", ""))[:60],
         "todo_write": "更新待办清单",
         "explore": f"派助手去查「{str(args.get('task', '')).strip()[:30]}」",
+        "web_search": f"搜网页「{str(args.get('query', ''))[:30]}」",
+        "web_fetch": f"读网页 {str(args.get('url', ''))[:60]}",
         "job_output": f"看后台任务 {args.get('id', '')} 的输出",
         "job_stop": f"停掉后台任务 {args.get('id', '')}",
     }.get(name, name)
