@@ -110,6 +110,11 @@
 - 再看一遍开场：设置 → 桌面。
 - 形象：自带原创 VRM 形象，可以换成别的 VRM 或 Live2D 模型（.model3.json，Live2D 运行库要同意它的许可后装）；能调位置和大小。
 
+## 主动分享：自己留意更新
+
+在 设置 → 桌面（page=settings, section=desktop）打开「主动分享」，之后可以在对话里说「以后 Gemini 出新模型告诉我」或「DeepSeek 先不用关注了」。
+支持 Gemini、DeepSeek、OpenAI 的官方更新日志。你在不同日期反复聊到同一个主题，她也会低频关注。查到实质变化才会开口，气泡里能看出处或让她少说；设置里能查看和停止关注。
+
 ## 性格和说话风格
 
 位置：设置 → 形象（page=settings, section=appearance）。

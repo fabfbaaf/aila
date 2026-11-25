@@ -50,6 +50,8 @@ import type { AgentMode } from '../shared/agent'
 import { cleanRoute, routeForSection, toHash, type ShellRoute } from '../shared/shell'
 import { TRAY_16, TRAY_32 } from './trayImage'
 import { DesktopKeeper, type BriefingState } from './desktopKeeper'
+import { discoveries } from './discoveries'
+import { DISCOVERY_SOURCES, isDiscoveryId, isDiscoverySource } from '../shared/discoveries'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
@@ -864,7 +866,7 @@ function createAccount(): Account {
       const res = await fetch(`${AI_URL}/memory/extract`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(req),
+        body: JSON.stringify({ ...req, learnTopics: desktop?.prefs.proactiveSharing === true }),
         signal: AbortSignal.timeout(60_000)
       })
       if (!res.ok) throw new Error(`AI 服务返回 ${res.status}`)
@@ -1405,6 +1407,18 @@ function registerIpc(): void {
   })
   // 拖给她的文件、剪贴板：只认角色窗口（她身上才能拖、对她说才会去看）
   const fromCharacter = (e: { sender: Electron.WebContents }): boolean => !!win && e.sender === win.webContents
+  ipcMain.handle('discoveries:state', (e) => (fromMain(e) ? discoveries.state(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('discoveries:change', (e, source: unknown, action: unknown) => {
+    if (!isDiscoverySource(source) || !(fromMain(e) || (fromCharacter(e) && action === 'less'))) return MAIN_ONLY
+    if (action !== 'less' && action !== 'pause') return MAIN_ONLY
+    return discoveries.change(AI_URL, source, action)
+  })
+  ipcMain.handle('discoveries:shown', async (e, id: unknown) =>
+    fromCharacter(e) && isDiscoveryId(id) && (await discoveries.shown(AI_URL, id)).ok
+  )
+  ipcMain.on('discoveries:source', (e, source: unknown) => {
+    if ((fromMain(e) || fromCharacter(e)) && isDiscoverySource(source)) void shell.openExternal(DISCOVERY_SOURCES[source])
+  })
   // 她的作品、日记：看、删、打开、现在就做一件只认主窗口；气泡里点「看看」从角色窗口来，只是打开作品页
   const workOk = (id: unknown): id is string => typeof id === 'string' && WORK_ID.test(id)
   const nope = { ok: false, error: tm('只有主窗口能用') }
@@ -1577,6 +1591,10 @@ app.whenReady().then(() => {
       const r = await agentRelay.list()
       if (!r.ok || !r.data) return null
       return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [] }
+    },
+    pollDiscoveries: async () => {
+      const result = await discoveries.poll(AI_URL)
+      return result.ok ? result.data ?? null : null
     },
     loadBriefing: () => loadSettings().briefing ?? {},
     saveBriefing: (state) => saveSettings({ ...loadSettings(), briefing: state }),

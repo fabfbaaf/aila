@@ -6,6 +6,7 @@ import SpeechBubble from './components/SpeechBubble.vue'
 import ChatInput from './components/ChatInput.vue'
 import type { BubbleAsk } from './components/bubble'
 import type { CharacterEvent } from '../../shared/settings'
+import type { Discovery } from '../../shared/discoveries'
 import { BUILTIN_GESTURES, type ConfirmAsk } from '../../shared/chat'
 import { cleanMotions } from '../../shared/extensions'
 import type { AgentProgress } from '../../shared/agent'
@@ -63,6 +64,7 @@ const dropAsk = ref<DropInfo | null>(null)
 const briefingAsk = ref<{ text: string; detail: boolean } | null>(null)
 /** 她自己做好了一件作品：气泡里给「看看 / 待会儿」 */
 const workAsk = ref<{ id: string; title: string } | null>(null)
+const discoveryAsk = ref<Discovery | null>(null)
 /** 她在做自己的作品（编程任务也会让她「敲键盘」：两边都结束才放下） */
 let makingWork = false
 /** 编程任务在做 */
@@ -131,6 +133,17 @@ const bubbleAsk = computed<BubbleAsk | null>(() => {
       buttons: [
         { label: t('去看看'), value: 'open', primary: true },
         { label: t('等会儿'), value: 'later' }
+      ]
+    }
+  }
+  if (discoveryAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) {
+    return {
+      tag: t('她的发现'),
+      detail: discoveryAsk.value.summary,
+      buttons: [
+        { label: t('看官方来源'), value: 'discovery-source' },
+        { label: t('少分享这类'), value: 'discovery-less' },
+        { label: t('收起这条'), value: 'discovery-close' }
       ]
     }
   }
@@ -212,7 +225,7 @@ function showBubble(text: string, holdMs: number | null, fullText = ''): void {
   if (!fullText) bubbleExpanded.value = false
   bubbleVisible.value = true
   clearTimeout(bubbleTimer)
-  if (holdMs !== null && !bubbleExpanded.value && !screenAsk.value && !reminderAsk.value && !briefingAsk.value && !dropAsk.value) {
+  if (holdMs !== null && !bubbleExpanded.value && !screenAsk.value && !reminderAsk.value && !briefingAsk.value && !dropAsk.value && !discoveryAsk.value) {
     bubbleTimer = window.setTimeout(() => (bubbleVisible.value = false), holdMs)
   }
 }
@@ -341,6 +354,7 @@ function onAnswer(value: string): void {
   else if (workAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerWork(value)
   else if (briefingAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerBriefing(value)
   else if (agentAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) answerAgent(value)
+  else if (discoveryAsk.value && !convAsk.value && !reminderAsk.value && !screenAsk.value) void answerDiscovery(value)
   else if (reminderAsk.value && !convAsk.value) answerReminder(value)
   else if (convAsk.value) conversation.answer(value === 'yes')
   else answerScreen(value)
@@ -468,6 +482,43 @@ function showBriefing(b: { text: string; detail: boolean }): void {
   }, BRIEFING_ASK_MS)
 }
 
+let discoveryTimer = 0
+let lastDiscovery = ''
+
+function showDiscovery(report: Discovery): void {
+  if (lastDiscovery === report.id) {
+    void bridge?.discoveryShown(report.id)
+    return
+  }
+  if (conversation.busy || chatOpen.value || bubbleAsk.value || desk.value?.presence.quiet || entrancePhase.value) return
+  lastDiscovery = report.id
+  discoveryAsk.value = report
+  conversation.announce(report.title)
+  // 角色窗口真的接下这条之后，再告诉服务已经展示。
+  void bridge?.discoveryShown(report.id)
+  clearTimeout(discoveryTimer)
+  discoveryTimer = window.setTimeout(closeDiscovery, BRIEFING_ASK_MS)
+}
+
+function closeDiscovery(): void {
+  clearTimeout(discoveryTimer)
+  discoveryAsk.value = null
+  if (!bubbleAsk.value && !conversation.busy) bubbleVisible.value = false
+}
+
+async function answerDiscovery(value: string): Promise<void> {
+  const report = discoveryAsk.value
+  if (!report) return
+  if (value === 'discovery-source') bridge?.discoverySource(report.source)
+  closeDiscovery()
+  if (value === 'discovery-less') {
+    const result = await bridge?.discoveryChange(report.source, 'less')
+    if (!conversation.busy && !bubbleAsk.value) {
+      conversation.announce(result?.ok ? t('好，这类我会少说一点。') : t('这次没改成，过会儿再试。'))
+    }
+  }
+}
+
 function answerAgent(value: string): void {
   const ask = agentAsk.value
   agentAsk.value = null
@@ -569,6 +620,7 @@ function closeChat(): void {
 }
 
 function onSend(text: string): void {
+  if (discoveryAsk.value) closeDiscovery()
   // 她在等确认时打「好」「不要」就是回答；打别的话当新话题（这个操作不执行）
   if (conversation.answerText(text)) return
   if (screenAsk.value) {
@@ -617,6 +669,9 @@ function onCharacterEvent(ev: CharacterEvent): void {
     case 'reminder-failed':
       behavior.react('sad')
       behavior.say(lines.reminderFailed(ev.why), 4000)
+      break
+    case 'discovery':
+      showDiscovery(ev.report)
       break
     case 'briefing':
       showBriefing({ text: ev.text, detail: ev.detail })
