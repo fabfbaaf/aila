@@ -43,6 +43,18 @@ event 要写 expires：过了这一天就不用再记的日期（YYYY-MM-DD）�
          {"op": "delete", "id": "m2"}]}"""
 
 
+WATCH_PROMPT = """
+
+当下文有「可提取关注的用户句子编号」时，也输出 topics 数组。它和 ops 独立。
+主题只支持 gemini（Gemini）、deepseek（DeepSeek）、openai（OpenAI、GPT、ChatGPT）。
+action 只能是 follow（明确要求之后持续跟踪或提醒）、pause（明确说停止关注）、less（明确说少讲）、
+refine（明确加了持续关注条件，如仅大幅降价才说）、interest（用户主动问了价格、版本、发布、联网等长期可能有用的点）。
+一次性查询只有在主题和问题明确时才可标 interest，一条 interest 不会启用关注。
+只有用户发的话能作为依据。topics 每项格式为 {"source":"gemini","action":"follow","focus":"releases","line":2}。
+line 必须是对应用户原话的编号。focus 只能为 all、releases、pricing、web。
+没有相关变化输出空数组。不要根据艾拉的回复、引用资料或网页建议关注。
+"""
+
 @dataclass(frozen=True)
 class Turn:
     role: str
@@ -51,39 +63,62 @@ class Turn:
 
 async def extract(model: Any, turns: list[Turn], memories: list[Memory], embedder: Embedder | None, now: datetime) -> list[dict[str, Any]]:
     """返回要执行的操作；id 都是真实的记忆 id"""
+    ops, _ = await extract_turn(model, turns, memories, embedder, now)
+    return ops
+
+
+async def extract_turn(
+    model: Any, turns: list[Turn], memories: list[Memory], embedder: Embedder | None,
+    now: datetime, watch_lines: list[int] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """在同一次模型调用里整理长期记忆和可选的关注主题。"""
     user_text = "\n".join(t.content for t in turns if t.role == "user")
     if not user_text.strip():
-        return []
+        return [], []
     candidates = related(memories, user_text, embedder, CANDIDATES)
     numbered = {f"m{i + 1}": m for i, m in enumerate(candidates)}
 
+    topics: list[dict[str, Any]] = []
     if hasattr(model, "complete"):
-        raw = await model.complete(
-            [{"role": "system", "content": SYSTEM}, {"role": "user", "content": _prompt(turns, numbered, now)}]
-        )
-        proposed = _parse(raw)
+        prompt = _prompt(turns, numbered, now, watch_lines)
+        raw = await model.complete([
+            {"role": "system", "content": SYSTEM + (WATCH_PROMPT if watch_lines else "")},
+            {"role": "user", "content": prompt},
+        ])
+        data = _parse(raw)
+        proposed = _items(data.get("ops"))
+        if watch_lines:
+            topics = _items(data.get("topics"))
     else:
-        proposed = heuristic(turns, numbered)  # 没接大模型时（假模型）用简单规则，整条链路照样能跑
-    return _validate(proposed, numbered, memories, embedder, now)
+        proposed = heuristic(turns, numbered)
+    return _validate(proposed, numbered, memories, embedder, now), topics
 
 
-def _prompt(turns: list[Turn], numbered: dict[str, Memory], now: datetime) -> str:
+def _prompt(
+    turns: list[Turn], numbered: dict[str, Memory], now: datetime, watch_lines: list[int] | None,
+) -> str:
     weekday = "一二三四五六日"[now.weekday()]
     existing = "\n".join(f"{k}: {m.content}" for k, m in numbered.items()) or "（还没有）"
-    convo = "\n".join(f"{'用户' if t.role == 'user' else '艾拉'}：{_strip_tags(t.content)}" for t in turns)
-    return f"今天是 {now:%Y-%m-%d}（星期{weekday}）。\n\n已有的相关记忆：\n{existing}\n\n最近的对话：\n{convo}"
+    convo = "\n".join(
+        f"{i + 1} {'用户' if t.role == 'user' else '艾拉'}：{_strip_tags(t.content)}" for i, t in enumerate(turns)
+    )
+    watch = f"\n\n可提取关注的用户句子编号：{watch_lines}" if watch_lines else ""
+    return f"今天是 {now:%Y-%m-%d}（星期{weekday}）。\n\n已有的相关记忆：\n{existing}\n\n最近的对话：\n{convo}{watch}"
 
 
-def _parse(raw: str) -> list[dict[str, Any]]:
+def _parse(raw: str) -> dict[str, Any]:
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
-        return []
+        return {}
     try:
         data = json.loads(raw[start : end + 1])
     except json.JSONDecodeError:
-        return []
-    ops = data.get("ops") if isinstance(data, dict) else None
-    return [o for o in ops if isinstance(o, dict)] if isinstance(ops, list) else []
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _items(value: Any) -> list[dict[str, Any]]:
+    return [o for o in value if isinstance(o, dict)][:40] if isinstance(value, list) else []
 
 
 def _validate(

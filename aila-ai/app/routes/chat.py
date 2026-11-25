@@ -17,7 +17,10 @@ from ..confirm import Confirmations
 from ..extension_extras import motions_prompt
 from ..deps import get_confirmations, get_embedder, get_memory_store, get_model, get_registry, status
 from ..llm import ChatModel, Message, classify_error
-from ..memory import Memory, Turn, extract
+from ..memory import Memory, Turn
+from ..memory.extract import extract_turn
+from ..discoveries import Discoveries, mock_topics
+from .discoveries import get_discoveries
 from ..memory.episodes import Line, chat_context
 from ..memory.store import EPISODE, MemoryStore
 from ..persona import system_prompt
@@ -179,10 +182,16 @@ async def chat_confirm(ans: ConfirmAnswer, confirms: Confirmations = Depends(get
     return {"ok": True}
 
 
+class ExtractMessage(ChatMessage):
+    id: str | None = Field(default=None, max_length=128)
+    createdAt: datetime | None = None
+
+
 class ExtractRequest(BaseModel):
     # 最近几轮对话（通常是刚结束的那一轮，再加上前面一两轮做上下文）
-    messages: list[ChatMessage] = Field(min_length=1, max_length=20)
+    messages: list[ExtractMessage] = Field(min_length=1, max_length=20)
     memories: list[MemoryIn] = Field(default_factory=list, max_length=2000)
+    learnTopics: bool = False
 
 
 @router.post("/memory/extract")
@@ -190,12 +199,22 @@ async def memory_extract(
     req: ExtractRequest,
     model: ChatModel = Depends(get_model),
     embedder: Any = Depends(get_embedder),
+    discoveries: Discoveries = Depends(get_discoveries),
 ) -> dict[str, list[dict[str, Any]]]:
     """返回记忆要做的操作：add（新增）、update（修改，id 是原来那条）、delete（删除）。由桌面端执行并同步"""
     turns = [Turn(m.role, m.content) for m in req.messages]
     memories = [m.to_memory() for m in req.memories]
+    now = datetime.now().astimezone()
+    watch = [
+        {"line": i, "content": m.content, "id": m.id, "day": m.createdAt.astimezone().date().isoformat()}
+        for i, m in enumerate(req.messages, 1)
+        if req.learnTopics and m.role == "user" and m.id and m.createdAt
+    ]
     try:
-        ops = await extract(model, turns, memories, embedder, datetime.now().astimezone())
+        ops, topics = await extract_turn(model, turns, memories, embedder, now, [m["line"] for m in watch])
+        if watch:
+            # 明确指令在假模型下也生效；正常情况下模型能理解更自然的说法。
+            discoveries.learn(topics if hasattr(model, "complete") else mock_topics(watch), watch)
     except Exception as err:  # 大模型没连上、超时：告诉桌面端这次没整理成，它过一会儿再试（以前是当成「没什么要记的」）
         log.warning("整理记忆失败：%s", err)
         code, message = classify_error(err)

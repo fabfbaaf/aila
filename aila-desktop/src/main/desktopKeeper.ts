@@ -11,6 +11,7 @@ import { app, Notification, powerMonitor, type BrowserWindow } from 'electron'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { cleanPrefs, type DesktopPrefs, type DesktopStatus, type FocusState, type Presence, type Reminder } from '../shared/desktop'
+import type { Discovery } from '../shared/discoveries'
 import type { AiResult, CharacterEvent } from '../shared/settings'
 import {
   daysKnown,
@@ -57,6 +58,7 @@ export interface DesktopKeeperOptions {
   saveBriefing: (state: BriefingState) => void
   /** 她的一天：作品、日记（AI 服务的接口）和记着的状态。不给就没有这些 */
   life?: LifeHooks
+  pollDiscoveries?: () => Promise<Discovery | null>
 }
 
 export interface LifeHooks {
@@ -101,6 +103,7 @@ export class DesktopKeeper {
   private minute: NodeJS.Timeout | undefined
   private briefing: BriefingState
   private briefingBusy = false
+  private checkingDiscoveries = false
   private life: LifeState
   private lifeBusy = false
   /** 上次告诉桌面上的她「在做作品」没有 */
@@ -256,10 +259,26 @@ export class DesktopKeeper {
       }
     }
     // 每天第一次见面、晚上的日报：人在电脑前、她能说话时才说；没说成的下一分钟再试
-    if (!canTalk || idle >= AWAY_SECONDS || this.briefingBusy) return
-    const now = new Date()
-    if (due(this.briefing.morning, now)) await this.brief('morning', now)
-    else if (this.prefs.reportAt && due(this.briefing.evening, now, this.prefs.reportAt)) await this.brief('evening', now)
+    if (canTalk && idle < AWAY_SECONDS && !this.briefingBusy) {
+      const now = new Date()
+      if (due(this.briefing.morning, now)) await this.brief('morning', now)
+      else if (this.prefs.reportAt && due(this.briefing.evening, now, this.prefs.reportAt)) await this.brief('evening', now)
+    }
+    void this.checkDiscoveries()
+  }
+
+  private async checkDiscoveries(): Promise<void> {
+    if (!this.prefs.proactiveSharing || !this.o.pollDiscoveries || this.checkingDiscoveries) return
+    this.checkingDiscoveries = true
+    try {
+      const report = await this.o.pollDiscoveries()
+      if (report && this.prefs.proactiveSharing && this.presence.visible && !this.presence.quiet &&
+          powerMonitor.getSystemIdleTime() < AWAY_SECONDS) {
+        this.o.characterEvent({ kind: 'discovery', report })
+      }
+    } finally {
+      this.checkingDiscoveries = false
+    }
   }
 
   /** 右键菜单「今天做了什么」：马上说今天的日报（不算晚上那一次） */

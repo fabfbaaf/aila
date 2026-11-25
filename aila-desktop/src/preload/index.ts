@@ -38,6 +38,7 @@ import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, Age
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
+import type { DiscoveryAction, DiscoverySource, DiscoveryState } from '../shared/discoveries'
 import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 import type { ModelDownloadState } from '../shared/models'
@@ -290,6 +291,11 @@ const api = {
 
   /** 让她现在说说今天做了什么（主窗口） */
   desktopReportNow: (): Promise<boolean> => ipcRenderer.invoke('desktop:report-now'),
+  discoveryState: (): Promise<AiResult<DiscoveryState>> => ipcRenderer.invoke('discoveries:state'),
+  discoveryChange: (source: DiscoverySource, action: DiscoveryAction): Promise<AiResult<DiscoveryState>> =>
+    ipcRenderer.invoke('discoveries:change', source, action),
+  discoverySource: (source: DiscoverySource): void => ipcRenderer.send('discoveries:source', source),
+  discoveryShown: (id: string): Promise<boolean> => ipcRenderer.invoke('discoveries:shown', id),
   reminderSnooze: (text: string, minutes: number): Promise<boolean> => ipcRenderer.invoke('reminder:snooze', text, minutes),
   onDesktopStatus: (cb: (status: DesktopStatus) => void): Unsubscribe => listen('desktop:status', cb),
 

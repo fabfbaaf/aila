@@ -218,4 +218,7 @@ EN3: dict[str, str] = {
     "这条命令要用户同意，子 Agent 没法问。不要换着法子试，写进报告，主 Agent 收回改动后再跑。": "This command needs the user's OK and helpers can't ask. Don't try workarounds: put it in the report and the main agent will run it after bringing the changes back.",
     "这条命令{0}，子 Agent 没法问用户，不执行。需要的话写进报告。": "This command {0}; helpers can't ask the user, so it won't run. Put it in the report if needed.",
     "这条命令会读可能存着密钥的文件，子 Agent 没法问用户，不执行。": "This command would read files that may hold keys; helpers can't ask the user, so it won't run.",
+    # 主动分享
+    "找不到更新日志的日期": "No release date found in the changelog",
+    "更新摘要格式不正确": "The update summary has an invalid format",
 }

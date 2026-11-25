@@ -38,6 +38,8 @@ export interface DesktopPrefs {
   checkUpdates: boolean
   /** 每周五晚上写这周的回顾（作品页「回顾」里看；会花一点钱，一周一次） */
   weeklyReview: boolean
+  /** 从聊到的话题找官方更新，等合适的时候主动分享 */
+  proactiveSharing: boolean
 }
 
 export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
@@ -53,7 +55,8 @@ export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = {
   wander: false,
   entrance: true,
   checkUpdates: true,
-  weeklyReview: true
+  weeklyReview: true,
+  proactiveSharing: false
 }
 
 export const SIT_BREAK_CHOICES = [0, 30, 45, 60, 90] as const
@@ -113,6 +116,7 @@ export function cleanPrefs(raw: unknown, base: DesktopPrefs = DEFAULT_DESKTOP_PR
     wander: bool('wander'),
     entrance: bool('entrance'),
     checkUpdates: bool('checkUpdates'),
-    weeklyReview: bool('weeklyReview')
+    weeklyReview: bool('weeklyReview'),
+    proactiveSharing: bool('proactiveSharing')
   }
 }

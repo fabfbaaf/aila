@@ -12,7 +12,7 @@ export interface MemoryForAi {
 }
 
 export interface ExtractRequest {
-  messages: { role: 'user' | 'assistant'; content: string }[]
+  messages: { role: 'user' | 'assistant'; content: string; id: string; createdAt: string }[]
   memories: MemoryForAi[]
 }
 
@@ -117,7 +117,7 @@ export class MemoryKeeper {
     if (!last || last.id === this.lastDone || !recent.some((m) => m.role === 'user')) return
     try {
       const ops = await this.deps.extract({
-        messages: recent.map(({ role, content }) => ({ role, content })),
+        messages: recent.map(({ role, content, id, createdAt }) => ({ role, content, id, createdAt })),
         memories: forAi(this.deps.memories.list())
       })
       this.lastDone = last.id

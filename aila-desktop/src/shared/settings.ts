@@ -80,6 +80,7 @@ export interface ScreenStatus {
 
 /** 在设置窗口里做了某件事，让她在桌面上有点反应 */
 export type CharacterEvent =
+  | { kind: 'discovery'; report: import('./discoveries').Discovery }
   | { kind: 'forget-one' }
   | { kind: 'forget-all' }
   | { kind: 'knowledge-added'; names: string[] }
