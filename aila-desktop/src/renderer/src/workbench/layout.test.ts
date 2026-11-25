@@ -7,7 +7,9 @@ import {
   crossLinks,
   groupAnchors,
   groupColors,
+  haloScale,
   highlightFrom,
+  layerAlpha,
   labelled,
   linkKey,
   moduleAnchors,
@@ -208,5 +210,55 @@ describe('她干活的文件对到星球上', () => {
     expect(starOf('C:\\code\\shop', 'c:/code/shop/backend', './api/x.py')).toBe('backend/api/x.py')
     expect(starOf('C:\\code\\shop', 'C:\\code\\blog', 'a.py')).toBeNull()
     expect(starOf('C:\\code\\shop', 'C:\\code\\shopping', 'a.py')).toBeNull()
+  })
+})
+
+describe('星图的分层显示', () => {
+  it('看全部时只有模块和模块之间的线，文件之间的线、光点都不画', () => {
+    const far = layerAlpha(1)
+    expect(far.fileLines).toBe(0)
+    expect(far.sparks).toBe(0)
+    expect(far.moduleSuns).toBeGreaterThan(0.5)
+    expect(far.moduleLines).toBeGreaterThan(0.3)
+    expect(far.planets).toBeLessThan(0.4)
+  })
+
+  it('拉近看文件：模块的大星和星云都没了，文件、文件之间的线出来', () => {
+    const near = layerAlpha(0)
+    expect(near.moduleSuns).toBe(0)
+    expect(near.nebula).toBe(0)
+    expect(near.planets).toBe(1)
+    expect(near.fileLines).toBeGreaterThan(0)
+    expect(near.sparks).toBeGreaterThan(0)
+  })
+
+  it('光晕、星云不会糊成一片：都压得很低；跨进程弧线一直很淡', () => {
+    for (const z of [0, 0.25, 0.5, 0.75, 1]) {
+      const a = layerAlpha(z)
+      expect(a.halos).toBeLessThanOrEqual(0.55)
+      expect(a.nebula).toBeLessThanOrEqual(0.05)
+      expect(a.arcs).toBeLessThanOrEqual(0.3)
+    }
+    expect(haloScale(0)).toBeLessThan(haloScale(1))
+  })
+
+  it('越拉近文件之间的线越清楚（不会突然跳）', () => {
+    const steps = [1, 0.8, 0.6, 0.4, 0.2, 0].map((z) => layerAlpha(z).fileLines)
+    for (let i = 1; i < steps.length; i++) expect(steps[i]).toBeGreaterThanOrEqual(steps[i - 1])
+  })
+
+  it('名字不压在工具栏、图例上', () => {
+    const toolbar = { id: 'ui:top', x: 300, y: 30, w: 600, h: 40, priority: 0 }
+    const shown = placeLabels(
+      [
+        { id: 'under', x: 320, y: 32, w: 80, h: 18, priority: 9000 },
+        { id: 'free', x: 320, y: 300, w: 80, h: 18, priority: 1 }
+      ],
+      3,
+      [toolbar]
+    )
+    expect(shown.has('under')).toBe(false)
+    expect(shown.has('free')).toBe(true)
+    expect(shown.has('ui:top')).toBe(false)
   })
 })

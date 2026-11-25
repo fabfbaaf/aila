@@ -6,6 +6,9 @@
  * - 每个模块外面罩一层淡淡的星云，名字写在星云上；子项目的名字写在星系上方
  * - 跨进程的光线画成弧线：淡金是 HTTP 接口（桌面端 → AI 服务、桌面端 → 云端），淡青是 IPC 消息（预加载 → 主进程）。
  *   函数调用只在同一类语言里连得上，这几条弧线把前后端连起来
+ * - 分层显示（layout.ts 的 layerAlpha）：看全部时只有模块和模块之间的线，拉近才出现文件和文件之间的线；
+ *   光晕、星云拉近时淡下去，不会叠成一片紫雾；跨进程的弧线一直很淡，选中、报错时才亮
+ * - 第三方库是配角：外圈很淡的小点，不写名字；悬停、选中、选中的文件用到它时才亮、才有名字
  * - 测试文件调暗（也可以在界面上隐藏）
  * - 名字防重叠：每隔几帧按优先级重新摆一遍，挡住的先不显示
  * - 布局：d3-force-3d 力导向。光线把相关的文件拉近，星球之间互相排斥；每个文件被拉向自己模块的中心，
@@ -34,7 +37,9 @@ import {
   buildModules,
   groupAnchors,
   groupColors,
+  haloScale,
   kindOf,
+  layerAlpha,
   labelled,
   linkKey,
   moduleAnchors,
@@ -206,6 +211,8 @@ export class StarMap {
   /** 星球上闪一下的光环（她在读、刚改了这个文件） */
   private flashes: { sprite: THREE.Sprite; start: number; radius: number }[] = []
   private resize: ResizeObserver
+  /** 屏幕上不能压的地方（工具栏、图例、面板，相对画布的像素）：名字摆在上面就不显示 */
+  private reserved: LabelBox[] = []
 
   constructor(private el: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
@@ -230,7 +237,8 @@ export class StarMap {
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
     // 只让亮的东西（星球、光点）发光：门槛太低整个画面会发灰
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.35)
+    // 门槛提高、强度压低：只有真的亮的（选中、报错、光点）才泛光；以前门槛低，拉近时整个画面过曝
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.45, 0.3, 0.6)
     this.composer.addPass(this.bloom)
     this.composer.addPass(new OutputPass())
 
@@ -604,7 +612,7 @@ export class StarMap {
     mesh.scale.setScalar(star.radius)
     mesh.userData.id = star.id
     const halo = this.glowSprite(star.color, 0.55)
-    halo.scale.setScalar(star.radius * 4.2)
+    halo.scale.setScalar(star.radius * haloScale(1))
     this.scene.add(mesh, halo)
     this.planets.set(star.id, { star, mesh, halo, label: null, lit: false, base: { mesh: 1, halo: 0.55 } })
   }
@@ -616,7 +624,7 @@ export class StarMap {
     sun.userData.module = info.id
     sun.scale.setScalar(radius)
     const halo = this.glowSprite(color, 0)
-    halo.scale.setScalar(radius * 5)
+    halo.scale.setScalar(radius * 3.6)
     // 星云：只是一层很淡的光，不参与泛光（亮度低于泛光门槛）
     const nebula = this.glowSprite(color, 0.07)
     nebula.renderOrder = -1
@@ -634,12 +642,12 @@ export class StarMap {
 
   private addLib(lib: LibInfo): void {
     const color = new THREE.Color(LIB_COLORS[lib.ecosystem] ?? '#fff1c4')
-    const radius = 2.5 + Math.log2(lib.count + 1) * 1.4
+    const radius = 1.4 + Math.log2(lib.count + 1) * 0.45 // 配角：比模块小得多
     const mesh = new THREE.Mesh(this.sphere, new THREE.MeshBasicMaterial({ color, transparent: true }))
     mesh.scale.setScalar(radius)
     mesh.userData.lib = lib.id
-    const halo = this.glowSprite(color, 0.7)
-    halo.scale.setScalar(radius * 6)
+    const halo = this.glowSprite(color, 0.18)
+    halo.scale.setScalar(radius * 4)
     const label = makeModuleLabel(lib.name, `#${color.getHexString()}`)
     label.element.classList.add('lib-label')
     const owners = new Map(this.stars.map((s) => [s.id, s.mod]))
@@ -753,14 +761,14 @@ export class StarMap {
         const hot = h?.links.has(r.key)
         const src = this.planets.get(starId(r.source))
         const c = hot ? new THREE.Color(CHAIN_COLOR) : (src?.star.color ?? new THREE.Color('#ffffff')).clone()
-        c.multiplyScalar(hot ? 1.2 : h ? 0.1 : src?.star.test ? 0.35 : 0.85)
+        c.multiplyScalar(hot ? 1.2 : h ? 0.1 : near(r) ? 1.2 : src?.star.test ? 0.2 : 0.45)
         colors.setXYZ(k, c.r, c.g, c.b)
       })
       colors.needsUpdate = true
     }
     const bridgeColor = (r: Ray, boost: number): THREE.Color => {
       const test = this.planets.get(starId(r.source))?.star.test
-      const k = near(r) ? 1.25 : h ? (h.links.has(r.key) ? 1 : 0.12) : test ? 0.1 : 0.62
+      const k = near(r) ? 1.25 : h ? (h.links.has(r.key) ? 1 : 0.12) : test ? 0.1 : 0.5
       return new THREE.Color(r.kind === 'ipc' ? IPC_COLOR : HTTP_COLOR).multiplyScalar(k * boost)
     }
     if (this.arcs) {
@@ -794,15 +802,15 @@ export class StarMap {
     const selectedLibs = new Set(this.libs.filter((l) => this.selected && l.lib.users.includes(this.selected)).map((l) => l.lib.id))
     for (const l of this.libs) {
       const hot = l.lib.id === this.selectedLib || l.lib.id === this.hoveredLib || selectedLibs.has(l.lib.id)
-      l.mesh.material.opacity = h ? 0.3 : 1
-      l.halo.material.opacity = h ? 0.15 : hot ? 1 : 0.6
+      l.mesh.material.opacity = h ? 0.2 : hot ? 1 : 0.45
+      l.halo.material.opacity = h ? 0.06 : hot ? 0.8 : 0.16
     }
     if (this.libLines) {
       const colors = this.libLines.geometry.getAttribute('color') as THREE.BufferAttribute
       let k = 0
       for (const l of this.libs) {
         const hot = l.lib.id === this.selectedLib || l.lib.id === this.hoveredLib || selectedLibs.has(l.lib.id)
-        const c = l.color.clone().multiplyScalar(h ? 0.05 : hot ? 0.9 : 0.12)
+        const c = l.color.clone().multiplyScalar(h ? 0.03 : hot ? 0.8 : 0.035)
         for (let i = 0; i < l.modules.length * 2; i++) colors.setXYZ(k++, c.r, c.g, c.b)
       }
       colors.needsUpdate = true
@@ -811,26 +819,35 @@ export class StarMap {
     if (this.sim) this.sync() // 选中、报错的文件拉远时也不收拢：位置马上跟着变
   }
 
-  /** 远近：文件淡下去、模块的大星和模块之间的光线亮起来（中间平滑过渡） */
+  /** 远近：按 layerAlpha 分层（看全部时是模块，拉近是文件）；选中、报错时相关的东西不管远近都亮 */
   private applyZoom(): void {
     const t = this.zoom
-    const fade = 1 - 0.8 * t
+    const L = layerAlpha(t)
+    const focus = !!this.highlight || !!this.selected
+    const hs = haloScale(t)
     for (const p of this.planets.values()) {
-      p.mesh.material.opacity = p.lit ? p.base.mesh : p.base.mesh * fade
-      p.halo.material.opacity = p.lit ? p.base.halo : p.base.halo * fade
+      p.mesh.material.opacity = p.lit ? p.base.mesh : p.base.mesh * L.planets
+      p.halo.material.opacity = p.lit ? p.base.halo : p.base.halo * L.halos
+      p.halo.userData.scale = hs
     }
     const h = this.highlight
     for (const c of this.clusters.values()) {
       const hot = !h || c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))
       const k = (hot ? 1 : 0.3) * (c.info.test ? TEST_DIM : 1) * (c.info.id === this.hoveredModule ? 1.3 : 1)
-      c.sun.material.opacity = Math.min(1, 0.95 * t * k)
-      c.halo.material.opacity = Math.min(1, 0.5 * t * k)
-      c.nebula.material.opacity = (0.05 + 0.04 * (1 - t)) * (hot ? 1 : 0.5) * (c.info.test ? 0.6 : 1)
+      c.sun.material.opacity = Math.min(1, L.moduleSuns * k)
+      c.halo.material.opacity = Math.min(1, L.moduleHalos * k)
+      c.nebula.material.opacity = L.nebula * (hot ? 1 : 0.5) * (c.info.test ? 0.6 : 1)
       c.sun.visible = c.halo.visible = t > 0.02
+      c.nebula.visible = L.nebula > 0.002
     }
-    if (this.lines) (this.lines.material as THREE.LineBasicMaterial).opacity = 0.5 * (1 - 0.85 * t)
-    if (this.sparks) (this.sparks.material as THREE.PointsMaterial).opacity = 1 - 0.9 * t
-    if (this.moduleLines) (this.moduleLines.material as THREE.LineBasicMaterial).opacity = 0.75 * t
+    // 选中、报错时：文件之间的线、光点不管远近都要看得到（颜色里已经把无关的压暗了）
+    if (this.lines) (this.lines.material as THREE.LineBasicMaterial).opacity = focus ? Math.max(0.55, L.fileLines) : L.fileLines
+    if (this.sparks) (this.sparks.material as THREE.PointsMaterial).opacity = focus ? Math.max(0.8, L.sparks) : L.sparks
+    if (this.lines) this.lines.visible = focus || L.fileLines > 0.005
+    if (this.sparks) this.sparks.visible = focus || L.sparks > 0.005
+    if (this.arcs) (this.arcs.material as THREE.LineBasicMaterial).opacity = focus ? 0.8 : L.arcs
+    if (this.arcSparks) (this.arcSparks.material as THREE.PointsMaterial).opacity = focus ? 1 : L.arcs * 2
+    if (this.moduleLines) (this.moduleLines.material as THREE.LineBasicMaterial).opacity = L.moduleLines
   }
 
   // ---------- 每一帧 ----------
@@ -1045,7 +1062,8 @@ export class StarMap {
       if (this.highlight?.error.has(p.star.id)) k = 1 + 0.18 * Math.sin(t * 6)
       else if (p.star.id === this.selected) k = 1 + 0.06 * Math.sin(t * 2.5)
       p.mesh.scale.setScalar(r * k)
-      p.halo.scale.setScalar(r * 4.2 * (this.highlight?.error.has(p.star.id) ? 1.4 * k : k))
+      const hs = (p.halo.userData.scale as number | undefined) ?? haloScale(this.zoom)
+      p.halo.scale.setScalar(r * (p.lit ? 4.2 : hs) * (this.highlight?.error.has(p.star.id) ? 1.4 * k : k))
     }
   }
 
@@ -1070,7 +1088,8 @@ export class StarMap {
       objects.set(id, obj)
     }
     for (const g of this.galaxies) add(`g:${g.group}`, g.label, g.group, 18, 0, 10_000)
-    if (this.showLibs) for (const l of this.libs) add(`l:${l.lib.id}`, l.label, l.lib.name, 13, 0, 7_000 + l.lib.count)
+    // 第三方库是配角：悬停、选中、选中的文件用到它时才写名字
+    if (this.showLibs) for (const l of this.libs) if (this.libHot(l)) add(`l:${l.lib.id}`, l.label, l.lib.name, 13, 0, 7_000 + l.lib.count)
     for (const c of this.clusters.values()) {
       if (h && !c.stars.some((s) => h.error.has(s.id) || h.chain.has(s.id))) continue
       const size = Math.log10(c.info.lines + 10)
@@ -1083,12 +1102,22 @@ export class StarMap {
       const rank = (p.star.test ? 20 : 100) + Math.log10(p.star.lines + 10) * 10 // 测试文件的名字排在后面
       add(`f:${p.star.id}`, p.label, p.star.name, 12, 10, p.lit ? 9_000 : rank)
     }
-    const shown = placeLabels(boxes)
+    const shown = placeLabels(boxes, 3, this.reserved)
     for (const g of this.galaxies) g.label.visible = false
     for (const l of this.libs) l.label.visible = false
     for (const c of this.clusters.values()) c.label.visible = false
     for (const p of this.planets.values()) if (p.label) p.label.visible = false
     for (const [id, obj] of objects) obj.visible = shown.has(id)
+  }
+
+  /** 这个库现在该不该亮：悬停、选中，或者选中的文件用到它 */
+  private libHot(l: LibStar): boolean {
+    return l.lib.id === this.hoveredLib || l.lib.id === this.selectedLib || (!!this.selected && l.lib.users.includes(this.selected))
+  }
+
+  /** 界面上盖在星图上面的东西（工具栏、图例、面板）在哪：名字避开它们（相对画布的像素） */
+  setReserved(rects: { x: number; y: number; w: number; h: number }[]): void {
+    this.reserved = rects.map((r, i) => ({ id: `ui:${i}`, x: r.x + r.w / 2, y: r.y + r.h / 2, w: r.w, h: r.h, priority: Infinity }))
   }
 
   private flyTo(id: string): void {

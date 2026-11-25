@@ -203,9 +203,12 @@ export interface LabelBox {
   priority: number
 }
 
-/** 名字防重叠：按优先级从高到低摆，和已经摆上的挡住了就不显示 */
-export function placeLabels(items: LabelBox[], gap = 3): Set<string> {
-  const placed: LabelBox[] = []
+/**
+ * 名字防重叠：按优先级从高到低摆，和已经摆上的挡住了就不显示。
+ * obstacles：屏幕上不能压的地方（工具栏、图例、面板），名字落在上面就不显示
+ */
+export function placeLabels(items: LabelBox[], gap = 3, obstacles: LabelBox[] = []): Set<string> {
+  const placed: LabelBox[] = [...obstacles]
   const shown = new Set<string>()
   for (const b of [...items].sort((a, c) => c.priority - a.priority)) {
     const hit = placed.some((p) => Math.abs(p.x - b.x) * 2 < p.w + b.w + gap * 2 && Math.abs(p.y - b.y) * 2 < p.h + b.h + gap * 2)
@@ -369,4 +372,49 @@ export function modeColors(graph: CodeGraph, mode: ColorMode): { files: Map<stri
 /** 「按改动」时改得最多的几个文件（图例里列出来） */
 export function hottest(graph: CodeGraph, count = 5): GraphNode[] {
   return graph.nodes.filter((n) => (n.churn ?? 0) > 0).sort((a, b) => (b.churn ?? 0) - (a.churn ?? 0)).slice(0, count)
+}
+
+/**
+ * 每一层在某个远近下的透明度（zoom：0 = 拉到最近看文件，1 = 看全部看模块）。
+ *
+ * 分层显示，你的代码当主角：
+ * - 看全部时只有模块（大星 + 很淡的星云）和模块之间汇总的线；文件收拢在模块里，暗暗的
+ * - 拉近才出现一个个文件和文件之间的线、流动的光点
+ * - 光晕、星云拉近时淡下去：这些是叠加发光的半透明贴图，拉近后又大又多，以前会叠成一片紫雾
+ * - 跨进程的弧线一直很淡（选中、报错时另外点亮）
+ *
+ * halos 是乘在文件光晕原本透明度上的系数；其余是直接的透明度
+ */
+export interface LayerAlpha {
+  planets: number
+  halos: number
+  fileLines: number
+  sparks: number
+  moduleSuns: number
+  moduleHalos: number
+  moduleLines: number
+  nebula: number
+  arcs: number
+}
+
+export function layerAlpha(zoom: number): LayerAlpha {
+  const t = Math.min(1, Math.max(0, zoom))
+  /** 拉近到一定程度才出现：t 从 0.6 往下逐渐显出来 */
+  const near = Math.min(1, Math.max(0, (0.6 - t) / 0.6))
+  return {
+    planets: 1 - 0.72 * t,
+    halos: 0.55 - 0.4 * t,
+    fileLines: 0.3 * near,
+    sparks: 0.75 * near,
+    moduleSuns: 0.9 * t,
+    moduleHalos: 0.22 * t,
+    moduleLines: 0.55 * t,
+    nebula: 0.04 * t,
+    arcs: 0.16 + 0.1 * near
+  }
+}
+
+/** 文件光晕多大（是星球半径的几倍）：拉近时小一点，免得一个个光球连成一片 */
+export function haloScale(zoom: number): number {
+  return 2.4 + 1.2 * Math.min(1, Math.max(0, zoom))
 }
