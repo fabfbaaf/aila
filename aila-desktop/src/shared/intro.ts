@@ -3,8 +3,10 @@
  *
  * 1. 一本正经：主窗口变成一份很正式的产品介绍幻灯片（每页一个小演示），她站在左边当讲解员，用「您」一页页念功能，
  *    越念越随便：打哈欠、念得飞快
- * 2. 破壁：讲到地图那页她停下来，转头看你——「……算了，这些你自己点开看也行吧。」画面出故障、乱码，
- *    她敲敲屏幕，玻璃裂开碎掉，主窗口被挤到一边，她从窗口里跳到桌面上
+ * 2. 破壁（用魔法）：讲到地图那页她停下来，转头看你——「……算了，这些你自己点开看也行吧。」画面出故障、乱码。
+ *    她想出去：先往窗口边上走，撞上一层看不见的玻璃被弹回来（撞到的地方漾开一圈屏障的波纹）；
+ *    再敲两下，只泛波纹、敲不破；于是举起手放魔法——面前展开一个法阵，满屏的光点往里聚，
+ *    法阵爆开，发光的裂纹从法阵往外爬，玻璃碎了，她带着一串火花跳到桌面上
  * 3. 借鼠标：她在气泡里问「借一下你的鼠标？」。你点了「借给你」才动：真的光标被她挪着走，
  *    拖开主窗口、在对话框里打个招呼再删掉、切回任务页，最后放回原处。
  *    只挪光标，不真的点击（「点」是艾拉在自己窗口里演的，会出一圈波纹）；你一动鼠标或按 Esc 她马上停
@@ -94,8 +96,11 @@ export const INTRO_LINES = {
   stop: '……',
   bored: '……算了。这些你自己点开看也行吧。',
   cramped: '这个窗口，好挤啊。',
-  knock: '……让一下。',
-  out: '……呼。外面宽敞多了。',
+  wantOut: '……我想出去看看。',
+  bumped: '……诶？出不去？',
+  sturdy: '这层玻璃……有点结实。',
+  magic: '那就——用魔法吧。',
+  out: '……成功了。外面宽敞多了。',
   askMouse: '对了——借一下你的鼠标？',
   mouseTag: '借鼠标',
   mouseDetail: '只挪光标，不会点你别的程序。你一动鼠标或者按 Esc，我就停。',
@@ -122,6 +127,10 @@ export const INTRO_MS = {
   glitch: 1800,
   /** 每敲一下 */
   knock: 650,
+  /** 往窗口边上走、撞上去 */
+  bump: 700,
+  /** 法阵蓄力 */
+  charge: 2600,
   shatter: 900,
   /** 等你回答借不借鼠标；不回答就当不借 */
   askTimeout: 20000,
@@ -174,6 +183,24 @@ export function knockPoint(pet: Point, win: { width: number; height: number }, m
   }
 }
 
+/**
+ * 第一次试着出去：往主窗口左边走，走到身子贴着窗口边（中心离左边 40 像素）撞上去。
+ * to：角色窗口要走到的位置；contact：撞到的地方（主窗口里的坐标，画波纹用）
+ */
+export function bumpPoint(stand: Point, win: { width: number; height: number }, main: Rect): { to: Point; contact: Point } {
+  const centerX = main.x + 40
+  return {
+    to: { x: Math.round(centerX - win.width / 2), y: stand.y },
+    contact: { x: 14, y: Math.round(stand.y + win.height * 0.62 - main.y) }
+  }
+}
+
+/** 法阵画在哪（主窗口里的坐标）：她伸出去的手前面一点，在她和幻灯片之间 */
+export function magicCenter(stand: Point, win: { width: number; height: number }, main: Rect): Point {
+  const hand = knockPoint(stand, win, main)
+  return { x: Math.round(hand.x + 70), y: Math.round(hand.y - 30) }
+}
+
 /** 玻璃碎了以后主窗口被挤到哪：缩小一些，靠左上 */
 export function shovedMainBounds(main: Rect, workArea: Rect): Rect {
   const width = Math.round(main.width * 0.72)
@@ -207,14 +234,18 @@ export function shouldIntro(o: { introDone: boolean; showCharacter: boolean; vis
 }
 
 /** 音效（主窗口里用 Web Audio 现合成，shell/introSfx.ts） */
-export type SfxName = 'page' | 'type' | 'glitch' | 'knock' | 'crack' | 'shatter' | 'whoosh' | 'thud' | 'click' | 'chime'
+export type SfxName = 'page' | 'type' | 'glitch' | 'knock' | 'crack' | 'shatter' | 'whoosh' | 'thud' | 'click' | 'chime' | 'bonk' | 'charge' | 'spell'
 
 /** 主进程发给主窗口的画面指令 */
 export type IntroScene =
   | { scene: 'slides'; index: number }
   | { scene: 'stall' }
   | { scene: 'glitch' }
-  | { scene: 'crack'; x: number; y: number; stage: number }
+  | { scene: 'crack'; x: number; y: number; stage: number; magic?: boolean }
+  /** 撞上、敲到看不见的玻璃：那里漾开一圈屏障的波纹（敲不破） */
+  | { scene: 'ripple'; x: number; y: number }
+  /** 法阵：charge 展开、转着蓄力；burst 爆开（接着就是裂纹和碎） */
+  | { scene: 'magic'; x: number; y: number; phase: 'charge' | 'burst' }
   | { scene: 'shatter' }
   | { scene: 'click'; x: number; y: number }
   | { scene: 'type'; text: string }
@@ -226,7 +257,7 @@ export type IntroScene =
 export interface IntroCue {
   say?: string
   ms?: number
-  gesture?: 'wave' | 'nod' | 'tilt' | 'stretch' | 'knock' | 'turn' | 'point' | 'yawn'
+  gesture?: 'wave' | 'nod' | 'tilt' | 'stretch' | 'knock' | 'turn' | 'point' | 'yawn' | 'bonk' | 'cast'
   /** 在气泡里问借不借鼠标（回答走 intro:answer） */
   askMouse?: boolean
 }
@@ -239,13 +270,17 @@ export type FxCommand =
   | { fx: 'shatter'; rect: Rect; x: number; y: number }
   | { fx: 'trail'; x: number; y: number }
   | { fx: 'dust'; x: number; y: number }
+  /** 蓄力：满屏的光点往这一点聚过来 */
+  | { fx: 'charge'; x: number; y: number }
+  /** 法阵爆开：一圈光往外扩 */
+  | { fx: 'burst'; x: number; y: number }
   | { fx: 'cursor'; x: number; y: number }
   | { fx: 'cursor-off' }
   | { fx: 'clear' }
 
 /** 一个粒子：碎片（三角形）、火花、灰 */
 export interface Particle {
-  kind: 'shard' | 'spark' | 'dust'
+  kind: 'shard' | 'spark' | 'dust' | 'charge'
   x: number
   y: number
   vx: number
@@ -309,9 +344,24 @@ export function spawnSpark(at: Point, rand: () => number): Particle {
   return { kind: 'spark', x: at.x + (rand() - 0.5) * 40, y: at.y + (rand() - 0.5) * 40, vx: (rand() - 0.5) * 60, vy: 20 + rand() * 60, rot: 0, vr: 0, life, max: life, size: 2 + rand() * 4 }
 }
 
+/**
+ * 蓄力的光点：从四周（离中心 220~560 像素的一圈）出发，各自在寿命走完时正好到中心，越近越快（加速聚拢）。
+ * 用匀速近似：速度 = 距离 / 寿命；FxLayer 画的时候越接近中心越亮
+ */
+export function spawnCharge(center: Point, count: number, rand: () => number): Particle[] {
+  return Array.from({ length: count }, () => {
+    const a = rand() * Math.PI * 2
+    const r = 220 + rand() * 340
+    const life = 0.8 + rand() * 1.4
+    const x = center.x + Math.cos(a) * r
+    const y = center.y + Math.sin(a) * r
+    return { kind: 'charge' as const, x, y, vx: (center.x - x) / life, vy: (center.y - y) / life, rot: 0, vr: 0, life, max: life, size: 1.5 + rand() * 2.5 }
+  })
+}
+
 /** 往前走 dt 秒：碎片受重力掉得快，灰几乎不受重力，火花轻轻往下掉 */
 export function stepParticle(p: Particle, dt: number): Particle {
-  const gravity = p.kind === 'shard' ? 1700 : p.kind === 'spark' ? 220 : -30
+  const gravity = p.kind === 'shard' ? 1700 : p.kind === 'spark' ? 220 : p.kind === 'charge' ? 0 : -30
   const drag = p.kind === 'dust' ? Math.pow(0.15, dt) : 1
   return { ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vx: p.vx * drag, vy: p.vy * drag + gravity * dt, rot: p.rot + p.vr * dt, life: p.life - dt }
 }

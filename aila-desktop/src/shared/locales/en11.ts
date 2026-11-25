@@ -18,8 +18,11 @@ export const EN11: Record<string, string> = {
   // 破壁、借鼠标、住下
   '……算了。这些你自己点开看也行吧。': "...Never mind. You can just click around and see for yourself.",
   '这个窗口，好挤啊。': 'This window is so cramped.',
-  '……让一下。': '...Excuse me.',
-  '……呼。外面宽敞多了。': "...Phew. It's much roomier out here.",
+  '……我想出去看看。': '...I want to go out and look around.',
+  '……诶？出不去？': "...Huh? I can't get out?",
+  '这层玻璃……有点结实。': 'This glass is... pretty sturdy.',
+  '那就——用魔法吧。': 'Fine then. Magic it is.',
+  '……成功了。外面宽敞多了。': "...It worked. It's much roomier out here.",
   '对了——借一下你的鼠标？': 'Oh, right. Can I borrow your mouse?',
   借鼠标: 'Borrow mouse',
   '只挪光标，不会点你别的程序。你一动鼠标或者按 Esc，我就停。':

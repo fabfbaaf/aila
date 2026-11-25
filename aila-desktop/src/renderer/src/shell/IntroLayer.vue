@@ -4,7 +4,9 @@
  *
  * - 幻灯片：一份很「正式」的浅色产品介绍，左边留一栏给她站（她是桌面上的透明窗口，正好站在这一栏前面）
  * - 停住、故障：标题乱码、画面错位抖动、扫描线
- * - 裂纹：从她敲的地方往外裂，一下比一下多；碎掉时整块玻璃碎成几片掉下去，露出后面真正的艾拉
+ * - 屏障波纹：她撞上、敲到看不见的玻璃，那里漾开几圈青色的波纹（敲不破）
+ * - 法阵：她用魔法时面前展开的法阵（圆环、刻度、六芒星、符文，自己画的几何），转着蓄力，最后爆开
+ * - 裂纹：法阵爆开后发光的裂纹从法阵往外爬；碎掉时整块玻璃碎成几片掉下去，露出后面真正的艾拉
  * - 点击波纹：她借你鼠标「点」的地方冒一圈（真的点击没有发生，只是画出来）
  * - 打字：交给对话页的输入框（intents.chatDraftRequest），只填不发
  * - 收尾清单：开始用之前要做的几件事，你自己关
@@ -28,7 +30,29 @@ const emit = defineEmits<{ go: [route: ShellRoute] }>()
 /** 现在画哪一段：null = 什么都不画（演完、被跳过、还没开始） */
 const mode = ref<null | 'slides' | 'stall' | 'glitch' | 'shatter' | 'checklist'>(null)
 const index = ref(0)
-const crack = ref<{ x: number; y: number; stage: number } | null>(null)
+const crack = ref<{ x: number; y: number; stage: number; magic: boolean } | null>(null)
+/** 撞上、敲到玻璃时的波纹（几圈同时在漾） */
+const barrier = ref<{ id: number; x: number; y: number }[]>([])
+/** 法阵：在哪、在蓄力还是在爆开 */
+const sigil = ref<{ x: number; y: number; phase: 'charge' | 'burst' } | null>(null)
+/** 法阵上的刻度和符文（固定的几何，画一次） */
+const TICKS = Array.from({ length: 36 }, (_, i) => {
+  const a = (i / 36) * Math.PI * 2
+  const r1 = i % 3 === 0 ? 80 : 84
+  return { x1: Math.cos(a) * r1, y1: Math.sin(a) * r1, x2: Math.cos(a) * 90, y2: Math.sin(a) * 90 }
+})
+const STAR = [0, 1].map((k) =>
+  [0, 1, 2].map((i) => { const a = -Math.PI / 2 + k * Math.PI / 3 + (i * 2 * Math.PI) / 3; return `${(Math.cos(a) * 70).toFixed(1)},${(Math.sin(a) * 70).toFixed(1)}` }).join(' ')
+)
+const RUNES = Array.from({ length: 8 }, (_, i) => {
+  const a = (i / 8) * Math.PI * 2
+  const cx = Math.cos(a) * 56
+  const cy = Math.sin(a) * 56
+  // 每个符文是三四笔短线，按编号变形，看着像字又不是任何真的文字
+  const k = (i * 37) % 5
+  return `M${cx - 5} ${cy - 6} L${cx + 5} ${cy - 6} M${cx} ${cy - 6} L${cx + (k - 2) * 2} ${cy + 6} M${cx - 4} ${cy + (k % 2 ? 2 : -1)} L${cx + 4} ${cy + (k % 2 ? -1 : 2)}`
+})
+let barrierId = 0
 const shaking = ref(false)
 const ripples = ref<{ id: number; x: number; y: number }[]>([])
 /** 故障时的乱码标题（null = 正常标题） */
@@ -119,11 +143,33 @@ function onScene(s: IntroScene): void {
     }
     case 'crack':
       clearInterval(glitchTimer)
-      sfx.play('knock')
-      window.setTimeout(() => sfx.play('crack'), 60)
-      crack.value = { x: s.x, y: s.y, stage: s.stage }
+      if (s.magic) sfx.play('crack')
+      else {
+        sfx.play('knock')
+        window.setTimeout(() => sfx.play('crack'), 60)
+      }
+      crack.value = { x: s.x, y: s.y, stage: s.stage, magic: !!s.magic }
       shaking.value = false
       requestAnimationFrame(() => (shaking.value = true))
+      break
+    case 'ripple': {
+      // 她开始试着出去：故障停下来，画面安静，专心看她撞、敲
+      clearInterval(glitchTimer)
+      garbled.value = null
+      if (mode.value === 'glitch') mode.value = 'stall'
+      const rid = ++barrierId
+      barrier.value.push({ id: rid, x: s.x, y: s.y })
+      window.setTimeout(() => (barrier.value = barrier.value.filter((r) => r.id !== rid)), 1000)
+      break
+    }
+    case 'magic':
+      clearInterval(glitchTimer)
+      garbled.value = null
+      sigil.value = { x: s.x, y: s.y, phase: s.phase }
+      if (s.phase === 'burst') {
+        sfx.play('spell')
+        window.setTimeout(() => sigil.value?.phase === 'burst' && (sigil.value = null), 800)
+      }
       break
     case 'shatter':
       sfx.play('shatter')
@@ -152,6 +198,8 @@ function onScene(s: IntroScene): void {
       clearInterval(glitchTimer)
       mode.value = null
       crack.value = null
+      sigil.value = null
+      barrier.value = []
       break
   }
 }
@@ -213,7 +261,23 @@ onBeforeUnmount(() => {
       </section>
       <div class="scan" aria-hidden="true"></div>
     </div>
-    <svg v-if="crack" class="cracks" aria-hidden="true">
+    <!-- 撞上、敲到看不见的玻璃：漾开的波纹 -->
+    <div v-for="r in barrier" :key="r.id" class="barrier" :style="{ left: `${r.x}px`, top: `${r.y}px` }" aria-hidden="true"><i></i><i></i><i></i></div>
+    <!-- 法阵 -->
+    <svg v-if="sigil" class="sigil" :class="sigil.phase" :style="{ left: `${sigil.x}px`, top: `${sigil.y}px` }" viewBox="-100 -100 200 200" aria-hidden="true">
+      <g class="outer">
+        <circle r="92" />
+        <circle r="78" />
+        <line v-for="(k, i) in TICKS" :key="i" :x1="k.x1" :y1="k.y1" :x2="k.x2" :y2="k.y2" />
+      </g>
+      <g class="inner">
+        <polygon v-for="(pts, i) in STAR" :key="i" :points="pts" />
+        <path v-for="(d, i) in RUNES" :key="'r' + i" :d="d" class="rune" />
+        <circle r="34" />
+        <circle r="6" class="core" />
+      </g>
+    </svg>
+    <svg v-if="crack" class="cracks" :class="{ magic: crack.magic }" aria-hidden="true">
       <path v-for="(d, i) in cracks" :key="i" :d="d" />
       <circle :cx="crack.x" :cy="crack.y" :r="6 + crack.stage * 4" />
     </svg>
@@ -442,6 +506,96 @@ li::before {
   filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9));
 }
 
+/* 屏障波纹：几圈青色的环往外扩，像撞在一层看不见的玻璃上 */
+.barrier {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.barrier i {
+  position: absolute;
+  left: -60px;
+  top: -60px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 2px solid rgba(103, 232, 249, 0.85);
+  box-shadow: 0 0 18px rgba(103, 232, 249, 0.6), inset 0 0 14px rgba(167, 139, 250, 0.45);
+  animation: barrier 0.9s ease-out both;
+}
+
+.barrier i:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.barrier i:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+/* 法阵：外圈和里圈反着转，蓄力时慢慢放大变亮，爆开时一下撑大、变白、散掉 */
+.sigil {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  margin: -160px 0 0 -160px;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px #67e8f9) drop-shadow(0 0 14px rgba(167, 139, 250, 0.8));
+}
+
+.sigil circle,
+.sigil line,
+.sigil polygon,
+.sigil path {
+  fill: none;
+  stroke: #a5f3fc;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.sigil polygon {
+  stroke: #c4b5fd;
+}
+
+.sigil .rune {
+  stroke: #e9d5ff;
+  stroke-width: 1.4;
+}
+
+.sigil .core {
+  fill: #f0fdff;
+}
+
+.sigil .outer {
+  animation: spin 6s linear infinite;
+}
+
+.sigil .inner {
+  animation: spin 4s linear infinite reverse;
+}
+
+.sigil.charge {
+  animation: sigil-in 2.6s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.sigil.burst {
+  animation: sigil-burst 0.75s ease-out both;
+}
+
+/* 魔法打出来的裂纹：发光的青色 */
+.cracks.magic path {
+  stroke: #a5f3fc;
+  stroke-width: 2.2;
+  filter: drop-shadow(0 0 4px #67e8f9) drop-shadow(0 0 10px rgba(167, 139, 250, 0.9));
+}
+
+.cracks.magic circle {
+  fill: rgba(240, 253, 255, 0.85);
+  stroke: #67e8f9;
+}
+
 .cracks circle {
   fill: rgba(255, 255, 255, 0.45);
   stroke: rgba(30, 34, 52, 0.6);
@@ -644,6 +798,53 @@ li::before {
   to {
     transform: translate(calc(var(--dx) * 60px), 110vh) rotate(var(--spin));
     opacity: 0.6;
+  }
+}
+
+@keyframes barrier {
+  from {
+    opacity: 0.95;
+    transform: scale(0.15);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sigil-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.2) rotate(-90deg);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes sigil-burst {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: drop-shadow(0 0 6px #67e8f9) brightness(1);
+  }
+  30% {
+    filter: drop-shadow(0 0 24px #fff) brightness(2.4);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+    filter: drop-shadow(0 0 30px #fff) brightness(3);
   }
 }
 

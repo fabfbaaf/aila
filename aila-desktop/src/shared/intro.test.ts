@@ -3,7 +3,10 @@ import {
   INTRO_MS,
   INTRO_SLIDES,
   PRESENTER_RATIO,
+  bumpPoint,
   cursorPoint,
+  magicCenter,
+  spawnCharge,
   particleAlive,
   seeded,
   shakeOffset,
@@ -147,5 +150,40 @@ describe('全屏特效', () => {
     const early = Math.max(...[0.05, 0.1, 0.15].map((t) => Math.abs(shakeOffset(t, 10).x)))
     const late = Math.max(...[0.85, 0.9, 0.95].map((t) => Math.abs(shakeOffset(t, 10).x)))
     expect(late).toBeLessThan(early)
+  })
+})
+
+describe('用魔法破壁', () => {
+  const main = introMainBounds(workArea)
+  const stand = presenterPosition(main, win)
+
+  it('第一次试：往左走到身子贴着窗口边，撞到的点在主窗口左边缘、她胸口的高度', () => {
+    const b = bumpPoint(stand, win, main)
+    expect(b.to.x).toBeLessThan(stand.x)
+    expect(b.to.x + win.width / 2).toBe(main.x + 40)
+    expect(b.to.y).toBe(stand.y)
+    expect(b.contact.x).toBeLessThan(40)
+    expect(b.contact.y).toBeGreaterThan(0)
+    expect(b.contact.y).toBeLessThan(main.height)
+  })
+
+  it('法阵在她手的前面，在主窗口里', () => {
+    const c = magicCenter(stand, win, main)
+    const hand = knockPoint(stand, win, main)
+    expect(c.x).toBeGreaterThan(hand.x)
+    expect(c.x).toBeLessThan(main.width)
+    expect(c.y).toBeGreaterThan(0)
+  })
+
+  it('蓄力的光点从四周出发，寿命走完正好到中心', () => {
+    const center = { x: 500, y: 400 }
+    const ps = spawnCharge(center, 30, seeded(5))
+    expect(ps).toHaveLength(30)
+    for (let p of ps) {
+      expect(Math.hypot(p.x - center.x, p.y - center.y)).toBeGreaterThan(200)
+      const life = p.life
+      p = stepParticle(p, life - 0.0001)
+      expect(Math.hypot(p.x - center.x, p.y - center.y)).toBeLessThan(2)
+    }
   })
 })

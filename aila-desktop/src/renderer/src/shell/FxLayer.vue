@@ -6,16 +6,19 @@
  * - trail：她跳过去的路上留一串青紫色的火花
  * - dust：落地时脚边扬起一小撮灰
  * - cursor：她借你鼠标时，光标外面一圈会呼吸的光（知道现在是她在动）
+ * - charge：她放魔法蓄力时，满屏的光点往法阵聚过去；burst：法阵爆开，一圈光往外扩
  *
  * 没有预加载接口：主进程直接调 window.__fx(命令)（只是画画，不需要别的权限）。粒子的计算在 shared/intro.ts，能单测。
  */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { particleAlive, seeded, spawnDust, spawnShards, spawnSpark, stepParticle, type FxCommand, type Particle } from '../../../shared/intro'
+import { particleAlive, seeded, spawnCharge, spawnDust, spawnShards, spawnSpark, stepParticle, type FxCommand, type Particle } from '../../../shared/intro'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let particles: Particle[] = []
 let flash: { x: number; y: number; width: number; height: number; t: number } | null = null
 let cursor: { x: number; y: number } | null = null
+/** 爆开的光圈：从哪儿、已经扩了多久（秒） */
+let bursts: { x: number; y: number; t: number }[] = []
 let raf = 0
 let last = 0
 const rand = seeded(20261124)
@@ -28,6 +31,10 @@ function command(c: FxCommand): void {
     particles.push(spawnSpark({ x: c.x, y: c.y }, rand), spawnSpark({ x: c.x, y: c.y }, rand))
   } else if (c.fx === 'dust') {
     particles.push(...spawnDust({ x: c.x, y: c.y }, 18, rand))
+  } else if (c.fx === 'charge') {
+    particles.push(...spawnCharge({ x: c.x, y: c.y }, 70, rand))
+  } else if (c.fx === 'burst') {
+    bursts.push({ x: c.x, y: c.y, t: 0 })
   } else if (c.fx === 'cursor') {
     cursor = { x: c.x, y: c.y }
   } else if (c.fx === 'cursor-off') {
@@ -36,6 +43,7 @@ function command(c: FxCommand): void {
     particles = []
     flash = null
     cursor = null
+    bursts = []
   }
   if (!raf) {
     last = performance.now()
@@ -89,6 +97,17 @@ function frame(now: number): void {
       ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * fade})`
       ctx.stroke()
       ctx.restore()
+    } else if (p.kind === 'charge') {
+      // 越靠近法阵越亮、越白
+      const near = 1 - fade
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 4)
+      g.addColorStop(0, `rgba(255, 255, 255, ${0.5 + near * 0.5})`)
+      g.addColorStop(0.4, `rgba(103, 232, 249, ${0.4 + near * 0.5})`)
+      g.addColorStop(1, 'rgba(167, 139, 250, 0)')
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, p.size * 4, 0, Math.PI * 2)
+      ctx.fill()
     } else if (p.kind === 'spark') {
       const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3)
       g.addColorStop(0, `rgba(240, 250, 255, ${fade})`)
@@ -106,6 +125,21 @@ function frame(now: number): void {
     }
   }
 
+  for (const b of bursts) {
+    b.t += dt
+    const k = b.t / 0.8
+    if (k >= 1) continue
+    ctx.beginPath()
+    ctx.arc(b.x, b.y, 20 + k * 620, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(200, 245, 255, ${0.85 * (1 - k)})`
+    ctx.lineWidth = 6 * (1 - k) + 1
+    ctx.shadowColor = '#67e8f9'
+    ctx.shadowBlur = 24
+    ctx.stroke()
+    ctx.shadowBlur = 0
+  }
+  bursts = bursts.filter((b) => b.t < 0.8)
+
   if (cursor) {
     const pulse = 0.5 + Math.sin(now / 160) * 0.5
     ctx.beginPath()
@@ -119,7 +153,7 @@ function frame(now: number): void {
   }
 
   // 没东西可画了就停下，不白占 CPU
-  raf = particles.length || flash || cursor ? requestAnimationFrame(frame) : 0
+  raf = particles.length || flash || cursor || bursts.length ? requestAnimationFrame(frame) : 0
 }
 
 onMounted(() => {

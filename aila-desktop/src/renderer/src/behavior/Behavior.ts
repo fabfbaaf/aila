@@ -311,10 +311,30 @@ export class Behavior {
 
   /**
    * 开场演出里的动作：knock 抬手往前敲一下屏幕；turn 停下来、转头直视你（破壁那一下）；
-   * point 转头看着右边的幻灯片、摊手介绍；yawn 张嘴、眯眼、仰头打个哈欠
+   * point 转头看着右边的幻灯片、摊手介绍；yawn 张嘴、眯眼、仰头打个哈欠；
+   * bonk 撞上看不见的玻璃：吓一跳、头往后一仰；cast 放魔法：两手举起、仰头、眼睛亮起来
    */
-  introGesture(name: 'knock' | 'turn' | 'point' | 'yawn'): void {
+  introGesture(name: 'knock' | 'turn' | 'point' | 'yawn' | 'bonk' | 'cast'): void {
     this.markActive()
+    if (name === 'bonk') {
+      this.lookAtUser()
+      this.play([
+        { dur: 0.12, expr: { surprised: 1 }, pose: { headPitch: -0.25, bodyLean: 0.12, headRoll: 0.1 } },
+        { dur: 0.5, expr: { surprised: 0.6, sad: 0.2 }, pose: { headPitch: -0.08, bodyLean: 0.04, headRoll: 0.06 } },
+        { dur: 0.6, expr: { relaxed: 0.2 } }
+      ])
+      return
+    }
+    if (name === 'cast') {
+      this.lookAtUser()
+      this.onGesture('stretch') // Live2D 模型播一个自己的动作（手臂动起来）
+      this.play([
+        { dur: 0.4, expr: { happy: 0.3 }, pose: { armsUp: 0.7, headPitch: -0.1 } },
+        { dur: 2.2, expr: { happy: 0.4, surprised: 0.25 }, pose: { armsUp: 1, headPitch: -0.16, bodyLean: 0.04 } },
+        { dur: 0.6, expr: { happy: 0.6 }, pose: { armsUp: 0.3, headPitch: 0 } }
+      ])
+      return
+    }
     if (name === 'point') {
       // 幻灯片在她左手边（屏幕右边）：先看过去，摊手，一会儿再看回你
       this.lookGoal.set(2.2, 1.3, 2.2)

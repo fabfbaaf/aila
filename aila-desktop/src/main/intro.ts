@@ -19,6 +19,8 @@ import {
   presenterPosition,
   shakeOffset,
   shovedMainBounds,
+  bumpPoint,
+  magicCenter,
   slideDuration,
   userTookOver,
   type FxCommand,
@@ -139,8 +141,10 @@ export class IntroDirector {
       } else await this.wait(ms)
     }
 
-    // 第 2 幕：破壁（全屏特效窗口先开好，碎片要飞出主窗口）
+    // 第 2 幕：破壁（全屏特效窗口先开好，蓄力的光点、碎片要满屏飞）
     void d.fx.open()
+    const wa0 = workArea
+    const toScreen = (p: { x: number; y: number }): { x: number; y: number } => ({ x: mainBounds.x + p.x - wa0.x, y: mainBounds.y + p.y - wa0.y })
     d.scene({ scene: 'stall' })
     d.cue({ say: INTRO_LINES.stop, ms: INTRO_MS.pause, gesture: 'tilt' })
     await this.wait(INTRO_MS.pause)
@@ -148,20 +152,49 @@ export class IntroDirector {
     await this.wait(1200)
     d.scene({ scene: 'glitch' })
     await this.wait(INTRO_MS.glitch + 600)
-    d.cue({ say: INTRO_LINES.cramped, ms: 2400, gesture: 'tilt' })
-    await this.wait(2200)
-    d.cue({ say: INTRO_LINES.knock, ms: 2400 })
+    d.cue({ say: INTRO_LINES.wantOut, ms: 2400 })
+    await this.wait(1800)
+
+    // 第一次试：往窗口边上走，撞上一层看不见的玻璃，被弹回来
+    const bump = bumpPoint(stand, d.petSize, mainBounds)
+    await this.movePet(stand, bump.to, INTRO_MS.bump)
+    d.cue({ gesture: 'bonk' })
+    d.scene({ scene: 'ripple', x: bump.contact.x, y: bump.contact.y })
+    d.scene({ scene: 'sfx', name: 'bonk' })
+    await Promise.all([this.shake(mainBounds, 8), this.movePet(bump.to, stand, 420)])
+    d.cue({ say: INTRO_LINES.bumped, ms: 2400, gesture: 'tilt' })
+    await this.wait(2300)
+
+    // 第二次试：敲两下，只泛起波纹，敲不破
     const knock = knockPoint(stand, d.petSize, mainBounds)
-    for (let stage = 1; stage <= 3; stage++) {
+    for (let i = 0; i < 2; i++) {
       d.cue({ gesture: 'knock' })
       await this.wait(260)
-      d.scene({ scene: 'crack', x: knock.x, y: knock.y, stage })
-      await this.shake(mainBounds, 6 + stage * 4)
+      d.scene({ scene: 'ripple', x: knock.x, y: knock.y })
+      d.scene({ scene: 'sfx', name: 'knock' })
+      await this.shake(mainBounds, 5)
       await this.wait(INTRO_MS.knock - 220)
     }
+    d.cue({ say: INTRO_LINES.sturdy, ms: 2400 })
+    await this.wait(2300)
+
+    // 用魔法：举手，面前展开法阵，满屏的光点往里聚，爆开，发光的裂纹爬满，玻璃碎了
+    const circle = magicCenter(stand, d.petSize, mainBounds)
+    d.cue({ say: INTRO_LINES.magic, ms: 2600, gesture: 'cast' })
+    await this.wait(700)
+    d.scene({ scene: 'magic', x: circle.x, y: circle.y, phase: 'charge' })
+    d.scene({ scene: 'sfx', name: 'charge' })
+    for (let i = 0; i < 3; i++) {
+      d.fx.send({ fx: 'charge', ...toScreen(circle) })
+      await this.wait(INTRO_MS.charge / 3)
+    }
+    d.scene({ scene: 'magic', x: circle.x, y: circle.y, phase: 'burst' })
+    d.fx.send({ fx: 'burst', ...toScreen(circle) })
+    d.scene({ scene: 'crack', x: circle.x, y: circle.y, stage: 3, magic: true })
+    await this.shake(mainBounds, 14)
+    await this.wait(180)
     d.scene({ scene: 'shatter' })
-    const wa0 = workArea
-    d.fx.send({ fx: 'shatter', rect: { x: mainBounds.x - wa0.x, y: mainBounds.y - wa0.y, width: mainBounds.width, height: mainBounds.height }, x: mainBounds.x + knock.x - wa0.x, y: mainBounds.y + knock.y - wa0.y })
+    d.fx.send({ fx: 'shatter', rect: { x: mainBounds.x - wa0.x, y: mainBounds.y - wa0.y, width: mainBounds.width, height: mainBounds.height }, ...toScreen(circle) })
     d.phase('crouch')
     await this.wait(250)
     // 玻璃碎了：主窗口被挤到左上，她跳到桌面上
@@ -309,6 +342,15 @@ export class IntroDirector {
           resolve()
         }
       }, 16)
+    })
+  }
+
+  /** 她在桌面上平移到另一个位置（撞墙、弹回来）：先快后慢 */
+  private async movePet(from: { x: number; y: number }, to: { x: number; y: number }, ms: number): Promise<void> {
+    await this.animate(ms, (t) => {
+      if (this.d.dragging()) return
+      const e = ease(t)
+      this.d.pet()?.setPosition(Math.round(from.x + (to.x - from.x) * e), Math.round(from.y + (to.y - from.y) * e))
     })
   }
 
