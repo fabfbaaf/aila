@@ -57,5 +57,10 @@ export interface Avatar {
   getNeckWorldPosition(target: Vector3): Vector3
   /** 头部中心，用来算视线方向和镜头构图 */
   getHeadWorldPosition(target: Vector3): Vector3
+  /**
+   * 挥手、伸懒腰、开心时（行为系统告诉它）：模型有自己做好的动作就播一个（Live2D 用这个让手臂动起来）。
+   * VRM 的手臂由行为系统直接摆，不用实现
+   */
+  gesture?(name: 'wave' | 'stretch' | 'happy'): void
   dispose(): void
 }

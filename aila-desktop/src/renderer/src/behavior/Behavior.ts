@@ -98,6 +98,8 @@ export class Behavior {
 
   /** 想说话时调用，由界面负责显示气泡 */
   onSay: (text: string, ms: number) => void = () => {}
+  /** 挥手、伸懒腰、开心：告诉形象（Live2D 模型会播自己做好的动作，手臂才会动） */
+  onGesture: (name: 'wave' | 'stretch' | 'happy') => void = () => {}
 
   private cfg: BehaviorConfig
   private time = 0
@@ -201,6 +203,7 @@ export class Behavior {
       this.lookGoal.set(-0.7, 2.0, 2)
       this.nextGlance = this.time + 2.5
     }
+    if (name === 'wave' || name === 'stretch') this.onGesture(name as 'wave' | 'stretch')
     this.play(phases)
   }
 
@@ -301,6 +304,7 @@ export class Behavior {
       this.play([{ dur: 0.25, expr: { happy: 0.3 }, pose: { headPitch: 0.18, bodyLean: -0.1 } }, { dur: 0.4, expr: { happy: 0.3 } }])
     } else {
       this.play([{ dur: 0.2, expr: { happy: 0.4 }, pose: { headPitch: 0.18, bodyLean: -0.1 } }, ...GESTURES.wave])
+      this.onGesture('wave')
       setTimeout(() => this.say(first ? lines.firstMeet : greeting(new Date().getHours()), first ? 6000 : 3500), 350)
     }
   }
@@ -348,6 +352,7 @@ export class Behavior {
   /** 播放一段自定义反应（加载模型成功等场景） */
   react(kind: 'happy' | 'sad'): void {
     this.lookAtUser()
+    if (kind === 'happy') this.onGesture('happy')
     this.play(
       kind === 'happy'
         ? [{ dur: 0.3, pose: { headPitch: 0.12 } }, { dur: 1.6, expr: { happy: 0.6 } }]

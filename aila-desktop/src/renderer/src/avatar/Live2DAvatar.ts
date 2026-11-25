@@ -13,7 +13,7 @@
  */
 import { CanvasTexture, Mesh, MeshBasicMaterial, Object3D, PlaneGeometry, SRGBColorSpace, Vector3 } from 'three'
 import type { ModelFiles } from '../../../shared/model'
-import { live2dParams, lookFrom } from './live2dParams'
+import { STANDARD_IDS, idsFromGroups, live2dParams, lookFrom, pickMotion, type Live2DIds } from './live2dParams'
 import type { Avatar, Expressions, PoseState } from './types'
 import { t } from '../i18n'
 
@@ -24,6 +24,8 @@ const CANVAS_HEIGHT = 1000
 /** 头和脖子在模型里大概的高度（从上往下的比例）：没有统一的标注，按常见的立绘比例估 */
 const HEAD_FROM_TOP = 0.17
 const NECK_FROM_TOP = 0.3
+/** 挥手、伸懒腰时播的模型动作最多放多久（官方示例的动作是循环的，不停会一直放） */
+const GESTURE_MS = 4200
 /** 呼吸交给模型自带的（它会叠到好几个参数上），我们不覆盖 */
 const SKIP = new Set(['ParamBreath'])
 const CORE_URL = './live2d/live2dcubismcore.min.js'
@@ -80,6 +82,12 @@ export class Live2DAvatar implements Avatar {
   private width: number
   private params: Record<string, number> = {}
   private head = new Vector3()
+  /** 模型自己声明的张嘴、眨眼参数（model3.json 的 Groups） */
+  private ids: Live2DIds = STANDARD_IDS
+  /** 模型自带的动作（model3.json 的 FileReferences.Motions），挥手时挑一个播 */
+  private motions: Record<string, { File?: string }[]> | undefined
+  private turn = 0
+  private gestureTimer = 0
 
   constructor(
     PIXI: Pixi,
@@ -96,6 +104,10 @@ export class Live2DAvatar implements Avatar {
     // 眨眼由我们的行为系统控制（和 VRM 一样的节奏）；模型自带的自动眨眼关掉
     const internal = model.internalModel as unknown as { eyeBlink?: unknown; on: (e: string, cb: () => void) => void; coreModel: { setParameterValueById: (id: string, v: number) => void } }
     internal.eyeBlink = undefined
+    // 读模型自己的设置：张嘴、眨眼用哪个参数，有哪些动作
+    const json = (model.internalModel as unknown as { settings?: { json?: { Groups?: { Target?: string; Name?: string; Ids?: string[] }[]; FileReferences?: { Motions?: Record<string, { File?: string }[]> } } } }).settings?.json
+    this.ids = idsFromGroups(json?.Groups)
+    this.motions = json?.FileReferences?.Motions
     // 模型自己的动作（待机动作）更新完以后再写我们的参数：物理（头发、衣服）会跟着我们的头动
     internal.on('afterMotionUpdate', () => {
       for (const [id, v] of Object.entries(this.params)) {
@@ -115,10 +127,20 @@ export class Live2DAvatar implements Avatar {
   update(dt: number, pose: PoseState, expr: Expressions): void {
     const head = this.getHeadWorldPosition(this.head)
     const look = lookFrom(pose.lookTarget.x - head.x, pose.lookTarget.y - head.y, pose.lookTarget.z - head.z)
-    this.params = live2dParams(pose, expr, look)
+    this.params = live2dParams(pose, expr, look, this.ids)
     this.model.update(dt * 1000)
     this.renderer.render(this.model as never)
     this.texture.needsUpdate = true
+  }
+
+  /** 挥手、伸懒腰、开心：播一个模型自带的动作（手臂、身体跟着动；头、眼睛、嘴还是我们的），过一会儿停下回到待机 */
+  gesture(): void {
+    const pick = pickMotion(this.motions, this.turn++)
+    if (!pick) return
+    const m = this.model as unknown as { motion: (group: string, index: number, priority: number) => Promise<boolean>; internalModel: { motionManager: { stopAllMotions: () => void } } }
+    void m.motion(pick.group, pick.index, 3).catch(() => undefined) // 3 = 强制播放（打断待机动作）
+    window.clearTimeout(this.gestureTimer)
+    this.gestureTimer = window.setTimeout(() => m.internalModel.motionManager.stopAllMotions(), GESTURE_MS)
   }
 
   getNeckWorldPosition(target: Vector3): Vector3 {
@@ -130,6 +152,7 @@ export class Live2DAvatar implements Avatar {
   }
 
   dispose(): void {
+    window.clearTimeout(this.gestureTimer)
     this.model.destroy()
     this.renderer.destroy()
     this.texture.dispose()

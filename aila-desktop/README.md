@@ -172,11 +172,22 @@ npm.cmd run dist
 
 1. 先装 Live2D 的运行库：`npm run setup:live2d`。Cubism Core 是 Live2D 公司的专有软件，脚本先给你看许可协议的地址，你读过、同意了再加 `-- --accept-license` 运行，才会下载到 `src/renderer/public/live2d/`（不进 Git）
 2. 在「形象」里选 `.model3.json`；主进程把那个文件夹里的贴图、动作、物理文件读给角色窗口（最多 500 个文件、200MB，不跟着链接走）
-3. 官方的免费示例模型（Hiyori 等）在 [Live2D 的示例数据](https://www.live2d.com/en/learn/sample/) 和 [CubismWebSamples](https://github.com/Live2D/CubismWebSamples/tree/develop/Samples/Resources) 里，用 Live2D 免费素材许可
+3. 没有自己的模型、想先试试：用 Live2D 官方的免费示例模型，见下面「用官方示例模型试 Live2D」
+
+**用官方示例模型试 Live2D**（比如虹色真央：正面朝前、带表情和动作，最像桌面伙伴；桃濑日和是最常用的标准模型）：
+
+1. 在 [Live2D 的示例数据](https://www.live2d.com/en/learn/sample/) 里打开模型的页面，读过[免费素材许可协议](https://www.live2d.com/eula/live2d-free-material-license-agreement_en.html)和[示例数据使用条款](https://www.live2d.com/en/learn/sample/model-terms/)，同意了再点「Download」
+2. 解压到 `aila-desktop/demo-models/`（这个目录不进 Git：许可不允许把模型文件放进公开仓库或打进安装包）
+3. 「形象」里选 `runtime/` 文件夹里的 `.model3.json`
+
+许可的要点（以官方原文为准）：个人、年销售额不到 1000 万日元的小团队可以免费用「Live2D 原创角色」这一类示例（合作角色、初音未来等另有条款）；不能改角色设计；
+不能用在色情、暴力、政治、宗教等内容里；拿截图、视频公开发布时要写上 Live2D 的版权声明，比如
+「This content uses sample data owned and copyrighted by Live2D Inc.」（视频简介这类地方用条款里更长的那段）。
 
 怎么做的（`src/renderer/src/avatar/Live2DAvatar.ts`）：用 PixiJS + pixi-live2d-display 把模型画到离屏画布上，再当贴图贴在 three.js 场景的一个平面上，所以点击判断、镜头构图、省电降帧、行为系统都和 VRM 共用。
-她的姿态和表情换成 Cubism 的标准参数（`live2dParams.ts`：转头、眨眼、眯眼笑、嘴型、眉毛、视线），模型没有的参数会被忽略；
-手没有统一的参数，挥手、伸懒腰在 Live2D 上只有头和表情。页面的 CSP 不许 `eval`，所以加了 `@pixi/unsafe-eval`（名字吓人，其实是换成不用 eval 的实现）。
+她的姿态和表情换成 Cubism 的标准参数（`live2dParams.ts`：转头、眨眼、眯眼笑、嘴角、脸红、眉毛、视线），模型没有的参数会被忽略；
+张嘴、眨眼用模型在 `model3.json` 里自己声明的参数（Groups 的 LipSync、EyeBlink，比如真央张嘴是 `ParamA`）；表情比 VRM 放大一些，平面的脸上才看得出来。
+手没有统一的参数（名字、方向各家不一样），挥手、伸懒腰、开心时播模型自带的动作（不用待机动作和带特效的特殊动作，播几秒就回到待机），头、眼睛、嘴还是跟着她的行为走。页面的 CSP 不许 `eval`，所以加了 `@pixi/unsafe-eval`（名字吓人，其实是换成不用 eval 的实现）。
 
 **打包分发**：装了运行库再 `npm run dist`，安装包里会带上 Cubism Core。拿去分发的话要遵守 Live2D 的许可（商业产品还要看[出版许可](https://www.live2d.com/en/sdk/license/)）；不想带就先删掉 `src/renderer/public/live2d/` 再打包。
 

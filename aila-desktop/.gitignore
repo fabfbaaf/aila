@@ -13,3 +13,5 @@ build/*
 !build/logo.png
 # Live2D 运行库（专有软件，npm run setup:live2d 下载，不进 Git）
 src/renderer/public/live2d/
+# 演示用的 Live2D 示例模型（Live2D 公司的素材，许可不允许放进公开仓库：自己从官网下，见 README）
+demo-models/
