@@ -80,6 +80,8 @@ def build() -> None:
         "--paths", str(ROOT),
         # 第一次在设置页保存密钥时，app/envfile.py 照着它建 .env（注释都在）
         "--add-data", f"{ROOT / '.env.example'}{os.pathsep}.",
+        # 使用说明（她查自己的功能用，app/guide）
+        "--add-data", f"{ROOT / 'app' / 'guide' / 'guide.md'}{os.pathsep}app/guide",
     ]
     for name in COLLECT_ALL:
         args += ["--collect-all", name]

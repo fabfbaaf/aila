@@ -42,6 +42,7 @@ from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
+from .tools.guide import guide_skill
 from .tools.web import web_skill
 from .tools.x_browser import x_browser_skill
 
@@ -254,6 +255,7 @@ def get_registry() -> SkillRegistry:
         web_skill(http_client, search), knowledge_skill(get_knowledge()), code_skill(get_code_projects()),
         browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()), reminder_skill(),
         computer_skill(), computer_task_skill(lambda: get_runtime()), x_browser_skill(get_browser()),
+        guide_skill(lambda: get_runtime()),
     ])
     for skill in _mcp_skills:
         registry.add(skill)

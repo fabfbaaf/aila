@@ -47,7 +47,7 @@ import { cleanMemoryEdit, type AuthForm, type MemoryOp, type StoredMessage } fro
 import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AgentMode } from '../shared/agent'
-import { routeForSection, toHash, type ShellRoute } from '../shared/shell'
+import { cleanRoute, routeForSection, toHash, type ShellRoute } from '../shared/shell'
 import { TRAY_16, TRAY_32 } from './trayImage'
 import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { Drops } from './drops'
@@ -925,6 +925,8 @@ async function relayChat(id: number, messages: ChatMessage[]): Promise<void> {
       (ev) => {
         // 她在对话里把编程任务交给了工作窗口：打开工作窗口、接上那个任务
         if (ev.type === 'agent_task') openAgent(ev.session)
+        // 她带你去某一页（「这个设置在哪」）：地址只认 shell.ts 里的页面和分区
+        if (ev.type === 'open_page') openMain(cleanRoute(ev.route))
         // 她记下了一个提醒：存起来，到点叫你。没记上（时间不对、太多了）让她说一声
         if (ev.type === 'reminder' && desktop) {
           const r = desktop.addReminder(String(ev.at).slice(0, 64), String(ev.text).slice(0, 500))

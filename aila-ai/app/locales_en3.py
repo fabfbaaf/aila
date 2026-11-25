@@ -201,6 +201,10 @@ EN3: dict[str, str] = {
     "搜索「{0}」": 'Search the web for "{0}"',
     "读网页 {0}": "Read web page {0}",
     "快模型没有回答": "The fast model gave no answer",
+    # 使用说明
+    "正在翻使用说明": "Checking the user guide",
+    "正在打开「{0}」": 'Opening "{0}"',
+    "正在开任务改我自己": "Starting a task to improve myself",
     # 多智能体
     "开分支": "Opening a branch",
     "整理改动": "Collecting changes",
