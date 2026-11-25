@@ -23,6 +23,7 @@ import SettingsPage from './SettingsPage.vue'
 import ChatHistoryPage from './ChatHistoryPage.vue'
 import StudioPage from './StudioPage.vue'
 import CommandPalette from './CommandPalette.vue'
+import IntroLayer from './IntroLayer.vue'
 import { chatQueryRequest, newTaskRequest } from './intents'
 import type { PaletteAct } from './palette'
 
@@ -142,6 +143,8 @@ onBeforeUnmount(() => {
       </KeepAlive>
     </main>
     <CommandPalette v-if="paletteOpen" ref="palette" @close="paletteOpen = false" @act="act" />
+    <!-- 开场演出（shared/intro.ts）：第一次打开、或者设置里点「再看一遍」时盖在最上面 -->
+    <IntroLayer @go="go" />
   </div>
 </template>
 

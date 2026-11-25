@@ -91,3 +91,5 @@ export function shouldEnter(o: { entrance: boolean; showCharacter: boolean; visi
 
 /** 主进程发给角色页面的出场阶段 */
 export type EntrancePhase = 'emerge' | 'crouch' | 'jump' | 'land'
+/** 开场演出（shared/intro.ts）里还会让她先藏起来 */
+export type StagePhase = EntrancePhase | 'hide'
