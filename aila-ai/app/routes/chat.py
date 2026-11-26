@@ -139,6 +139,7 @@ async def chat(
 ) -> StreamingResponse:
     if req.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="最后一条必须是用户消息")
+    deps.get_phone().remember_skills(req.skills)  # 手机上聊天也按桌面端的技能包开关来（见 app/phone）
     s = deps.settings
     # 扩展包带的动作：系统提示词里列出来（装卸扩展时才变，平时前缀不变），标签解析也认
     motions = deps.get_extensions().motions()

@@ -37,7 +37,15 @@ import {
   listKnowledge,
   listSkills,
   putAiSettings,
-  testLlm
+  testLlm,
+  getPhone,
+  setPhone,
+  newPhonePairing,
+  forgetPhone,
+  getAndroid,
+  setAndroid,
+  pairAndroid,
+  connectAndroid
 } from './ai'
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -1357,8 +1365,40 @@ function registerIpc(): void {
   ipcMain.handle('ai:settings:test', (e) => (fromMainWindow(e) ? testLlm(AI_URL) : MAIN_ONLY))
   ipcMain.handle('skills:list', () => listSkills(AI_URL, account?.skillOverrides() ?? {}))
   ipcMain.on('skills:set', (e, id: string, on: boolean) => {
-    if (fromMainWindow(e)) account?.setSkill(String(id), Boolean(on))
+    if (!fromMainWindow(e)) return
+    account?.setSkill(String(id), Boolean(on))
+    void setPhone(AI_URL, { skills: account?.skillOverrides() ?? {} }) // 手机上聊天也按新的开关来
   })
+  // 设置 → 手机：局域网的门开关、配对码、配过的手机。只认主窗口
+  ipcMain.handle('phone:status', (e) => (fromMainWindow(e) ? getPhone(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('phone:enable', (e, on: unknown) =>
+    fromMainWindow(e) && typeof on === 'boolean'
+      ? setPhone(AI_URL, { enabled: on, skills: account?.skillOverrides() ?? {} })
+      : MAIN_ONLY
+  )
+  ipcMain.handle('phone:pair', (e) => (fromMainWindow(e) ? newPhonePairing(AI_URL) : MAIN_ONLY))
+  // 「让她操作安卓手机」：开关、选手机、无线调试配对和连接。只认主窗口，参数在这里先检查一遍
+  const adbAddress = (v: unknown): v is string => typeof v === 'string' && /^[\w.-]{1,253}:\d{1,5}$/.test(v)
+  ipcMain.handle('android:status', (e) => (fromMainWindow(e) ? getAndroid(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('android:set', (e, body: unknown) => {
+    if (!fromMainWindow(e) || !body || typeof body !== 'object') return MAIN_ONLY
+    const b = body as { enabled?: unknown; serial?: unknown }
+    const clean: { enabled?: boolean; serial?: string } = {}
+    if (typeof b.enabled === 'boolean') clean.enabled = b.enabled
+    if (typeof b.serial === 'string' && /^[\w.:-]{0,64}$/.test(b.serial)) clean.serial = b.serial
+    return setAndroid(AI_URL, clean)
+  })
+  ipcMain.handle('android:pair', (e, address: unknown, code: unknown) =>
+    fromMainWindow(e) && adbAddress(address) && typeof code === 'string' && /^\d{6}$/.test(code)
+      ? pairAndroid(AI_URL, address, code)
+      : MAIN_ONLY
+  )
+  ipcMain.handle('android:connect', (e, address: unknown) =>
+    fromMainWindow(e) && adbAddress(address) ? connectAndroid(AI_URL, address) : MAIN_ONLY
+  )
+  ipcMain.handle('phone:forget', (e, id: unknown) =>
+    fromMainWindow(e) && typeof id === 'string' && /^[0-9a-f]{1,32}$/.test(id) ? forgetPhone(AI_URL, id) : MAIN_ONLY
+  )
   ipcMain.handle('model:path', () => loadSettings().modelPath ?? null)
   ipcMain.on('model:choose', (e) => void chooseModel(BrowserWindow.fromWebContents(e.sender)))
   // 换回她自己的原创形象：忘掉选过的模型文件，角色窗口加载自带的那个

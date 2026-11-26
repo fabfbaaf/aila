@@ -11,9 +11,13 @@ import threading
 import time
 from dataclasses import replace
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from .phone import PhoneServer, PhoneStore
+    from .android import Adb, AndroidSession, AndroidSettings
 
 from . import envfile
 from .config import ENV_FILE as CONFIG_ENV_FILE
@@ -42,6 +46,7 @@ from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
+from .tools.android import android_skill
 from .tools.guide import guide_skill
 from .tools.web import web_skill
 from .tools.x_browser import x_browser_skill
@@ -256,6 +261,7 @@ def get_registry() -> SkillRegistry:
         browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()), reminder_skill(),
         computer_skill(), computer_task_skill(lambda: get_runtime()), x_browser_skill(get_browser()),
         guide_skill(lambda: get_runtime()),
+        android_skill(lambda: get_android_session(), android_ready),
     ])
     for skill in _mcp_skills:
         registry.add(skill)
@@ -368,3 +374,79 @@ def mcp_status() -> list[dict[str, Any]]:
         {"id": f"mcp:{c.id}", "name": c.name, "connected": f"mcp:{c.id}" in connected, "error": mcp_runner.hub.errors.get(c.id)}
         for c in mcp_runner.hub.configs
     ]
+
+
+# ---------- 手机连接（局域网，见 app/phone） ----------
+
+PHONE_PORT = int(os.getenv("AILA_PHONE_PORT", "8780"))
+# 默认开在所有网卡上（局域网里的手机要连）；AILA_PHONE_HOST 可以只开在某一个地址上（比如测试时只开 127.0.0.1）
+PHONE_HOST = os.getenv("AILA_PHONE_HOST", "0.0.0.0")  # noqa: S104
+
+
+@lru_cache
+def get_phone() -> "PhoneStore":
+    from .phone import PhoneStore
+
+    return PhoneStore.load(settings.data_dir / "phone.json")
+
+
+@lru_cache
+def get_phone_server() -> "PhoneServer":
+    from .phone import PhoneServer
+
+    return PhoneServer(PHONE_PORT, PHONE_HOST)
+
+
+async def apply_phone() -> None:
+    """按开关开、关局域网上的门（启动时、设置页拨开关时）"""
+    from .phone.gateway import create_gateway, default_answer, default_chat
+
+    server = get_phone_server()
+    if get_phone().enabled:
+        await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer))
+    else:
+        await server.stop()
+
+
+# ---------- 她操作安卓手机（ADB，见 app/android） ----------
+
+_android_session: "AndroidSession | None" = None
+
+
+@lru_cache
+def get_android_settings() -> "AndroidSettings":
+    from .android import AndroidSettings, settings_path
+
+    return AndroidSettings.load(settings_path(settings.data_dir))
+
+
+def get_adb() -> "Adb | None":
+    from .android import Adb, find_adb
+
+    path = find_adb()
+    return Adb(path) if path else None
+
+
+def android_ready() -> bool:
+    """对话里给不给她操作手机的工具：开关开着、选好了手机、找得到 ADB（不真的去连手机，要快）"""
+    s = get_android_settings()
+    if not (s.enabled and s.serial):
+        return False
+    from .android import find_adb
+
+    return find_adb() is not None
+
+
+def get_android_session() -> "AndroidSession | None":
+    """选好的那台手机（换了手机就换一个；屏幕清单跟着会话走）"""
+    global _android_session
+    s = get_android_settings()
+    adb = get_adb() if s.enabled and s.serial else None
+    if adb is None:
+        _android_session = None
+        return None
+    if _android_session is None or _android_session.serial != s.serial or _android_session.adb.path != adb.path:
+        from .android import AndroidSession
+
+        _android_session = AndroidSession(adb, s.serial)
+    return _android_session

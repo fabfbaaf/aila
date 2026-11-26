@@ -2,7 +2,7 @@
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, ScreenStatus } from '../shared/settings'
+import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, AndroidStatus, CodeProject, FixStats, PhoneStatus, ScreenStatus } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 import { tm } from './lang'
 
@@ -199,6 +199,56 @@ export async function listSkills(aiUrl: string, overrides: SkillOverrides): Prom
 }
 
 /** 设置页：只查看、撤销记住的命令，不提供添加允许规则的入口。 */
+// ---------- 手机连接（设置 → 手机） ----------
+
+export function getPhone(aiUrl: string): Promise<AiResult<PhoneStatus>> {
+  return attempt(async () => json<PhoneStatus>(await fetch(`${aiUrl}/phone`, { signal: AbortSignal.timeout(5000) })))
+}
+
+/** 开关局域网的门，或者告诉它桌面端现在的技能包开关（关掉的手机上也用不了） */
+export function setPhone(aiUrl: string, body: { enabled?: boolean; skills?: Record<string, boolean> }): Promise<AiResult<PhoneStatus>> {
+  return attempt(async () => json<PhoneStatus>(await fetch(`${aiUrl}/phone`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000)
+  })))
+}
+
+export function newPhonePairing(aiUrl: string): Promise<AiResult<{ code: string; expires: number; seconds: number }>> {
+  return attempt(async () => json(await fetch(`${aiUrl}/phone/pair`, { method: 'POST', signal: AbortSignal.timeout(5000) })))
+}
+
+export function forgetPhone(aiUrl: string, id: string): Promise<AiResult<PhoneStatus>> {
+  return attempt(async () => json<PhoneStatus>(await fetch(`${aiUrl}/phone/devices/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    signal: AbortSignal.timeout(5000)
+  })))
+}
+
+// ---------- 她操作安卓手机（设置 → 手机） ----------
+
+export function getAndroid(aiUrl: string): Promise<AiResult<AndroidStatus>> {
+  return attempt(async () => json<AndroidStatus>(await fetch(`${aiUrl}/android`, { signal: AbortSignal.timeout(15000) })))
+}
+
+async function sendAndroid<T>(aiUrl: string, method: 'PUT' | 'POST', path: string, body: unknown): Promise<AiResult<T>> {
+  return attempt(async () => json<T>(await fetch(`${aiUrl}/android${path}`, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000)
+  })))
+}
+
+export const setAndroid = (aiUrl: string, body: { enabled?: boolean; serial?: string }): Promise<AiResult<AndroidStatus>> =>
+  sendAndroid(aiUrl, 'PUT', '', body)
+/** 无线调试：先配对（手机上「使用配对码配对」给的地址和码），再连（「无线调试」页面最上面的地址） */
+export const pairAndroid = (aiUrl: string, address: string, code: string): Promise<AiResult<AndroidStatus>> =>
+  sendAndroid(aiUrl, 'POST', '/pair', { address, code })
+export const connectAndroid = (aiUrl: string, address: string): Promise<AiResult<AndroidStatus>> =>
+  sendAndroid(aiUrl, 'POST', '/connect', { address })
+
 export function getAgentRules(aiUrl: string): Promise<AiResult<AgentRuleGroup[]>> {
   return attempt(async () => json<AgentRuleGroup[]>(await fetch(`${aiUrl}/agent/rules`, { signal: AbortSignal.timeout(5000) })))
 }

@@ -20,6 +20,8 @@ import type {
 } from '../shared/cloud'
 import type {
   AgentRuleGroup,
+  PhoneStatus,
+  AndroidStatus,
   AiResult,
   AiSettings,
   AiSettingsUpdate,
@@ -211,6 +213,16 @@ const api = {
   agentPickFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:pick-folder'),
   agentTakeFocus: (): Promise<string | null> => ipcRenderer.invoke('agent:take-focus'),
   agentRules: (): Promise<AiResult<AgentRuleGroup[]>> => ipcRenderer.invoke('agent:rules'),
+  /** 设置 → 手机（局域网）：状态、开关、配对码、删掉一台手机 */
+  phoneStatus: (): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:status'),
+  phoneEnable: (on: boolean): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:enable', on),
+  phonePair: (): Promise<AiResult<{ code: string; expires: number; seconds: number }>> => ipcRenderer.invoke('phone:pair'),
+  phoneForget: (id: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:forget', id),
+  /** 「让她操作安卓手机」：状态、开关和选手机、无线调试配对、连接 */
+  androidStatus: (): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:status'),
+  androidSet: (body: { enabled?: boolean; serial?: string }): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:set', body),
+  androidPair: (address: string, code: string): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:pair', address, code),
+  androidConnect: (address: string): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:connect', address),
   agentMcp: (): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp'),
   agentMcpPreview: (json: string): Promise<AiResult<McpPreviewItem[]>> => ipcRenderer.invoke('agent:mcp:preview', json),
   agentMcpImport: (json: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:import', json),

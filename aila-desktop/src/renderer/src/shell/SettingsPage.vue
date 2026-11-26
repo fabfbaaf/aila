@@ -13,6 +13,7 @@ import StatusSection from '../settings/sections/StatusSection.vue'
 import DesktopSection from '../settings/sections/DesktopSection.vue'
 import AgentSection from '../settings/sections/AgentSection.vue'
 import ExtensionsSection from '../settings/sections/ExtensionsSection.vue'
+import PhoneSection from '../settings/sections/PhoneSection.vue'
 
 const props = defineProps<{ section: SettingsSection }>()
 const emit = defineEmits<{ go: [route: ShellRoute] }>()
@@ -27,7 +28,8 @@ const VIEWS: Partial<Record<SettingsSection, Component>> = {
   appearance: AppearanceSection,
   status: StatusSection,
   agent: AgentSection,
-  extensions: ExtensionsSection
+  extensions: ExtensionsSection,
+  phone: PhoneSection
 }
 const view = computed(() => VIEWS[props.section] ?? ModelSection)
 </script>
