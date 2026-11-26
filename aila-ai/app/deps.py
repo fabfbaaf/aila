@@ -17,6 +17,7 @@ import httpx
 
 if TYPE_CHECKING:
     from .phone import PhoneServer, PhoneStore
+    from .android import Adb, AndroidSession, AndroidSettings
 
 from . import envfile
 from .config import ENV_FILE as CONFIG_ENV_FILE
@@ -45,6 +46,7 @@ from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
+from .tools.android import android_skill
 from .tools.guide import guide_skill
 from .tools.web import web_skill
 from .tools.x_browser import x_browser_skill
@@ -259,6 +261,7 @@ def get_registry() -> SkillRegistry:
         browser_skill(), browse_skill(get_browser()), coding_skill(lambda: get_runtime()), reminder_skill(),
         computer_skill(), computer_task_skill(lambda: get_runtime()), x_browser_skill(get_browser()),
         guide_skill(lambda: get_runtime()),
+        android_skill(lambda: get_android_session(), android_ready),
     ])
     for skill in _mcp_skills:
         registry.add(skill)
@@ -403,3 +406,47 @@ async def apply_phone() -> None:
         await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer))
     else:
         await server.stop()
+
+
+# ---------- 她操作安卓手机（ADB，见 app/android） ----------
+
+_android_session: "AndroidSession | None" = None
+
+
+@lru_cache
+def get_android_settings() -> "AndroidSettings":
+    from .android import AndroidSettings, settings_path
+
+    return AndroidSettings.load(settings_path(settings.data_dir))
+
+
+def get_adb() -> "Adb | None":
+    from .android import Adb, find_adb
+
+    path = find_adb()
+    return Adb(path) if path else None
+
+
+def android_ready() -> bool:
+    """对话里给不给她操作手机的工具：开关开着、选好了手机、找得到 ADB（不真的去连手机，要快）"""
+    s = get_android_settings()
+    if not (s.enabled and s.serial):
+        return False
+    from .android import find_adb
+
+    return find_adb() is not None
+
+
+def get_android_session() -> "AndroidSession | None":
+    """选好的那台手机（换了手机就换一个；屏幕清单跟着会话走）"""
+    global _android_session
+    s = get_android_settings()
+    adb = get_adb() if s.enabled and s.serial else None
+    if adb is None:
+        _android_session = None
+        return None
+    if _android_session is None or _android_session.serial != s.serial or _android_session.adb.path != adb.path:
+        from .android import AndroidSession
+
+        _android_session = AndroidSession(adb, s.serial)
+    return _android_session

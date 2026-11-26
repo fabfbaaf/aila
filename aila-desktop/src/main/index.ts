@@ -41,7 +41,11 @@ import {
   getPhone,
   setPhone,
   newPhonePairing,
-  forgetPhone
+  forgetPhone,
+  getAndroid,
+  setAndroid,
+  pairAndroid,
+  connectAndroid
 } from './ai'
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -1373,6 +1377,25 @@ function registerIpc(): void {
       : MAIN_ONLY
   )
   ipcMain.handle('phone:pair', (e) => (fromMainWindow(e) ? newPhonePairing(AI_URL) : MAIN_ONLY))
+  // 「让她操作安卓手机」：开关、选手机、无线调试配对和连接。只认主窗口，参数在这里先检查一遍
+  const adbAddress = (v: unknown): v is string => typeof v === 'string' && /^[\w.-]{1,253}:\d{1,5}$/.test(v)
+  ipcMain.handle('android:status', (e) => (fromMainWindow(e) ? getAndroid(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('android:set', (e, body: unknown) => {
+    if (!fromMainWindow(e) || !body || typeof body !== 'object') return MAIN_ONLY
+    const b = body as { enabled?: unknown; serial?: unknown }
+    const clean: { enabled?: boolean; serial?: string } = {}
+    if (typeof b.enabled === 'boolean') clean.enabled = b.enabled
+    if (typeof b.serial === 'string' && /^[\w.:-]{0,64}$/.test(b.serial)) clean.serial = b.serial
+    return setAndroid(AI_URL, clean)
+  })
+  ipcMain.handle('android:pair', (e, address: unknown, code: unknown) =>
+    fromMainWindow(e) && adbAddress(address) && typeof code === 'string' && /^\d{6}$/.test(code)
+      ? pairAndroid(AI_URL, address, code)
+      : MAIN_ONLY
+  )
+  ipcMain.handle('android:connect', (e, address: unknown) =>
+    fromMainWindow(e) && adbAddress(address) ? connectAndroid(AI_URL, address) : MAIN_ONLY
+  )
   ipcMain.handle('phone:forget', (e, id: unknown) =>
     fromMainWindow(e) && typeof id === 'string' && /^[0-9a-f]{1,32}$/.test(id) ? forgetPhone(AI_URL, id) : MAIN_ONLY
   )

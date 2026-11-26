@@ -258,6 +258,11 @@ data: {"type": "done"}
   - 手机上聊天按桌面端的技能包开关来（桌面端每次聊天都带着，记在 `phone.json`；改开关时也推过来），关掉的技能包手机上也用不了；不带桌面端的记忆列表
   - 局域网里是 http：家里的网络用，公共 Wi-Fi 别开。第一次打开时 Windows 防火墙会问，选专用网络
   - 本机接口：`GET /phone`、`PUT /phone {enabled, skills}`、`POST /phone/pair`、`DELETE /phone/devices/{id}`
+- **她操作安卓手机**（`app/android/`、`tools/android.py`，「安卓手机」技能包）：通过 ADB 操作你的安卓手机。只在 设置 → 手机 里打开「让她操作安卓手机」、选好手机、找得到 adb（`AILA_ADB`、PATH、Android SDK 的常见位置）时才把工具给她（`phone_read / phone_tap / phone_type / phone_swipe / phone_key / phone_open_app`）。
+  - 看屏幕：`uiautomator dump` 的界面树 → 带编号的按钮、输入框、可滑区域和屏幕上的文字（`android/ui.py`，纯计算）；按编号点，坐标由代码算，不让大模型报坐标；屏幕清单一分钟就算旧，要重新看
+  - 风险：文字像发送、支付、删除、确认、安装、允许……的按钮先问你，支付和银行 App 里点什么都先问；问你时给你看的按钮文字和 App 包名由代码拿；同意以后执行前再看一遍屏幕，同一个编号不是同一个东西就不点；密码、验证码、卡号输入框不填；命令都是代码拼的固定几种，打字的文字转义
+  - 打中文：`input text` 只认英文，手机上装了开源的 ADBKeyBoard 并切换成它时用它的广播（base64），没装就说清楚
+  - 本机接口：`GET /android`、`PUT /android {enabled, serial}`、`POST /android/pair {address, code}`、`POST /android/connect {address}`
 - **使用说明**（`app/guide/`，`aila_guide` / `open_page` / `improve_aila`）：她查自己的功能用的说明书（`guide.md`，按「## 标题」分节），用户问「能不能……」「在哪设置」时先按问题查相关的几节（字词重合打分，不用向量模型）再照着答，说明里没写的就说没有；`open_page` 让主窗口切到某一页（只认固定的页面和设置分区，桌面端再按 `shell.ts` 检查）；`improve_aila` 在她自己的源码仓库里开编程任务，一定在新分支上做，你看过、合并了才生效（打包版没有源码，告诉你去克隆）。加了页面或设置分区要更新 `guide.md`——桌面端的 `guide.test.ts` 会检查每一页、每个分区都写到了
 - **统一的权限检查**：不在这次清单里的工具不执行（大模型偶尔会「编」一个关掉的工具名）；有副作用的工具（`risk="write"`）必须用户点头才执行。
 - **MCP**：在 `mcp.json` 里配置外部 MCP 服务（格式见 `mcp.example.json`，兼容 Claude Desktop 的写法），每个服务成为一个技能包，默认关闭。工具声明了 `readOnlyHint`、或用户给整个服务标了 `"readOnly": true` 的直接用，其余的每次都要确认。工具的返回和网页一样当外部内容处理。一个服务连不上不影响其他的。

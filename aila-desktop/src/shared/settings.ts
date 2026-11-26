@@ -20,6 +20,17 @@ export type SettingsSection =
   /** 手机连接（局域网）：开关、配对码、配过的手机 */
   | 'phone'
 
+/** 设置 → 手机 →「让她操作安卓手机」：ADB 找没找到、连着哪些手机、选的哪台（aila-ai/app/android） */
+export interface AndroidStatus {
+  enabled: boolean
+  serial: string
+  /** adb 程序的路径；没找到是 null */
+  adb: string | null
+  /** state：device 能用；unauthorized 要在手机上点「允许 USB 调试」；offline 断了 */
+  devices: { serial: string; state: string; model: string }[]
+  error: string
+}
+
 /** 设置 → 手机：AI 服务那边局域网的门（aila-ai/app/phone） */
 export interface PhoneStatus {
   enabled: boolean

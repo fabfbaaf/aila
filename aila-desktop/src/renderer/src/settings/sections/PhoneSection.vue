@@ -5,7 +5,7 @@
  */
 import { t } from '../../i18n'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { AiResult, PhoneStatus } from '../../../../shared/settings'
+import type { AiResult, AndroidStatus, PhoneStatus } from '../../../../shared/settings'
 import { bridge } from '../../platform/bridge'
 
 const status = ref<PhoneStatus | null>(null)
@@ -53,8 +53,55 @@ function when(ts: number): string {
   return ts ? new Date(ts * 1000).toLocaleString() : t('还没连过')
 }
 
+// ---------- 让她操作安卓手机（ADB） ----------
+
+const android = ref<AndroidStatus | null>(null)
+const androidError = ref('')
+const androidBusy = ref(false)
+const pairAddress = ref('')
+const pairCode = ref('')
+const connectAddress = ref('')
+
+const ready = computed(() => android.value?.devices.filter((d) => d.state === 'device') ?? [])
+
+function applyAndroid(r: AiResult<AndroidStatus>): void {
+  if (r.ok && r.data) {
+    android.value = r.data
+    androidError.value = r.data.error
+  } else androidError.value = r.error ?? t('出错了。')
+}
+
+async function loadAndroid(): Promise<void> {
+  if (bridge) applyAndroid(await bridge.androidStatus())
+}
+
+async function androidDo(fn: () => Promise<AiResult<AndroidStatus>>): Promise<void> {
+  androidBusy.value = true
+  applyAndroid(await fn())
+  androidBusy.value = false
+}
+
+function setAndroid(body: { enabled?: boolean; serial?: string }): void {
+  if (bridge) void androidDo(() => bridge!.androidSet(body))
+}
+
+function pairAndroid(): void {
+  if (bridge) void androidDo(() => bridge!.androidPair(pairAddress.value.trim(), pairCode.value.trim()))
+}
+
+function connectAndroid(): void {
+  if (bridge) void androidDo(() => bridge!.androidConnect(connectAddress.value.trim()))
+}
+
+function stateText(state: string): string {
+  if (state === 'device') return t('能用')
+  if (state === 'unauthorized') return t('在手机上点「允许 USB 调试」')
+  return t('断开了')
+}
+
 onMounted(() => {
   void load()
+  void loadAndroid()
   // 配对码倒计时；手机配上以后列表跟着更新
   timer = window.setInterval(() => {
     now.value = Date.now() / 1000
@@ -105,6 +152,49 @@ onBeforeUnmount(() => clearInterval(timer))
         </li>
       </ul>
       <p class="hint">{{ t('删掉以后那台手机马上连不上，要重新配对。') }}</p>
+    </div>
+
+    <div class="card" :aria-busy="androidBusy">
+      <h3>{{ t('让她操作安卓手机') }}</h3>
+      <p class="hint">{{ t('她通过 ADB（安卓的调试工具）看你手机的屏幕、点、打字、打开 App。发送、支付、删除、确认这类按钮先问你，支付和银行 App 里点什么都先问；密码、验证码不碰。只支持安卓。') }}</p>
+      <template v-if="android && !android.adb">
+        <p class="msg error">{{ t('没找到 ADB。装 Android SDK Platform-Tools（谷歌官方，免费），把它放进 PATH 或者装在默认位置，再点刷新。') }}</p>
+        <button class="btn" @click="loadAndroid">{{ t('刷新') }}</button>
+      </template>
+      <template v-else-if="android">
+        <label class="toggle">
+          <input type="checkbox" :checked="android.enabled" :disabled="androidBusy" @change="setAndroid({ enabled: ($event.target as HTMLInputElement).checked })" />
+          <span>{{ t('让她操作安卓手机') }}</span>
+        </label>
+        <p class="hint">{{ t('手机上先打开「开发者选项 → USB 调试」用线连上；或者打开「无线调试」，在下面配对、连接。') }}</p>
+        <ul class="devices">
+          <li v-for="d in android.devices" :key="d.serial">
+            <label class="pick">
+              <input type="radio" name="android" :value="d.serial" :checked="android.serial === d.serial" :disabled="d.state !== 'device' || androidBusy" @change="setAndroid({ serial: d.serial })" />
+              <span class="name">{{ d.model || d.serial }}</span>
+            </label>
+            <span class="hint">{{ stateText(d.state) }}</span>
+          </li>
+          <li v-if="!android.devices.length" class="hint">{{ t('还没连上手机。') }}</li>
+        </ul>
+        <p v-if="android.enabled && !android.serial && ready.length" class="hint">{{ t('选一台手机，她才能操作。') }}</p>
+        <details class="wireless">
+          <summary>{{ t('无线调试（不用线）') }}</summary>
+          <p class="hint">{{ t('手机上：设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，把显示的 IP:端口 和配对码填这里。') }}</p>
+          <div class="row">
+            <input v-model="pairAddress" placeholder="192.168.1.20:37123" />
+            <input v-model="pairCode" maxlength="6" inputmode="numeric" :placeholder="t('配对码')" />
+            <button class="btn" :disabled="androidBusy" @click="pairAndroid">{{ t('配对') }}</button>
+          </div>
+          <p class="hint">{{ t('配对成功后，填「无线调试」页面最上面的 IP:端口 连接。') }}</p>
+          <div class="row">
+            <input v-model="connectAddress" placeholder="192.168.1.20:41055" />
+            <button class="btn" :disabled="androidBusy" @click="connectAndroid">{{ t('连接') }}</button>
+          </div>
+        </details>
+        <button class="btn" :disabled="androidBusy" @click="loadAndroid">{{ t('刷新') }}</button>
+      </template>
+      <p v-if="androidError" class="msg error" role="alert">{{ androidError }}</p>
     </div>
   </section>
 </template>
@@ -160,5 +250,30 @@ onBeforeUnmount(() => clearInterval(timer))
 
 .devices .btn {
   margin-left: auto;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wireless {
+  margin: 10px 0;
+}
+
+.wireless summary {
+  cursor: pointer;
+}
+
+.wireless .row {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.wireless input {
+  min-width: 0;
+  flex: 1;
 }
 </style>

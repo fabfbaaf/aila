@@ -2,7 +2,7 @@
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, CodeProject, FixStats, PhoneStatus, ScreenStatus } from '../shared/settings'
+import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, AndroidStatus, CodeProject, FixStats, PhoneStatus, ScreenStatus } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 import { tm } from './lang'
 
@@ -225,6 +225,29 @@ export function forgetPhone(aiUrl: string, id: string): Promise<AiResult<PhoneSt
     signal: AbortSignal.timeout(5000)
   })))
 }
+
+// ---------- 她操作安卓手机（设置 → 手机） ----------
+
+export function getAndroid(aiUrl: string): Promise<AiResult<AndroidStatus>> {
+  return attempt(async () => json<AndroidStatus>(await fetch(`${aiUrl}/android`, { signal: AbortSignal.timeout(15000) })))
+}
+
+async function sendAndroid<T>(aiUrl: string, method: 'PUT' | 'POST', path: string, body: unknown): Promise<AiResult<T>> {
+  return attempt(async () => json<T>(await fetch(`${aiUrl}/android${path}`, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000)
+  })))
+}
+
+export const setAndroid = (aiUrl: string, body: { enabled?: boolean; serial?: string }): Promise<AiResult<AndroidStatus>> =>
+  sendAndroid(aiUrl, 'PUT', '', body)
+/** 无线调试：先配对（手机上「使用配对码配对」给的地址和码），再连（「无线调试」页面最上面的地址） */
+export const pairAndroid = (aiUrl: string, address: string, code: string): Promise<AiResult<AndroidStatus>> =>
+  sendAndroid(aiUrl, 'POST', '/pair', { address, code })
+export const connectAndroid = (aiUrl: string, address: string): Promise<AiResult<AndroidStatus>> =>
+  sendAndroid(aiUrl, 'POST', '/connect', { address })
 
 export function getAgentRules(aiUrl: string): Promise<AiResult<AgentRuleGroup[]>> {
   return attempt(async () => json<AgentRuleGroup[]>(await fetch(`${aiUrl}/agent/rules`, { signal: AbortSignal.timeout(5000) })))

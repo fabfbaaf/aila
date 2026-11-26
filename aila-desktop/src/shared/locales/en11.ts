@@ -164,5 +164,20 @@ export const EN11: Record<string, string> = {
   "配过的手机": "Paired phones",
   "还没有。": "None yet.",
   "最近一次连：{when}": "Last connected: {when}",
-  "删掉以后那台手机马上连不上，要重新配对。": "A removed phone is cut off right away and has to pair again."
+  "删掉以后那台手机马上连不上，要重新配对。": "A removed phone is cut off right away and has to pair again.",
+  // 她操作安卓手机
+  "能用": "Ready",
+  "在手机上点「允许 USB 调试」": "Tap \"Allow USB debugging\" on the phone",
+  "断开了": "Disconnected",
+  "让她操作安卓手机": "Let her operate my Android phone",
+  "她通过 ADB（安卓的调试工具）看你手机的屏幕、点、打字、打开 App。发送、支付、删除、确认这类按钮先问你，支付和银行 App 里点什么都先问；密码、验证码不碰。只支持安卓。": "She uses ADB (Android's debugging tool) to see your phone's screen, tap, type and open apps. Buttons like send, pay, delete or confirm ask you first, and every tap in payment or banking apps asks; passwords and verification codes are off-limits. Android only.",
+  "没找到 ADB。装 Android SDK Platform-Tools（谷歌官方，免费），把它放进 PATH 或者装在默认位置，再点刷新。": "ADB not found. Install Android SDK Platform-Tools (official and free from Google), put it on PATH or in the default location, then click Refresh.",
+  "手机上先打开「开发者选项 → USB 调试」用线连上；或者打开「无线调试」，在下面配对、连接。": "On the phone, turn on Developer options → USB debugging and connect a cable, or turn on Wireless debugging and pair and connect below.",
+  "还没连上手机。": "No phone connected yet.",
+  "选一台手机，她才能操作。": "Pick a phone so she can operate it.",
+  "无线调试（不用线）": "Wireless debugging (no cable)",
+  "手机上：设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，把显示的 IP:端口 和配对码填这里。": "On the phone: Settings → Developer options → Wireless debugging → Pair device with pairing code, then enter the IP:port and code shown.",
+  "配对": "Pair",
+  "配对成功后，填「无线调试」页面最上面的 IP:端口 连接。": "Once paired, enter the IP:port at the top of the Wireless debugging page to connect.",
+  "连接": "Connect"
 }
