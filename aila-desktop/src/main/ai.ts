@@ -2,7 +2,19 @@
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, AndroidStatus, CodeProject, FixStats, PhoneStatus, ScreenStatus } from '../shared/settings'
+import type {
+  AgentRuleGroup,
+  AiResult,
+  AiSettings,
+  AiSettingsUpdate,
+  AndroidStatus,
+  CodeProject,
+  FixStats,
+  PhoneStatus,
+  ScheduleInput,
+  ScheduleItem,
+  ScreenStatus
+} from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 import { tm } from './lang'
 
@@ -232,6 +244,27 @@ export function forgetPhone(aiUrl: string, id: string): Promise<AiResult<PhoneSt
     signal: AbortSignal.timeout(5000)
   })))
 }
+
+// ---------- 定时任务（设置 → 编程） ----------
+
+async function scheduleCall<T>(aiUrl: string, method: string, path: string, body?: unknown): Promise<AiResult<T>> {
+  return attempt(async () => json<T>(await fetch(`${aiUrl}/agent/schedules${path}`, {
+    method,
+    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    // 「现在跑一次」要先跑测试，可能要好一会儿
+    signal: AbortSignal.timeout(path.endsWith('/run') ? 660000 : 10000)
+  })))
+}
+
+export const listSchedules = (aiUrl: string): Promise<AiResult<{ items: ScheduleItem[]; projects: { name: string; path: string }[] }>> =>
+  scheduleCall(aiUrl, 'GET', '')
+export const addSchedule = (aiUrl: string, body: ScheduleInput): Promise<AiResult<ScheduleItem>> => scheduleCall(aiUrl, 'POST', '', body)
+export const changeSchedule = (aiUrl: string, id: string, body: Partial<ScheduleInput> & { enabled?: boolean }): Promise<AiResult<ScheduleItem>> =>
+  scheduleCall(aiUrl, 'PUT', `/${encodeURIComponent(id)}`, body)
+export const deleteSchedule = (aiUrl: string, id: string): Promise<AiResult<unknown>> => scheduleCall(aiUrl, 'DELETE', `/${encodeURIComponent(id)}`)
+export const runSchedule = (aiUrl: string, id: string): Promise<AiResult<ScheduleItem>> =>
+  scheduleCall(aiUrl, 'POST', `/${encodeURIComponent(id)}/run`)
 
 // ---------- 她操作安卓手机（设置 → 手机） ----------
 

@@ -242,6 +242,15 @@ EN3: dict[str, str] = {
     "被权限挡住了，停下了": "Blocked by permissions and stopped",
     "花费到上限了，停下了": "Hit the spending limit and stopped",
     "一直没等到你同意，停下了": "Stopped after waiting too long for your OK",
+    # 定时任务
+    "只能在登记过、做过任务的项目里设定时任务。": "Scheduled tasks can only be set in registered projects or ones you've worked in.",
+    "没有这个定时任务。": "No such scheduled task.",
+    "定时任务最多 {0} 个。": "At most {0} scheduled tasks.",
+    "正在设定时任务「{0}」": "Setting up scheduled task \"{0}\"",
+    "设一个定时任务": "set up a scheduled task",
+    "{0}\n项目：{1}": "{0}\nProject: {1}",
+    "（对不上）": "(no match)",
+    "正在看定时任务": "Looking at scheduled tasks",
     # 手机连接
     "这台手机还没配对，或者已经在电脑上被删掉了。": "This phone isn't paired, or it was removed on the computer.",
     "没有这个任务。": "No such task.",

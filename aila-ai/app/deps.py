@@ -17,6 +17,7 @@ import httpx
 
 if TYPE_CHECKING:
     from .notify import Notifier
+    from .runtime.schedules import Scheduler, ScheduleStore
     from .phone import PhoneServer, PhoneStore
     from .android import Adb, AndroidSession, AndroidSettings
 
@@ -49,6 +50,7 @@ from .tools.reader import make_resolver
 from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
 from .tools.android import android_skill
 from .tools.guide import guide_skill
+from .tools.schedule import schedule_skill
 from .tools.web import web_skill
 from .tools.x_browser import x_browser_skill
 
@@ -264,6 +266,7 @@ def get_registry() -> SkillRegistry:
         computer_skill(), computer_task_skill(lambda: get_runtime()), x_browser_skill(get_browser()),
         guide_skill(lambda: get_runtime()),
         android_skill(lambda: get_android_session(), android_ready),
+        schedule_skill(lambda: get_schedules(), lambda: get_runtime().find_project("")),
     ])
     for skill in _mcp_skills:
         registry.add(skill)
@@ -465,3 +468,26 @@ def get_android_session() -> "AndroidSession | None":
 
         _android_session = AndroidSession(adb, s.serial)
     return _android_session
+
+
+# ---------- 定时和自动触发的编程任务（app/runtime/schedules.py） ----------
+
+
+@lru_cache
+def get_schedules() -> "ScheduleStore":
+    from .runtime.schedules import ScheduleStore
+
+    return ScheduleStore(settings.data_dir / "schedules.json")
+
+
+@lru_cache
+def get_scheduler() -> "Scheduler":
+    from .runtime.schedules import Scheduler, run_schedule
+
+    async def run_once(s):  # noqa: ANN001, ANN202
+        session, result = await run_schedule(get_runtime(), s)
+        if not session:  # 没开任务（测试都过了、没开成）：也告诉你一声；开了任务的，做完时任务自己会提醒
+            get_notifier().notice("schedule", "", f"定时任务「{s.name}」：{result}", f"定时任务「{s.name}」：{result}")
+        return session, result
+
+    return Scheduler(get_schedules(), run_once)

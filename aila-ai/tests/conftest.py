@@ -33,7 +33,8 @@ def isolated_data(tmp_path: Path) -> Iterator[None]:
     saved = deps.settings
     deps.settings = replace(saved, data_dir=tmp_path / "data")
     caches = (deps.get_knowledge, deps.get_code_projects, deps.get_registry, deps.get_runtime, deps.get_memory_store,
-              deps.get_phone, deps.get_phone_server, deps.get_android_settings, deps.get_notifier)
+              deps.get_phone, deps.get_phone_server, deps.get_android_settings, deps.get_notifier,
+              deps.get_schedules, deps.get_scheduler)
     for cache in caches:
         cache.cache_clear()
     yield

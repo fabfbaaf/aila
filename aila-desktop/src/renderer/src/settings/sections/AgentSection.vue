@@ -8,6 +8,8 @@ const MODE_HINTS = localized(MODE_HINTS_RAW)
 import type { AgentRuleGroup } from '../../../../shared/settings'
 import { loadAgentRules, removeAgentRule } from '../agentRules'
 import { loadComputerContext, loadComputerSettings, saveComputerInventory } from '../computer'
+import { bridge } from '../../platform/bridge'
+import SchedulesCard from './SchedulesCard.vue'
 
 const modes: AgentMode[] = ['read_only', 'ask', 'auto']
 const groups = ref<AgentRuleGroup[]>([])
@@ -195,6 +197,8 @@ onActivated(loadComputer)
         </ul>
       </section>
     </div>
+
+    <SchedulesCard v-if="bridge" />
 
     <p class="hint moved">{{ t('外部工具（MCP）的加、删、开关移到了设置里的「技能和扩展」，和扩展包、技能包放在一起。') }}</p>
   </section>

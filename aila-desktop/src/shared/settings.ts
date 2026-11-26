@@ -20,6 +20,31 @@ export type SettingsSection =
   /** 手机连接（局域网）：开关、配对码、配过的手机 */
   | 'phone'
 
+/** 定时任务（aila-ai/app/runtime/schedules.py）：到点她自己开一个编程任务 */
+export interface ScheduleItem {
+  id: string
+  name: string
+  project: string
+  prompt: string
+  kind: 'daily' | 'interval'
+  time: string
+  /** 星期几：0 是周一 */
+  days: number[]
+  hours: number
+  /** run 直接做；tests 先跑测试，没过才做 */
+  action: 'run' | 'tests'
+  mode: 'read_only' | 'ask' | 'auto'
+  enabled: boolean
+  last_run: string
+  last_session: string
+  last_result: string
+  /** 「什么时候、做什么」，服务那边拼好的 */
+  describe: string
+  next: string | null
+}
+
+export type ScheduleInput = Pick<ScheduleItem, 'name' | 'project' | 'prompt' | 'kind' | 'time' | 'days' | 'hours' | 'action' | 'mode'>
+
 /** 设置 → 手机 →「让她操作安卓手机」：ADB 找没找到、连着哪些手机、选的哪台（aila-ai/app/android） */
 export interface AndroidStatus {
   enabled: boolean

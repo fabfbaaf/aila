@@ -420,6 +420,7 @@ data: {"type": "done"}
   - 同一步里派几个时一起跑（最多 4 个），结果按调用顺序记进日志；打断时一起停，子会话也记成被打断
   - 子 Agent 自己的系统提示词、工具列表也固定，开头放主会话同一份环境说明：同一个项目派出去的助手之间互相命中缓存
   - 用量记在主会话里（`usage` 事件带 `purpose: "explore"`）：算进总数，但不算主 Agent 的一步，也不影响要不要压缩
+- **定时任务**（`runtime/schedules.py`、`routes/schedules.py`、对话里的「定时任务」技能包 `tools/schedule.py`）：每天几点（可选星期几）或每隔几小时，在登记过、做过任务的项目里开一个任务；`action=tests` 时先跑项目自带的测试（`code.fix.detect_tests`，和合并分支时一样，不由大模型决定），过了只提醒一声，没过才开任务并带上测试输出（标明只是数据）。权限默认只读；`ask` / `auto` 一定 `isolate`（新分支）。后台每 30 秒看一眼（`Scheduler`），下次时间由 `next_run` 算（纯计算）；关机错过的下次启动补跑一次，不攒；同一个不会同时跑两份。对话里设要你确认（`risk="write"`，确认内容由代码拼）。存在 `data/schedules.json`；接口 `GET/POST /agent/schedules`、`PUT/DELETE /agent/schedules/{id}`、`POST /agent/schedules/{id}/run`
 - **多智能体**（`runtime/workers.py`，`delegate` / `merge_work` / `discard_work` 工具）：大任务能拆成几块改的文件不重叠的活时，她在同一步里派几个子 Agent 一起做。
   - 每个子 Agent 在自己的 git 分支里改（`branch.py` 的 worktree 临时目录，带着你没提交的改动），你的代码一个字都不动；用「编程用的模型」，有自己的系统提示词和会话日志（`data/sessions/<id>.sub/`）
   - 做完交回报告和改了哪些文件；她用 `merge_work` 收回：按改文件的权限问你，给你看的 diff 由 git 算出来；收回 = 把改过的文件按字节写回（不提交），这期间同一个文件被改过（她自己或别的子 Agent）就不收、告诉你是哪些；`discard_work` 不要了
