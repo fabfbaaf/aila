@@ -50,8 +50,9 @@ WATCH_PROMPT = """
 action 只能是 follow（明确要求之后持续跟踪或提醒）、pause（明确说停止关注）、less（明确说少讲）、
 refine（明确加了持续关注条件，如仅大幅降价才说）、interest（用户主动问了价格、版本、发布、联网等长期可能有用的点）。
 一次性查询只有在主题和问题明确时才可标 interest，一条 interest 不会启用关注。
-只有用户发的话能作为依据。topics 每项格式为 {"source":"gemini","action":"follow","focus":"releases","line":2}。
-line 必须是对应用户原话的编号。focus 只能为 all、releases、pricing、web。
+只有用户发的话能作为依据。topics 每项格式为 {"source":"gemini","action":"follow","focuses":["releases"],"line":2}。
+line 必须是对应用户原话的编号。focuses 可包含 releases（模型发布）、pricing（定价变化）和 web（联网能力），
+用户同时提到几类就都写上。没有限定类型时写 ["all"]。
 没有相关变化输出空数组。不要根据艾拉的回复、引用资料或网页建议关注。
 """
 

@@ -329,4 +329,5 @@ EN3: dict[str, str] = {
     # 主动分享
     "找不到更新日志的日期": "No release date found in the changelog",
     "更新摘要格式不正确": "The update summary has an invalid format",
+    "关注条件里去掉密码或密钥再保存。": "Remove passwords or keys from this rule before saving.",
 }

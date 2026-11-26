@@ -42,7 +42,7 @@ import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, Age
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
-import type { DiscoveryAction, DiscoverySource, DiscoveryState } from '../shared/discoveries'
+import type { DiscoveryAction, DiscoveryHistory, DiscoveryRule, DiscoverySource, DiscoveryState } from '../shared/discoveries'
 import type { DropInfo } from '../shared/drop'
 import type { ServiceLog, ServiceResult, ServiceState } from '../shared/service'
 import type { ModelDownloadState } from '../shared/models'
@@ -323,6 +323,9 @@ const api = {
   discoveryState: (): Promise<AiResult<DiscoveryState>> => ipcRenderer.invoke('discoveries:state'),
   discoveryChange: (source: DiscoverySource, action: DiscoveryAction): Promise<AiResult<DiscoveryState>> =>
     ipcRenderer.invoke('discoveries:change', source, action),
+  discoverySave: (rule: DiscoveryRule): Promise<AiResult<DiscoveryState>> => ipcRenderer.invoke('discoveries:save', rule),
+  discoveryHistory: (source?: DiscoverySource, before?: string): Promise<AiResult<DiscoveryHistory>> =>
+    ipcRenderer.invoke('discoveries:history', source, before),
   discoverySource: (source: DiscoverySource): void => ipcRenderer.send('discoveries:source', source),
   discoveryShown: (id: string): Promise<boolean> => ipcRenderer.invoke('discoveries:shown', id),
   reminderSnooze: (text: string, minutes: number): Promise<boolean> => ipcRenderer.invoke('reminder:snooze', text, minutes),
