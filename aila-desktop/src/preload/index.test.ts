@@ -52,6 +52,8 @@ describe('会话管理的预加载桥', () => {
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:memory', 'C:/shop')
     await api.agentRemember('C:/shop', '改完跑 npm test')
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:memory-add', 'C:/shop', '改完跑 npm test')
+    await api.agentRemember('C:/shop', '改完跑 pytest', 'ab12')
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:memory-add', 'C:/shop', '改完跑 pytest', 'ab12')
     await api.agentForgetMemory('C:/shop', 'ab12')
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:memory-forget', 'C:/shop', 'ab12')
   })

@@ -9,6 +9,7 @@ import {
   groupColors,
   haloScale,
   highlightFrom,
+  evidenceHighlight,
   isRelated,
   layerAlpha,
   relatedFiles,
@@ -299,4 +300,21 @@ describe('关联高亮', () => {
     expect([...m.out]).toEqual(['api'])
     expect([...m.in]).toEqual(['cli'])
   })
+})
+
+
+it('星图只高亮找到的证据文件和检索经过的边', () => {
+  const highlight = evidenceHighlight({
+    locations: [
+      { file: 'gone.py', line: 1 },
+      { file: 'ai/app/routes/chat.py', line: 17 },
+      { file: 'ai/app/agent.py', line: 28 },
+      { file: 'ai/app/tools/code.py', line: 39 }
+    ],
+    edges: [['ai/app/agent.py', 'ai/app/routes/chat.py'], ['gone.py', 'ai/app/agent.py']]
+  }, GRAPH)
+  expect(highlight.primary).toEqual({ file: 'ai/app/routes/chat.py', line: 17, qname: null })
+  expect([...highlight.chain]).toHaveLength(3)
+  expect(highlight.error.size).toBe(0)
+  expect([...highlight.links]).toEqual([linkKey(GRAPH.links[0])])
 })

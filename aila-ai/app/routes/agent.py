@@ -328,6 +328,7 @@ async def set_budget(sid: str, req: SetBudget, rt: Runtime = Depends(get_runtime
 class MemoryNote(BaseModel):
     cwd: str = Field(min_length=1, max_length=1000)
     text: str = Field(min_length=1, max_length=2000)
+    replaces: str | None = Field(default=None, max_length=64)
 
 
 class ForgetNote(BaseModel):
@@ -348,15 +349,15 @@ async def list_commands(cwd: str | None = None, kind: Literal["project", "comput
 
 
 @router.get("/memory")
-async def list_memory(cwd: str, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+async def list_memory(cwd: str, history: bool = False, rt: Runtime = Depends(get_runtime)) -> list[dict]:
     """这个项目记下的话，早的在前"""
-    return [asdict(n) for n in rt.memory.notes(cwd)]
+    return [asdict(n) for n in (rt.memory.history(cwd) if history else rt.memory.notes(cwd))]
 
 
 @router.post("/memory", status_code=201)
 async def add_memory(req: MemoryNote, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
-        note, added = rt.memory.add(req.cwd, req.text, "user")
+        note, added = rt.memory.add(req.cwd, req.text, "user", replaces=req.replaces)
     except MemoryError_ as err:
         raise HTTPException(422, str(err)) from err
     return {**asdict(note), "added": added}

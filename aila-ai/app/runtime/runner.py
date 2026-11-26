@@ -20,6 +20,7 @@ from ..computer import build_computer_context, computer_shell
 from ..config import ENV_FILE
 from ..confirm import Confirmations
 from ..knowledge import KnowledgeBase
+from ..knowledge.rerank import Score
 from ..llm import CoderModel
 from .branch import BranchError, BranchInfo, open_branch
 from .branch import discard as discard_branch
@@ -92,6 +93,7 @@ class Runtime:
         language: Callable[[], str] = lambda: "zh",
         web_search: Callable[[], SearchProvider | None] | None = None,
         knowledge: Callable[[], KnowledgeBase] | None = None,
+        reranker: Callable[[], Score | None] = lambda: None,
     ) -> None:
         # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
         self.language = language
@@ -104,6 +106,7 @@ class Runtime:
         # 代码库（代码 RAG + 调用图）：给了就让她能按意思搜、按报错定位、看调用关系
         self.code_projects = code_projects
         self.knowledge = knowledge
+        self.reranker = reranker
         self.rules = Rules(data_dir / "agent_rules.json")
         self.computer_rules = Rules(data_dir / "computer_rules.json")
         self.computer_inventory = computer_inventory
@@ -207,7 +210,7 @@ class Runtime:
             access = CodeAccess(self.code_projects(), session.cwd) if self.code_projects else None
             extra = access.tools() if access else []
             if access and self.knowledge:
-                extra.append(project_evidence_tool(access, session.workdir, self.knowledge))
+                extra.append(project_evidence_tool(access, session.workdir, self.knowledge, self.reranker, self.memory, self.store))
             # 联网搜索、带着问题读网页（读网页用快模型）；派出去查资料的助手也能用
             web = WebAccess(self.fast_factory, self.web_search).tools()
             explorer = Explorer(session, workspace.root, self.shell, [*extra, *web], self.rules, self.fast_factory,
@@ -220,7 +223,8 @@ class Runtime:
             workers = Workers(session, workspace.root, self.shell, self.rules, lambda: policy.mode, self.model_factory,
                               self.work_dir, web, self.config.context_window)
             extra = [*extra, explorer.tool(), *web, *workers.tools(), *browser.tools(), *plan_tools(session.events),
-                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
+                     remember_tool(self.memory, session.cwd, session.id, lambda: self._last_user_seq(session)),
+                     *bridge_tools(self.mcp), *skill_tools]
         agent = Agent(
             session,
             self.model_factory(),
@@ -636,6 +640,10 @@ class Runtime:
             if close:
                 for q in self._listeners.get(sid, set()):
                     q.put_nowait(None)  # 这一轮结束了
+
+    @staticmethod
+    def _last_user_seq(session: Session) -> int | None:
+        return next((e.get("seq") for e in reversed(session.events) if e["type"] == "user"), None)
 
     # ---------- 记忆库 ----------
 

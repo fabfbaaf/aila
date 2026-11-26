@@ -354,6 +354,22 @@ async function loadNotes(): Promise<void> {
   }
 }
 
+const replacingNote = ref<AgentMemoryNote | null>(null)
+watch(() => current.value?.cwd, () => {
+  replacingNote.value = null
+  noteText.value = ''
+})
+
+function editNote(note: AgentMemoryNote): void {
+  replacingNote.value = note
+  noteText.value = note.text
+}
+
+function cancelEditNote(): void {
+  replacingNote.value = null
+  noteText.value = ''
+}
+
 async function addNote(): Promise<void> {
   if (current.value?.kind === 'computer') return
   const cwd = current.value?.cwd
@@ -361,8 +377,8 @@ async function addNote(): Promise<void> {
   if (!cwd || !text || noteBusy.value) return
   noteBusy.value = true
   try {
-    await source.remember(cwd, text)
-    noteText.value = ''
+    await source.remember(cwd, text, replacingNote.value?.id)
+    cancelEditNote()
     await loadNotes()
   } catch (err) {
     error.value = (err as Error).message
@@ -1079,13 +1095,16 @@ onBeforeUnmount(() => {
         <ul v-if="notes.length" class="notes">
           <li v-for="n in notes" :key="n.id" :class="n.source" :title="n.source === 'agent' ? tr('她记的') : tr('你加的')">
             <span>{{ n.text }}</span>
+            <button class="x" type="button" :title="tr('更正这条约定')" :aria-label="tr('更正这条约定')" @click="editNote(n)">{{ tr('更正') }}</button>
             <button class="x" :title="tr('删掉这条')" :aria-label="tr('删掉这条')" @click="forgetNote(n)"><Icon name="close" :size="12" :stroke="2" /></button>
           </li>
         </ul>
         <p v-else class="dim">{{ tr('她弄清了测试命令、代码约定这类事会记在这里，下次在这个项目开任务时带上。') }}</p>
+        <p v-if="replacingNote" class="dim">{{ tr('正在更正：{text}', { text: replacingNote.text }) }}</p>
         <form class="note-add" @submit.prevent="addNote">
           <input v-model="noteText" maxlength="300" :placeholder="tr('自己加一条……')" :aria-label="tr('加一条项目记忆')" @keydown.stop />
-          <button type="submit" :disabled="!noteText.trim() || noteBusy">{{ tr('记下') }}</button>
+          <button type="submit" :disabled="!noteText.trim() || noteBusy">{{ replacingNote ? tr('保存更正') : tr('记下') }}</button>
+          <button v-if="replacingNote" type="button" @click="cancelEditNote">{{ tr('取消') }}</button>
         </form>
       </section>
       <section>

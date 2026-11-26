@@ -38,6 +38,7 @@ import {
   getScreenStatus,
   listCodeProjects,
   listKnowledge,
+  searchKnowledge,
   listSkills,
   putAiSettings,
   testLlm,
@@ -71,6 +72,7 @@ import { cleanRoute, routeForSection, toHash, type ShellRoute } from '../shared/
 import { TRAY_16, TRAY_32 } from './trayImage'
 import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { discoveries } from './discoveries'
+import type { ProjectEvidenceQuery } from '../shared/evidence'
 import { DISCOVERY_SOURCES, isDiscoveryId, isDiscoverySource } from '../shared/discoveries'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
@@ -684,10 +686,27 @@ function openAgent(sid?: string): void {
 function cleanFocus(raw: unknown): WorkbenchFocus | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const f = raw as Record<string, unknown>
-  return {
+  const focus: WorkbenchFocus = {
     project: typeof f.project === 'string' ? f.project.slice(0, 64) : undefined,
     error: typeof f.error === 'string' ? f.error.slice(0, 8000) : undefined
   }
+  if (f.evidence && typeof f.evidence === 'object') {
+    const evidence = f.evidence as Record<string, unknown>
+    const validPath = (file: unknown): file is string => typeof file === 'string'
+      && file.length > 0 && file.length <= 512 && !file.startsWith('/') && !file.includes('\\')
+      && !file.includes(':') && !file.split('/').includes('..')
+    const locations = Array.isArray(evidence.locations) ? evidence.locations.slice(0, 18).flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return []
+      const { file, line } = item as Record<string, unknown>
+      return validPath(file) && typeof line === 'number' && Number.isSafeInteger(line) && line > 0 ? [{ file, line }] : []
+    }) : []
+    const edges = Array.isArray(evidence.edges) ? evidence.edges.slice(0, 18).flatMap((edge: unknown) =>
+      Array.isArray(edge) && edge.length === 2 && validPath(edge[0]) && validPath(edge[1])
+        ? [[edge[0], edge[1]] as [string, string]] : []
+    ) : []
+    if (locations.length) focus.evidence = { locations, edges }
+  }
+  return focus
 }
 
 /** 状态变化发给所有窗口（角色窗口和主窗口） */
@@ -1063,6 +1082,9 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('knowledge:list', () => listKnowledge(AI_URL))
+  ipcMain.handle('knowledge:search', (e, query: unknown) =>
+    fromMainWindow(e) && typeof query === 'string' && query.length <= 500
+      ? searchKnowledge(AI_URL, query) : MAIN_ONLY)
   ipcMain.handle('knowledge:delete', (e, id: string) => (fromMainWindow(e) ? deleteKnowledge(AI_URL, String(id)) : MAIN_ONLY))
   ipcMain.handle('knowledge:add', async (e) => {
     if (!fromMainWindow(e)) return null
@@ -1088,9 +1110,17 @@ function registerIpc(): void {
     fromMainWindow(e) && Array.isArray(linked) && linked.length <= 1000
       && linked.every((doc) => typeof doc === 'string' && /^[0-9a-f]{32}$/.test(doc))
       ? setCodeDocuments(AI_URL, String(id), linked) : MAIN_ONLY)
-  ipcMain.handle('code:evidence', (e, id: string, query: unknown) =>
-    fromMainWindow(e) && typeof query === 'string' && query.length <= 2000
-      ? codeEvidence(AI_URL, String(id), query) : MAIN_ONLY)
+  ipcMain.handle('code:evidence', (e, id: unknown, raw: unknown) => {
+    if (!fromMainWindow(e) || typeof id !== 'string' || !/^[a-f0-9]{12}$/.test(id) || !raw || typeof raw !== 'object') {
+      return MAIN_ONLY
+    }
+    const body = raw as Partial<ProjectEvidenceQuery>
+    if (typeof body.query !== 'string' || !body.query.trim() || body.query.length > 2000
+        || (body.mode !== 'answer' && body.mode !== 'inspect')
+        || (body.memory !== 'current' && body.memory !== 'history')
+        || (body.as_of !== undefined && !Number.isFinite(body.as_of))) return MAIN_ONLY
+    return codeEvidence(AI_URL, id, { query: body.query, mode: body.mode, memory: body.memory, as_of: body.as_of })
+  })
   ipcMain.handle('code:fixes', () => getFixStats(AI_URL))
   ipcMain.handle('code:add', async (e) => {
     if (!fromMainWindow(e)) return null
@@ -1117,7 +1147,10 @@ function registerIpc(): void {
     codeChunk(AI_URL, String(id), String(file), Number(line) || 1)
   )
   ipcMain.handle('code:locate-all', (_e, text: string) => codeLocateAll(AI_URL, String(text).slice(0, 20000)))
-  ipcMain.on('workbench:open', (_e, focus: unknown) => openWorkbench(cleanFocus(focus)))
+  ipcMain.on('workbench:open', (e, focus: unknown) => {
+    const clean = cleanFocus(focus)
+    if (!clean?.evidence || fromMainWindow(e)) openWorkbench(clean)
+  })
   ipcMain.handle('workbench:take-focus', () => {
     const f = workbenchFocus
     workbenchFocus = null
@@ -1184,10 +1217,11 @@ function registerIpc(): void {
       : notAllowed
   )
   ipcMain.handle('agent:memory', (e, cwd: unknown) => (fromAgent(e) && cwdOk(cwd) ? agentRelay.memory(cwd) : notAllowed))
-  ipcMain.handle('agent:memory-add', (e, cwd: unknown, text: unknown) => {
+  ipcMain.handle('agent:memory-add', (e, cwd: unknown, text: unknown, replaces: unknown) => {
     if (!fromAgent(e) || !cwdOk(cwd)) return notAllowed
     if (typeof text !== 'string' || !text.trim() || text.length > 2000) return { ok: false, error: tm('要记的话不能是空的，也别太长。') }
-    return agentRelay.addMemory(cwd, text)
+    if (replaces !== undefined && (typeof replaces !== 'string' || !/^[\w-]{1,64}$/.test(replaces))) return notAllowed
+    return agentRelay.addMemory(cwd, text, replaces)
   })
   ipcMain.handle('agent:memory-forget', (e, cwd: unknown, id: unknown) =>
     fromAgent(e) && cwdOk(cwd) && typeof id === 'string' && /^[\w-]{1,64}$/.test(id) ? agentRelay.forgetMemory(cwd, id) : notAllowed

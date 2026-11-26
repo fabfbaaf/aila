@@ -49,4 +49,5 @@ class SearchRequest(BaseModel):
 @router.post("/search")
 async def search(req: SearchRequest, kb: KnowledgeBase = Depends(get_knowledge)) -> list[dict[str, Any]]:
     hits = await asyncio.to_thread(kb.search, req.query, req.k)
-    return [{**{k: v for k, v in asdict(h).items() if k != "sha256"}, "source": h.source} for h in hits]
+    return [{**{k: v for k, v in asdict(h).items() if k != "sha256"}, "source": h.source,
+             "version": h.sha256[:12]} for h in hits]

@@ -27,6 +27,7 @@ import {
   crossLinks,
   groupColors,
   highlightFrom,
+  evidenceHighlight,
   kindOf,
   searchNodes,
   starOf,
@@ -56,6 +57,7 @@ const code = ref<ChunkSource | null>(null)
 const query = ref('')
 const tip = ref<{ name: string; lines: number; x: number; y: number } | null>(null)
 const located = ref<LocatedError | null>(null)
+const evidenceFocus = shallowRef<WorkbenchFocus | null>(null)
 const errorText = ref('')
 const notice = ref('')
 /** 手势开着（摄像头开着）。不记住：每次打开星图都要自己点，免得一打开窗口摄像头就亮了 */
@@ -159,7 +161,12 @@ function applyColors(): void {
 }
 
 watch(colorMode, applyColors)
-const primary = computed(() => (located.value ? highlightFrom(located.value, graph.value ?? { nodes: [], links: [] }).primary : null))
+const visibleGraph = () => graph.value ?? { nodes: [], links: [] }
+const primary = computed(() => {
+  if (located.value) return highlightFrom(located.value, visibleGraph()).primary
+  const evidence = evidenceFocus.value?.evidence
+  return evidence ? evidenceHighlight(evidence, visibleGraph()).primary : null
+})
 const kinds: Record<string, string> = localized({ function: '函数', method: '方法', class: '类', template: '界面模板' })
 /** 修改的说明（项目、改了什么、怎么测）和 diff 分开显示 */
 const fixLines = computed(() => {
@@ -186,11 +193,14 @@ async function loadProjects(): Promise<void> {
 
 async function loadGraph(): Promise<void> {
   if (!projectId.value || !map) return
+  const requested = projectId.value
   status.value = t('正在画星图……')
   node.value = null
   code.value = null
   try {
-    graph.value = await source.graph(projectId.value)
+    const result = await source.graph(requested)
+    if (requested !== projectId.value) return
+    graph.value = result
   } catch (err) {
     status.value = t('读不了这个项目：{why}', { why: (err as Error).message })
     return
@@ -199,9 +209,13 @@ async function loadGraph(): Promise<void> {
   applyColors()
   status.value = ''
   if (located.value?.project === projectId.value) showError(located.value)
+  else showEvidence()
 }
 
-watch(projectId, () => void loadGraph())
+watch(projectId, () => {
+  if (evidenceFocus.value?.project !== projectId.value) evidenceFocus.value = null
+  void loadGraph()
+})
 watch(hideTests, () => {
   if (!map || !shown.value) return
   map.setGraph(shown.value)
@@ -209,6 +223,7 @@ watch(hideTests, () => {
   if (node.value && !shown.value.nodes.some((n) => n.id === node.value!.id)) node.value = null
   else if (node.value) map.select(node.value.id, false)
   if (located.value?.project === projectId.value) showError(located.value)
+  else showEvidence()
 })
 
 /** 面板里点一个跨进程的文件：飞过去看它 */
@@ -248,8 +263,18 @@ const marked = computed(() =>
 // ---------- 报错 ----------
 
 async function applyFocus(f: WorkbenchFocus): Promise<void> {
+  if (f.evidence) {
+    clearError()
+    notice.value = ''
+    evidenceFocus.value = { ...f, project: f.project || projectId.value }
+    hideTests.value = false
+    if (f.project && f.project !== projectId.value) projectId.value = f.project
+    else showEvidence()
+    return
+  }
   if (f.project && f.project !== projectId.value) projectId.value = f.project
   if (!f.error) return
+  clearEvidence()
   errorText.value = f.error
   notice.value = t('正在找报错落在哪……')
   const loc = await source.locate(f.error).catch(() => null)
@@ -273,6 +298,25 @@ function showError(loc: LocatedError): void {
     map.select(target.id)
     void selectNode(target, h.primary!.line)
   }
+}
+
+function showEvidence(): void {
+  const focus = evidenceFocus.value
+  if (!map || !shown.value || !focus?.evidence || focus.project !== projectId.value) return
+  const highlight = evidenceHighlight(focus.evidence, shown.value)
+  map.setHighlight(highlight)
+  const target = highlight.primary
+  const visible = target && shown.value.nodes.find((item) => item.id === target.file)
+  if (visible && target) {
+    map.select(visible.id)
+    void selectNode(visible, target.line)
+  }
+}
+
+function clearEvidence(): void {
+  if (!evidenceFocus.value) return
+  evidenceFocus.value = null
+  map?.setHighlight(null)
 }
 
 function clearError(): void {
@@ -609,6 +653,11 @@ onBeforeUnmount(() => {
     <div v-else-if="moduleTip" class="tip" :style="{ left: `${moduleTip.x + 14}px`, top: `${moduleTip.y + 10}px` }">
       <b>{{ moduleTip.m.label }}</b> · {{ t('{n} 个文件', { n: moduleTip.m.files.length }) }} · {{ t('{n} 行', { n: moduleTip.m.lines }) }}
       <div class="muted">{{ moduleTip.m.id }} · {{ t('点一下飞过去') }}</div>
+    </div>
+
+    <div v-if="evidenceFocus" class="error-bar">
+      <b>{{ t('检索到的代码链路') }}</b>
+      <button class="ghost" @click="clearEvidence">{{ t('收起') }}</button>
     </div>
 
     <div v-if="located || notice" class="error-bar">

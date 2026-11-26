@@ -1,0 +1,148 @@
+[
+  {
+    "id": "discovery-interval",
+    "question": "主动分享新版要求每两小时检查。`INTERVAL` 现在是多久？从 pollDiscoveries 查到本地服务和相关测试。",
+    "documents": [
+      {
+        "name": "主动分享新版规格.md",
+        "text": "## 检查频率\n\n主动分享每两小时检查一次。涉及桌面端 `pollDiscoveries`，本地接口 `/discoveries/poll`，服务端参数 `INTERVAL`。"
+      }
+    ],
+    "required": [
+      {
+        "document": "主动分享新版规格.md",
+        "quote": "每两小时检查一次"
+      },
+      {
+        "file": "aila-ai/app/discoveries.py",
+        "quote": "INTERVAL = 6 * 3600"
+      },
+      {
+        "file": "aila-desktop/src/main/index.ts",
+        "quote": "pollDiscoveries"
+      },
+      {
+        "file": "aila-ai/app/routes/discoveries.py",
+        "quote": "await store.poll()"
+      },
+      {
+        "file": "aila-ai/tests/test_discoveries.py",
+        "quote": "timedelta(seconds=INTERVAL)"
+      }
+    ],
+    "answer_terms": [
+      [
+        "两小时",
+        "2 小时",
+        "2小时"
+      ],
+      [
+        "六小时",
+        "6 小时",
+        "6小时"
+      ]
+    ]
+  },
+  {
+    "id": "ignore-rules",
+    "question": "`matches` 对 .ailaignore 通配符怎么比较？核对新版忽略规格。",
+    "documents": [
+      {
+        "name": "忽略新版规格.md",
+        "text": "## 忽略通配符\n\n.ailaignore 新版需求：含路径的通配符按项目相对路径匹配，单文件名可在任意层命中。入口 `matches`。"
+      }
+    ],
+    "required": [
+      {
+        "document": "忽略新版规格.md",
+        "quote": "按项目相对路径匹配"
+      },
+      {
+        "file": "aila-ai/app/code/ignore.py",
+        "quote": "fnmatch.fnmatchcase(rel, pattern)"
+      }
+    ],
+    "answer_terms": [
+      [
+        "相对路径",
+        "整个路径"
+      ],
+      [
+        "任意",
+        "任一",
+        "每一层",
+        "每个"
+      ]
+    ]
+  },
+  {
+    "id": "current-decision",
+    "question": "安装包验收现在按哪条项目决定执行？",
+    "decisions": [
+      "安装包验收先用当前 Windows 用户。",
+      "安装包验收暂停，等干净的 Windows 环境。"
+    ],
+    "required": [
+      {
+        "decision": true,
+        "quote": "暂停，等干净的 Windows 环境"
+      }
+    ],
+    "answer_terms": [
+      [
+        "暂停",
+        "暂缓"
+      ],
+      [
+        "干净的 Windows",
+        "干净 Windows",
+        "干净用户"
+      ]
+    ]
+  },
+  {
+    "id": "historical-decision",
+    "question": "安装包验收一开始怎么决定，后来怎么改口？",
+    "history": true,
+    "decisions": [
+      "安装包验收先用当前 Windows 用户。",
+      "安装包验收暂停，等干净的 Windows 环境。"
+    ],
+    "required": [
+      {
+        "decision": true,
+        "quote": "先用当前 Windows 用户"
+      },
+      {
+        "decision": true,
+        "quote": "暂停，等干净的 Windows 环境"
+      }
+    ],
+    "answer_terms": [
+      [
+        "当前 Windows 用户",
+        "本机用户"
+      ],
+      [
+        "干净的 Windows",
+        "干净 Windows",
+        "干净用户"
+      ]
+    ]
+  },
+  {
+    "id": "absent-evidence",
+    "question": "ZQX074 VJS809 TXK042",
+    "required": [],
+    "answer_terms": [
+      [
+        "找不到",
+        "没有",
+        "无法",
+        "缺少",
+        "不足",
+        "未知"
+      ]
+    ]
+  }
+]

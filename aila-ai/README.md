@@ -315,9 +315,13 @@ data: {"type": "done"}
 
 ### 代码库（代码 RAG）
 
-「项目 → 列表 → 项目资料与问答」用 GET/PUT `/code/projects/{id}/documents` 维护资料关联，POST `/code/projects/{id}/evidence` 问项目问题。文档检索在关键词、向量各取候选之前先限定关联范围。代码从混合检索和资料里的符号出发，最多展开两跳静态调用、HTTP 和 IPC 关系；代码出处取原始行，资料出处带章节、页码（有时）和版本指纹。已配置的对话模型根据摘录组织答复，服务端核对每条说法引用的编号是否存在；生成失败时仍能看摘录。
+「项目 → 列表 → 项目资料与问答」用 GET/PUT `/code/projects/{id}/documents` 保存资料关联，通过 POST `/code/projects/{id}/evidence` 提问或本机检索检查（`mode: "inspect"`）。检索展示入选摘录、初选命中方式和淘汰的候选。代码从混合检索、资料中明确提到的符号和端点出发，最多追三跳静态调用、HTTP、IPC 和相关测试，星图可定位涉及文件。回答区分直接引句和推断，服务端核对引用 ID 和逐字引句，生成失败仍可展开摘录。
 
-编程任务用 `project_evidence` 查同一组资料，代码取当前工作区。独立分支或子目录使用临时的名称和关键词索引；正常项目根目录复用混合索引。
+项目约定默认只取当前版本，问答也支持 `memory: "history"` 或 `as_of`（Unix 秒）。更正新版本的同时保留生效和替换时间，以及编程会话里可查到的来源消息。编程任务和只读的查资料助手用 `project_evidence` 检索；独立分支或子目录用当前工作区的临时名称和关键词索引。
+
+可选本地重排使用现有 fastembed 运行 [BGE 多语言重排模型的 INT8 ONNX 转换](https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX)。准备快照里的 `onnx/model_int8.onnx` 和同级目录下的 `config.json`、`tokenizer*.json`、`special_tokens_map.json`，设置 `AILA_RERANK_MODEL_DIR` 指向快照根目录，重启 AI 服务。缺模型或加载失败时沿用混合排序。
+
+项目评测使用 `scripts/eval_project_rag.py` 和 `scripts/project_rag_cases.json`。默认不调用对话模型，比较不取证、混合检索和多跳的必要证据覆盖、延迟、上下文字数。传 `--rerank-model-dir` 加入真实模型重排对照，传 `--models-dir` 加入向量检索，传 `--with-model` 用同一编程模型测答案关键词、引用精度和实际输入 token。用 `--report 路径.json` 输出分题结果与仓库版本。
 
 用户在设置窗口里登记自己的项目，她就能在代码里找东西、看到报错时直接定位到出错的函数。这是「魔法工作台」的技术核心，索引只建在本机（`data/code/`），代码不上传。
 

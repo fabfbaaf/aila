@@ -78,9 +78,15 @@ export interface LocatedError {
 }
 
 /** 打开星图时要做的事：看哪个项目、标出哪个报错 */
+export interface WorkbenchEvidenceFocus {
+  locations: { file: string; line: number }[]
+  edges: [string, string][]
+}
+
 export interface WorkbenchFocus {
   project?: string
   error?: string
+  evidence?: WorkbenchEvidenceFocus
 }
 
 /** 她准备好、正等用户点头的代码修改（确认里的 detail：项目、说明、测试、diff） */

@@ -66,6 +66,14 @@ create table if not exists digested (
 """
 
 
+def short_terms(query: str) -> list[str]:
+    """为中文的短词保留两字匹配，英文按单词匹配。"""
+    grams = []
+    for run in re.findall(r"[A-Za-z0-9_]{2,}|[一-鿿]{2,}", query):
+        grams.extend([run] if run.isascii() else [run[i:i + 2] for i in range(len(run) - 1)])
+    return list(dict.fromkeys(g.lower() for g in grams))[:MAX_GRAMS]
+
+
 @dataclass
 class Entry:
     id: str
@@ -307,10 +315,7 @@ class MemoryStore:
     def _short_words(self, query: str, allowed: set[int]) -> list[int]:
         """两个字的词（名字、昵称：「团子」「小王」）trigram 分词找不到：按两字片段直接在原文里找。
         片段越少见分越高；几乎每条都有的（「用户」「今天」）不算，免得什么都沾边"""
-        grams = []
-        for run in re.findall(r"[A-Za-z0-9_]{2,}|[一-鿿]{2,}", query):
-            grams.extend([run] if run.isascii() else [run[i : i + 2] for i in range(len(run) - 1)])
-        grams = list(dict.fromkeys(g.lower() for g in grams))[:MAX_GRAMS]
+        grams = short_terms(query)
         if not grams:
             return []
         total = len(allowed)

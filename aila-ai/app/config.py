@@ -50,6 +50,7 @@ class Settings:
     mail_user: str = ""
     mail_pass: str = ""
     mail_host: str = ""
+    rerank_model_dir: str = ""
 
     @property
     def mock(self) -> bool:
@@ -93,4 +94,5 @@ def load_settings() -> Settings:
         mail_user=os.getenv("AILA_MAIL_USER", "").strip(),
         mail_pass=os.getenv("AILA_MAIL_PASS", "").strip(),
         mail_host=os.getenv("AILA_MAIL_HOST", "").strip(),
+        rerank_model_dir=os.getenv("AILA_RERANK_MODEL_DIR", "").strip(),
     )

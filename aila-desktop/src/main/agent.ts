@@ -133,8 +133,8 @@ export class AgentRelay {
     return this.call('GET', `/agent/memory?cwd=${encodeURIComponent(cwd)}`)
   }
 
-  addMemory(cwd: string, text: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> {
-    return this.call('POST', '/agent/memory', { cwd, text })
+  addMemory(cwd: string, text: string, replaces?: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> {
+    return this.call('POST', '/agent/memory', { cwd, text, replaces })
   }
 
   forgetMemory(cwd: string, id: string): Promise<AiResult<{ ok: boolean }>> {

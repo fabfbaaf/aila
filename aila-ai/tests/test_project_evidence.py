@@ -113,7 +113,10 @@ def test_project_evidence_endpoint_binds_claims_to_returned_excerpts(tmp_path: P
             queries.append(json.loads(messages[-1]["content"]))
             refs = [s["id"] for s in queries[-1]["sources"] if "file" in s]
             yield json.dumps({"claims": [
-                {"text": "The implementation returns 6.", "sources": refs[:1]},
+                {"text": "The implementation returns 6.", "sources": refs[:1],
+                 "kind": "supported", "quotes": {refs[0]: "return 6"}},
+                {"text": "Guessed quote", "sources": refs[:1],
+                 "kind": "supported", "quotes": {refs[0]: "return 99"}},
                 {"text": "Mixed invalid citation", "sources": refs[:1] + ["made-up"]},
                 {"text": "No citation", "sources": []},
             ], "gaps": ["Unit of the return value"]})
@@ -128,6 +131,11 @@ def test_project_evidence_endpoint_binds_claims_to_returned_excerpts(tmp_path: P
     assert client.get(f"{url}/documents").json()["linked"] == [visible.id]
     body = client.post(f"{url}/evidence", json={"query": "Check quota"}).json()
     assert body["status"] == "answered" and len(body["claims"]) == 1
+    assert body["claims"][0]["kind"] == "supported" and body["sent"]
+    assert list(body["claims"][0]["quotes"].values()) == ["return 6"]
+    inspection = client.post(f"{url}/evidence", json={"query": "Check quota", "mode": "inspect"}).json()
+    assert inspection["status"] == "inspection" and not inspection["sent"]
+    assert inspection["sources"] == body["sources"] and len(queries) == 1
     assert body["gaps"] == ["Unit of the return value"]
     assert [s["document"] for s in queries[-1]["sources"] if "document" in s] == ["requirements.md"]
     assert body["sources"][0]["heading"] == "Quota" and len(body["sources"][0]["version"]) == 12
@@ -162,4 +170,105 @@ async def test_agent_reads_isolated_workspace_and_original_project_documents(tmp
         assert result.extra["evidence"][0]["document"] == doc.name
         assert not projects.index(project.id).outline("gate.py")
     finally:
+        kb.close()
+
+
+def test_rerank_receives_scoped_candidates_and_keeps_exclusions(tmp_path: Path) -> None:
+    from app.code.evidence import RetrievalTrace
+
+    kb = KnowledgeBase(":memory:", lambda: None)
+    index = CodeIndex(tmp_path, ":memory:", lambda: None)
+    try:
+        linked = [kb.add(f"policy{i}.txt", f"schedule update related policy {i}".encode()) for i in range(6)]
+        kb.add("private.txt", b"schedule update unrelated private policy")
+        kb.set_project_documents("p", [doc.id for doc in linked])
+
+        def scorer(query: str, candidates: list[str]) -> list[float]:
+            assert all("private" not in candidate for candidate in candidates)
+            return [100 if "policy5" in candidate else 0 for candidate in candidates]
+
+        trace = RetrievalTrace()
+        sources = collect(index, kb, "p", "schedule update", scorer=scorer, trace=trace)
+        assert sources[0].document == "policy5.txt"
+        assert trace.reranked == ["documents"] and trace.document_candidates == 6
+        assert len(trace.excluded) == 2
+        assert not ({s.document for s in trace.excluded} & {s.document for s in sources})
+    finally:
+        index.close()
+        kb.close()
+
+
+def test_versioned_decisions_are_scoped_and_keep_original_message(tmp_path: Path) -> None:
+    from app.runtime.evidencetool import decision_sources
+    from app.runtime.memory import ProjectMemory
+    from app.runtime.session import SessionStore
+
+    root, other = tmp_path / "project", tmp_path / "other"
+    root.mkdir()
+    other.mkdir()
+    sessions = SessionStore(tmp_path / "sessions")
+    session = sessions.create(root, "ask", "mock", "")
+    original = "安装包验收用当前 Windows 用户"
+    session.append({"type": "user", "text": original})
+    seq = session.events[-1]["seq"]
+    memory = ProjectMemory(tmp_path / "notes.json")
+    older, _ = memory.add(root, original, "agent", session.id, message_seq=seq)
+    newer, _ = memory.add(root, "安装包验收暂停，等干净用户", replaces=older.id)
+    memory.add(other, "安装包验收给所有人", "agent", session.id, message_seq=seq)
+
+    assert [s.text for s in decision_sources(memory, sessions, root, "安装包验收")] == [newer.text]
+    timeline = decision_sources(memory, sessions, root, "安装包验收", history=True)
+    assert [s.text for s in timeline] == [newer.text, older.text]
+    assert timeline[1].session == session.id and timeline[1].message == original
+    assert timeline[1].until == newer.t and timeline[0].supersedes == older.id
+    assert decision_sources(memory, sessions, root, "安装包验收", as_of=older.t)[0].text == older.text
+    assert decision_sources(memory, sessions, other, "安装包验收")[0].message is None
+    assert older.text not in memory.context(root)
+    assert memory.remove(root, newer.id) and memory.history(root) == []
+
+
+def test_route_wrapper_and_parameter_show_actual_endpoints(tmp_path: Path) -> None:
+    (tmp_path / "bridge.ts").write_text(
+        'function sendRequest(base: string, path = "") {\n'
+        '    return fetch(\x60${base}/jobs${path}\x60)\n}\n'
+        'export function runner() { return sendRequest(base, "/get/hello") }\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "jobs.py").write_text(
+        'router = APIRouter(prefix="/jobs")\n\n'
+        '@router.get("/get/{request_id}")\ndef details(request_id):\n'
+        '    return request_id\n',
+        encoding="utf-8",
+    )
+    index = CodeIndex(tmp_path, ":memory:", lambda: None)
+    kb = KnowledgeBase(":memory:", lambda: None)
+    try:
+        sources = collect(index, kb, "p", "runner")
+        endpoints = [c for c in sources if isinstance(c, CodeSource) and c.relation == "http"]
+        assert endpoints and endpoints[0].file == "jobs.py"
+        assert endpoints[0].start == 3 and '/get/{request_id}' in endpoints[0].text
+        assert endpoints[0].via == "/jobs/get/{}"
+    finally:
+        index.close()
+        kb.close()
+
+
+def test_file_reference_finds_identifier_past_truncated_module(tmp_path: Path) -> None:
+    lines = ["# This unrelated source line precedes the declaration"] * 100
+    lines += ["POLL_INTERVAL = 6 * 3600", "def read_interval():", "    return POLL_INTERVAL"]
+    (tmp_path / "timer.py").write_text("\n".join(lines), encoding="utf-8")
+    (tmp_path / "test_timer.py").write_text(
+        "from timer import POLL_INTERVAL\n\ndef test_timer():\n    assert POLL_INTERVAL > 0\n", encoding="utf-8",
+    )
+    index = CodeIndex(tmp_path, ":memory:", lambda: None)
+    kb = KnowledgeBase(":memory:", lambda: None)
+    try:
+        index.refresh(embed=False)
+        doc = kb.add("spec.md", "检查周期是 \x60POLL_INTERVAL\x60。".encode())
+        kb.set_project_documents("p", [doc.id])
+        sources = collect(index, kb, "p", "检查周期")
+        assert any(isinstance(s, CodeSource) and "POLL_INTERVAL = 6 * 3600" in s.text for s in sources)
+        assert any(isinstance(s, CodeSource) and s.relation == "test_reference" for s in sources)
+    finally:
+        index.close()
         kb.close()

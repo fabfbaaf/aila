@@ -11,7 +11,8 @@ Electron 的渲染层（预加载）和主进程之间走 IPC，按函数名永�
 """
 
 import re
-from dataclasses import dataclass
+from bisect import bisect_right
+from dataclasses import dataclass, field, replace
 
 PARAM = "{}"
 
@@ -21,6 +22,7 @@ class Endpoint:
     kind: str  # http / ipc
     role: str  # serve：提供（处理）它；call：请求（发出）它
     key: str  # http：规整过的路径（参数写成 {}）；ipc：频道名
+    lines: tuple[int, ...] = field(default=(), compare=False)
 
 
 # ---------- HTTP：提供接口 ----------
@@ -43,6 +45,13 @@ STRING = {
 URL_HEAD = re.compile(r"^(?:https?|wss?)://[^/\s]+")
 INTERP = re.compile(r"\$\{[^}]*\}|\{[^}]*\}")
 PATH_LIKE = re.compile(r"^/[A-Za-z_]")
+
+
+# 本地 HTTP 封装常把固定前缀和第二个参数拼起来，例如 fetch(`\${url}/discoveries\${path}`)。
+JS_FETCH_PREFIX = re.compile(
+    r"\bfunction\s+(\w+)(?:<[^>]+>)?\s*\(\s*\w+\s*:[^,]{1,100},\s*(\w+)\s*[:=][^)]{0,150}\)"
+    r"[^;]{0,350}?\bfetch\(\s*`\$\{\w+\}(/[^$`]+)\$\{\2\}`"
+)
 
 # ---------- IPC ----------
 
@@ -94,7 +103,12 @@ def _join(prefix: str, path: str) -> str:
 def scan(path: str, text: str, lang: str) -> list[Endpoint]:
     """一个文件提供了哪些接口、请求了哪些接口、收发哪些 IPC 消息"""
     family = FAMILY.get(lang, "")
-    found: set[Endpoint] = set()
+    found: dict[Endpoint, list[int]] = {}
+    line_starts = [m.start() + 1 for m in re.finditer("\n", text)]
+
+    def add(endpoint: Endpoint, offset: int) -> None:
+        found.setdefault(endpoint, []).append(bisect_right(line_starts, offset) + 1)
+
     serving: set[str] = set()  # 提供接口那几行里的路径：同一个字符串不再算成请求
     test = is_test(path)  # 测试文件不算提供接口（里面写的路由多半是测试数据），只算请求
 
@@ -104,7 +118,7 @@ def scan(path: str, text: str, lang: str) -> list[Endpoint]:
         for m in PY_ROUTE.finditer(text):
             serving.add(m.group(2))
             if not test:
-                found.add(Endpoint("http", "serve", route_key(_join(prefix, m.group(2)))))
+                add(Endpoint("http", "serve", route_key(_join(prefix, m.group(2)))), m.start(2))
     elif family == "java":
         cls = JAVA_CLASS.search(text)
         top = cls.start() if cls else 0
@@ -116,17 +130,24 @@ def scan(path: str, text: str, lang: str) -> list[Endpoint]:
                 prefix = value  # 类上的 @RequestMapping：下面每个方法的前缀
                 continue
             if not test:
-                found.add(Endpoint("http", "serve", route_key(_join(prefix, value))))
+                add(Endpoint("http", "serve", route_key(_join(prefix, value))), m.start())
     elif family == "web":
         for m in JS_ROUTE.finditer(text):
             serving.add(m.group(2))
             if not test:
-                found.add(Endpoint("http", "serve", route_key(m.group(2))))
+                add(Endpoint("http", "serve", route_key(m.group(2))), m.start(2))
+        for m in JS_FETCH_PREFIX.finditer(text):
+            name, _, prefix = m.groups()
+            calls = re.compile(rf"\b{re.escape(name)}(?:<[^<>\n]+>)?\(\s*\w+\s*,\s*(['\"])(/[^'\"]*)\1")
+            for call in calls.finditer(text):
+                key = normalize(_join(prefix, call.group(2)))
+                if key:
+                    add(Endpoint("http", "call", key), call.start(2))
         for m in IPC_RECEIVE.finditer(text):
             if not test:
-                found.add(Endpoint("ipc", "serve", m.group(2)))
+                add(Endpoint("ipc", "serve", m.group(2)), m.start(2))
         for m in IPC_SEND.finditer(text):
-            found.add(Endpoint("ipc", "call", m.group(2)))
+            add(Endpoint("ipc", "call", m.group(2)), m.start(2))
 
     pattern = STRING.get(family)
     if pattern:
@@ -136,8 +157,8 @@ def scan(path: str, text: str, lang: str) -> list[Endpoint]:
                 continue
             key = normalize(raw)
             if key:
-                found.add(Endpoint("http", "call", key))
-    return sorted(found, key=lambda e: (e.kind, e.role, e.key))
+                add(Endpoint("http", "call", key), m.start())
+    return [replace(e, lines=tuple(sorted(set(found[e])))) for e in sorted(found, key=lambda e: (e.kind, e.role, e.key))]
 
 
 def _score(call: list[str], route: list[str]) -> float | None:
@@ -166,30 +187,35 @@ def _score(call: list[str], route: list[str]) -> float | None:
     return score if literal else None  # 一段字面都没对上（/{}）不算
 
 
-def link(found: dict[str, list[Endpoint]]) -> dict[tuple[str, str, str], set[str]]:
-    """(请求的文件, 提供的文件, http/ipc) → 经过的接口路径或频道名。同一个文件里的不连"""
-    served: dict[tuple[str, str], set[str]] = {}
-    for file, eps in found.items():
-        for e in eps:
-            if e.role == "serve":
-                served.setdefault((e.kind, e.key), set()).add(file)
-    routes = [(key, key.split("/")[1:], files) for (kind, key), files in served.items() if kind == "http"]
-    out: dict[tuple[str, str, str], set[str]] = {}
-    for file, eps in found.items():
-        for e in eps:
-            if e.role != "call":
+def connections(found: dict[str, list[Endpoint]]) -> list[tuple[str, Endpoint, str, Endpoint]]:
+    """保留请求和提供方的各自位置：两端路径参数的写法可能不同。"""
+    served: dict[tuple[str, str], list[tuple[str, Endpoint]]] = {}
+    for file, endpoints in found.items():
+        for endpoint in endpoints:
+            if endpoint.role == "serve":
+                served.setdefault((endpoint.kind, endpoint.key), []).append((file, endpoint))
+    routes = [(key.split("/")[1:], refs) for (kind, key), refs in served.items() if kind == "http"]
+    out = []
+    for file, endpoints in found.items():
+        for endpoint in endpoints:
+            if endpoint.role != "call":
                 continue
-            if e.kind == "ipc":
-                targets = [(e.key, served.get(("ipc", e.key), set()))]
+            if endpoint.kind == "ipc":
+                targets = served.get(("ipc", endpoint.key), [])
             else:
-                parts = e.key.split("/")[1:]
-                scored = [(s, key, files) for key, segs, files in routes if (s := _score(parts, segs)) is not None]
-                best = max((s for s, _, _ in scored), default=None)
-                targets = [(key, files) for s, key, files in scored if s == best]
-            for key, files in targets:
-                for dst in files:
-                    if dst != file:
-                        out.setdefault((file, dst, e.kind), set()).add(key)
+                parts = endpoint.key.split("/")[1:]
+                scored = [(score, refs) for segs, refs in routes if (score := _score(parts, segs)) is not None]
+                best = max((score for score, _ in scored), default=None)
+                targets = [ref for score, refs in scored if score == best for ref in refs]
+            out.extend((file, endpoint, dst, receiver) for dst, receiver in targets if dst != file)
+    return out
+
+
+def link(found: dict[str, list[Endpoint]]) -> dict[tuple[str, str, str], set[str]]:
+    """星图只需要每对文件之间经过的接口路径或频道名。"""
+    out: dict[tuple[str, str, str], set[str]] = {}
+    for src, call, dst, receiver in connections(found):
+        out.setdefault((src, dst, call.kind), set()).add(receiver.key)
     return out
 
 

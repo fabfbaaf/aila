@@ -17,7 +17,7 @@ import type {
   ScreenStatus
 } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
-import type { ProjectAnswer, ProjectDocuments } from '../shared/evidence'
+import type { DocumentSource, ProjectAnswer, ProjectDocuments, ProjectEvidenceQuery } from '../shared/evidence'
 import { tm } from './lang'
 
 // ---------- 代码星图 ----------
@@ -68,13 +68,13 @@ export function setCodeDocuments(aiUrl: string, id: string, linked: string[]): P
   )
 }
 
-export function codeEvidence(aiUrl: string, id: string, query: string): Promise<AiResult<ProjectAnswer>> {
+export function codeEvidence(aiUrl: string, id: string, body: ProjectEvidenceQuery): Promise<AiResult<ProjectAnswer>> {
   return attempt(async () =>
     json<ProjectAnswer>(await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/evidence`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query }),
-      signal: AbortSignal.timeout(90000)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120000)
     }))
   )
 }
@@ -174,6 +174,18 @@ function describeDetail(detail: unknown): string | null {
     return String(detail[0].msg).replace(/^Value error, /, '')
   }
   return null
+}
+
+/** 只检查本机检索结果。 */
+export function searchKnowledge(aiUrl: string, query: string): Promise<AiResult<Omit<DocumentSource, 'id'>[]>> {
+  return attempt(async () =>
+    json<Omit<DocumentSource, 'id'>[]>(await fetch(aiUrl + '/knowledge/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(15000)
+    }))
+  )
 }
 
 export async function listKnowledge(aiUrl: string): Promise<KnowledgeDoc[]> {

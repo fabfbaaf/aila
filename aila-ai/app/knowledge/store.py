@@ -13,6 +13,7 @@ import re
 import sqlite3
 import threading
 import uuid
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -78,6 +79,7 @@ class Hit:
     text: str
     score: float
     sha256: str = ""
+    matches: tuple[str, ...] = ()
 
     @property
     def source(self) -> str:
@@ -169,6 +171,7 @@ class KnowledgeBase:
         if not query:
             return []
         ranks: dict[int, float] = {}
+        matches: dict[int, list[str]] = defaultdict(list)
         best_vector = 0.0
 
         scope_sql = ""
@@ -195,6 +198,7 @@ class KnowledgeBase:
             best_vector = float(scores[order[0]])
             for rank, i in enumerate(order):
                 ranks[ids[i]] = ranks.get(ids[i], 0.0) + 1 / (RRF_K + rank + 1)
+                matches[ids[i]].append("vector")
 
         fts = _fts_query(query)
         keyword_hits = 0
@@ -208,6 +212,7 @@ class KnowledgeBase:
             keyword_hits = len(rows)
             for rank, (cid,) in enumerate(rows):
                 ranks[cid] = ranks.get(cid, 0.0) + 1 / (RRF_K + rank + 1)
+                matches[cid].append("keyword")
 
         if not ranks or (keyword_hits == 0 and best_vector < MIN_VECTOR):
             return []
@@ -223,7 +228,8 @@ class KnowledgeBase:
                     (*[cid for cid, _ in top], *scope_params),
                 )
             }
-        return [Hit(*rows[cid][:-1], round(score, 4), rows[cid][-1]) for cid, score in top if cid in rows]
+        return [Hit(*rows[cid][:-1], round(score, 4), rows[cid][-1], tuple(matches[cid]))
+                for cid, score in top if cid in rows]
 
     def close(self) -> None:
         self._db.close()

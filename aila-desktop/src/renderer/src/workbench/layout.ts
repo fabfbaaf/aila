@@ -1,5 +1,5 @@
 // 星图里不涉及 3D 的部分：颜色、大小、分组和模块的位置、模块的名字、名字防重叠、远近切换、搜索、报错时哪些星球和光线要亮
-import type { CodeGraph, GraphLink, GraphNode, LinkKind, LocatedError } from '../../../shared/workbench'
+import type { CodeGraph, GraphLink, GraphNode, LinkKind, LocatedError, WorkbenchEvidenceFocus } from '../../../shared/workbench'
 
 /** 子项目的颜色：亮、彼此分得开（报错用的红色不在里面） */
 export const PALETTE = ['#5ad1ff', '#b58cff', '#ffd35a', '#5affb4', '#ff8fd1', '#8fa8ff', '#ffa95a', '#7dffef']
@@ -273,6 +273,19 @@ export function highlightFrom(loc: LocatedError, graph: CodeGraph): Highlight {
   const links = new Set(graph.links.filter((l) => lit.has(l.source) && lit.has(l.target)).map(linkKey))
   const first = loc.frames.find((f) => f.file)
   return { error, chain, links, primary: first?.file ? { file: first.file, line: first.line, qname: first.qname } : null }
+}
+
+/** 项目问答定位已有文件和实际检索经过的边。 */
+export function evidenceHighlight(
+  evidence: WorkbenchEvidenceFocus, graph: CodeGraph
+): Highlight {
+  const files = new Set(graph.nodes.map((node) => node.id))
+  const first = evidence.locations.find((at) => files.has(at.file))
+  const chain = new Set(evidence.locations.map((at) => at.file).filter((file) => files.has(file)))
+  const links = new Set(graph.links.filter((link) => chain.has(link.source) && chain.has(link.target)
+    && evidence.edges.some(([a, b]) => (a === link.source && b === link.target) || (b === link.source && a === link.target))
+  ).map(linkKey))
+  return { error: new Set(), chain, links, primary: first ? { ...first, qname: null } : null }
 }
 
 /** 搜文件：名字开头对上的排前面，其次路径短的 */

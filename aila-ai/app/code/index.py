@@ -24,7 +24,7 @@ import numpy as np
 from ..knowledge.store import _fts_query
 from ..memory.embedder import Embedder
 from ..runtime.workspace import Workspace, WorkspaceError
-from .endpoints import Endpoint, is_test, link, scan
+from .endpoints import Endpoint, connections, is_test, link, scan
 from .ignore import clean, ignored
 from .imports import resolve as resolve_imports
 from .imports import scan_imports
@@ -74,6 +74,7 @@ create table if not exists calls (
 create index if not exists calls_callee on calls (callee);
 create index if not exists calls_chunk on calls (chunk_id);
 create virtual table if not exists chunks_fts using fts5 (body, tokenize = 'trigram');
+create virtual table if not exists files_fts using fts5 (path unindexed, body, tokenize = 'trigram');
 create table if not exists meta (key text primary key, value text not null);
 """
 
@@ -216,7 +217,7 @@ class CodeIndex:
     def refreshed_structure(self) -> Iterator[None]:
         """多次读取调用图和位置时，共用一版结构。"""
         with self._refresh_lock:
-            self._refresh(embed=False)
+            self._refresh(embed=False, references=True)
             yield
 
     def embed_missing(self, batch: int = 128) -> int:
@@ -243,15 +244,18 @@ class CodeIndex:
             done += len(rows)
         return done
 
-    def _refresh(self, embed: bool = True) -> RefreshStats:
+    def _refresh(self, embed: bool = True, *, references: bool = False) -> RefreshStats:
         t0 = time.perf_counter()
         files = self.list_files()
         with self._lock:
             known = {r[0]: (r[1], r[2], r[3]) for r in self._db.execute("select path, sha1, mtime, size from files")}
+            indexed = {r[0] for r in self._db.execute("select rowid from files_fts")} if references else set()
+            row_ids = dict(self._db.execute("select path, rowid from files")) if references else {}
 
         todo: list[tuple[str, bytes, str, float, int]] = []
         touched: list[tuple[float, int, str]] = []
         present: set[str] = set()
+        backfill: list[tuple[int, str, str]] = []
         for rel in files:
             path = self._source_path(rel)
             if path is None:
@@ -264,7 +268,8 @@ class CodeIndex:
                 continue
             present.add(rel)
             old = known.get(rel)
-            if old and old[1] == st.st_mtime and old[2] == st.st_size:
+            missing_reference = references and row_ids.get(rel) not in indexed
+            if old and old[1] == st.st_mtime and old[2] == st.st_size and not missing_reference:
                 continue  # 没改过：连读都不用读
             try:
                 data = path.read_bytes()
@@ -272,6 +277,8 @@ class CodeIndex:
                 continue
             sha = hashlib.sha1(data).hexdigest()
             if old and old[0] == sha:
+                if missing_reference:
+                    backfill.append((row_ids[rel], rel, data.decode("utf-8", errors="replace")))
                 touched.append((st.st_mtime, st.st_size, rel))  # 只是保存了一下，内容没变
                 continue
             todo.append((rel, data, sha, st.st_mtime, st.st_size))
@@ -288,10 +295,13 @@ class CodeIndex:
             i = 0
             for rel, data, sha, mtime, size, chunks in parsed:
                 self._drop_file(rel)
-                self._db.execute(
+                file_row = self._db.execute(
                     "insert into files values (?, ?, ?, ?, ?, ?)",
                     (rel, language_of(rel) or "", sha, mtime, size, data.count(b"\n") + 1),
                 )
+                if references:
+                    self._db.execute("insert into files_fts (rowid, path, body) values (?, ?, ?)",
+                                     (file_row.lastrowid, rel, data.decode("utf-8", errors="replace")))
                 for c in chunks:
                     blob = vectors[i].astype(np.float32).tobytes() if vectors is not None else None
                     i += 1
@@ -306,6 +316,7 @@ class CodeIndex:
                         (cur.lastrowid, f"{rel}\n{c.qname}\n{c.signature}\n{c.doc}\n{c.text}"),
                     )
                     self._db.executemany("insert into calls values (?, ?)", [(cur.lastrowid, n) for n in c.calls])
+            self._db.executemany("insert into files_fts (rowid, path, body) values (?, ?, ?)", backfill)
             self._db.executemany("update files set mtime = ?, size = ? where path = ?", touched)
             self._db.execute("insert or replace into meta values ('refreshed_at', ?)", (str(time.time()),))
             if parsed or removed:
@@ -319,12 +330,14 @@ class CodeIndex:
     def _drop_file(self, rel: str) -> None:
         ids = [(r[0],) for r in self._db.execute("select id from chunks where file = ?", (rel,))]
         self._db.executemany("delete from chunks_fts where rowid = ?", ids)
+        self._db.execute("delete from files_fts where rowid in (select rowid from files where path = ?)", (rel,))
         self._db.execute("delete from files where path = ?", (rel,))  # 块和调用关系跟着删（外键级联）
 
     # ---------- 查 ----------
 
     def search(
-        self, query: str, k: int = 6, modes: tuple[str, ...] = ("exact", "keyword", "vector"), drill: str | None = "after"
+        self, query: str, k: int = 6, modes: tuple[str, ...] = ("exact", "keyword", "vector"), drill: str | None = "after",
+        *, matches: dict[int, list[str]] | None = None,
     ) -> list[CodeChunk]:
         """modes、drill 只在评测时改：看每一路单独、合起来、加不加「往文件里细找」各有多准
 
@@ -336,18 +349,20 @@ class CodeIndex:
             return []
         ranks: dict[int, float] = {}
 
-        def add(ids: list[int], weight: float = 1.0) -> None:
+        def add(ids: list[int], method: str, weight: float = 1.0) -> None:
             for rank, cid in enumerate(ids):
                 ranks[cid] = ranks.get(cid, 0.0) + weight / (RRF_K + rank + 1)
+                if matches is not None:
+                    matches.setdefault(cid, []).append(method)
 
         if "exact" in modes:
-            add(self._exact(query), weight=2.0)  # 名字完全对上是很强的信号
+            add(self._exact(query), "exact", weight=2.0)  # 名字完全对上是很强的信号
         if "keyword" in modes and (fts := code_fts_query(query)):
             with self._lock:
                 rows = self._db.execute(
                     "select rowid from chunks_fts where chunks_fts match ? order by bm25(chunks_fts) limit ?", (fts, CANDIDATES)
                 ).fetchall()
-            add([r[0] for r in rows])
+            add([r[0] for r in rows], "keyword")
         qvec = None
         if "vector" in modes or drill:
             embedder = self._get_embedder()
@@ -356,13 +371,16 @@ class CodeIndex:
                 qvec = embedder.embed_query(query)
                 if "vector" in modes:
                     scores = matrix @ qvec
-                    add([ids[i] for i in np.argsort(-scores)[:CANDIDATES]])
+                    add([ids[i] for i in np.argsort(-scores)[:CANDIDATES]], "vector")
 
         top = [cid for cid, _ in sorted(ranks.items(), key=lambda kv: -kv[1])[:k]]
         found = {c.id: c for c in self._chunks_by_id(top)}
         hits = [found[cid] for cid in top if cid in found]
         if drill and qvec is not None:
             hits = self._drill(hits, qvec, before=drill == "before")
+            if matches is not None:
+                for hit in hits:
+                    matches.setdefault(hit.id, ["drill"])
         return hits[:k]
 
     def _drill(self, hits: list[CodeChunk], qvec: np.ndarray, before: bool) -> list[CodeChunk]:
@@ -573,11 +591,11 @@ class CodeIndex:
             key=lambda x: (-x["count"], x["name"]))[:MAX_LIBS]
         return {"nodes": nodes, "links": links, "libs": lib_list}
 
-    def endpoint_links(self) -> dict[tuple[str, str, str], set[str]]:
+    def endpoint_links(self) -> list[tuple[str, Endpoint, str, Endpoint]]:
         """只取 HTTP、IPC 关系，复用星图的静态识别和文件扫描缓存。"""
         with self._lock:
             files = self._db.execute("select path, lang, mtime, size from files order by path").fetchall()
-        return link({f: self._scan_of(f, lang, mtime, size)[0] for f, lang, mtime, size in files})
+        return connections({f: self._scan_of(f, lang, mtime, size)[0] for f, lang, mtime, size in files})
 
     def _source_path(self, rel: str) -> Path | None:
         try:
@@ -628,6 +646,32 @@ class CodeIndex:
             out += nxt
             level = nxt
         return out
+
+    def references(self, identifier: str, *, tests: bool | None = None, limit: int = 6) -> list[tuple[CodeChunk, int]]:
+        """全文定位确切拼写，包含报告被截短时还没进函数块的常量和属性。"""
+        if not re.fullmatch(r"[A-Za-z_]\w{2,79}", identifier):
+            return []
+        with self._lock:
+            paths = [r[0] for r in self._db.execute(
+                "select path from files_fts where files_fts match ? order by path", (f'"{identifier}"',)
+            )]
+        name = re.compile(rf"(?<![\w$]){re.escape(identifier)}(?![\w$])")
+        references: list[tuple[CodeChunk, int]] = []
+        for path in paths:
+            if tests is not None and is_test(path) != tests:
+                continue
+            seen: set[int] = set()
+            for line, text in enumerate(self.indexed_lines(path), 1):
+                if not name.search(text):
+                    continue
+                chunk = self.chunk_at(path, line)
+                if chunk is None or chunk.id in seen:
+                    continue
+                references.append((chunk, line))
+                seen.add(chunk.id)
+                if len(references) >= limit:
+                    return references
+        return references
 
     def indexed_lines(self, file: str) -> list[str]:
         """代码依据用原始行。只有磁盘内容还和本次索引对得上才返回。"""

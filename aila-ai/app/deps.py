@@ -27,6 +27,7 @@ from . import envfile
 from .config import ENV_FILE as CONFIG_ENV_FILE
 from .config import load_settings
 from .confirm import Confirmations
+from .knowledge.rerank import Score, local_reranker
 from .knowledge import KnowledgeBase, knowledge_skill
 from .llm import ChatModel, CoderModel, MockModel, OpenAICompatibleModel
 from .memory.episodes import Digester
@@ -116,10 +117,14 @@ def get_runtime() -> Runtime:
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
                       computer_inventory=settings.computer_inventory, extensions=get_extensions(),
                       memory_store=lambda: get_memory_store(), language=lambda: settings.language,
-                      web_search=search_provider, knowledge=get_knowledge)
+                      web_search=search_provider, knowledge=get_knowledge, reranker=get_reranker)
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     runtime.watchers.append(get_notifier().watch)  # 等你同意、做完了：告诉手机（app/notify.py）
     return runtime
+
+
+def get_reranker() -> Score | None:
+    return local_reranker(settings.rerank_model_dir)
 
 
 def _load(kind: str, build: Any) -> Any:
