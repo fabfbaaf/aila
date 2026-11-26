@@ -44,7 +44,11 @@ export interface PhoneStatus {
   devices: { id: string; name: string; created: number; lastSeen: number }[]
   /** 正在等手机输入的配对码（过期时间是秒级时间戳） */
   pairing: { code: string; expires: number } | null
+  /** 推到手机通知栏：哪家、填没填地址（地址不回显） */
+  push: { kind: PushKind; set: boolean }
 }
+
+export type PushKind = 'none' | 'ntfy' | 'bark' | 'wecom' | 'feishu'
 
 /** 一个项目里「以后都允许」的命令；路径和命令都按原文删除。 */
 export interface AgentRuleGroup {

@@ -5,7 +5,7 @@
  */
 import { t } from '../../i18n'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { AiResult, AndroidStatus, PhoneStatus } from '../../../../shared/settings'
+import type { AiResult, AndroidStatus, PhoneStatus, PushKind } from '../../../../shared/settings'
 import { bridge } from '../../platform/bridge'
 
 const status = ref<PhoneStatus | null>(null)
@@ -22,6 +22,7 @@ const left = computed(() => {
 /** 服务那边回来的状态：放进页面；出错就显示原因 */
 function apply(r: AiResult<PhoneStatus>): void {
   if (r.ok && r.data) {
+    if (!status.value) pushKind.value = r.data.push.kind
     status.value = r.data
     error.value = r.data.error
   } else error.value = r.error ?? t('出错了。')
@@ -51,6 +52,37 @@ async function forget(id: string): Promise<void> {
 
 function when(ts: number): string {
   return ts ? new Date(ts * 1000).toLocaleString() : t('还没连过')
+}
+
+// ---------- 推到手机通知栏 ----------
+
+const PUSH_KINDS: { id: PushKind; name: string; hint: string }[] = [
+  { id: 'none', name: '不推', hint: '' },
+  { id: 'ntfy', name: 'ntfy', hint: 'https://ntfy.sh/你自己起的一个难猜的名字（手机上装 ntfy 订阅同一个名字）' },
+  { id: 'bark', name: 'Bark（iPhone）', hint: 'https://api.day.app/你的 Bark 密钥' },
+  { id: 'wecom', name: '企业微信机器人', hint: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…' },
+  { id: 'feishu', name: '飞书机器人', hint: 'https://open.feishu.cn/open-apis/bot/v2/hook/…' }
+]
+const pushKind = ref<PushKind>('none')
+const pushUrl = ref('')
+const pushMsg = ref('')
+const pushHint = computed(() => PUSH_KINDS.find((k) => k.id === pushKind.value)?.hint ?? '')
+
+async function savePush(): Promise<void> {
+  if (!bridge) return
+  pushMsg.value = ''
+  const r = await bridge.phonePush(pushKind.value, pushUrl.value.trim())
+  if (r.ok && r.data) {
+    status.value = r.data
+    pushUrl.value = ''
+    pushMsg.value = t('存好了。')
+  } else pushMsg.value = r.error ?? t('出错了。')
+}
+
+async function testPush(): Promise<void> {
+  if (!bridge) return
+  const r = await bridge.phonePushTest()
+  pushMsg.value = r.ok ? t('推了一条，看看手机上收到没。') : r.error ?? t('出错了。')
 }
 
 // ---------- 让她操作安卓手机（ADB） ----------
@@ -139,6 +171,26 @@ onBeforeUnmount(() => clearInterval(timer))
           </template>
         </div>
       </template>
+    </div>
+
+    <div class="card">
+      <h3>{{ t('推到手机通知栏') }}</h3>
+      <p class="hint">{{ t('她等你同意、任务做完或出错时，手机上的页面开着会弹一条；页面关着时可以借一个推送服务推到通知栏。推出去的只有任务标题和状态，不带命令和代码。') }}</p>
+      <div class="push-row">
+        <select v-model="pushKind">
+          <option v-for="k in PUSH_KINDS" :key="k.id" :value="k.id">{{ t(k.name) }}</option>
+        </select>
+        <input
+          v-if="pushKind !== 'none'"
+          v-model="pushUrl"
+          type="password"
+          autocomplete="off"
+          :placeholder="status?.push.set && status.push.kind === pushKind ? t('已设置（不显示）。要换就填新的') : t(pushHint)"
+        />
+        <button class="btn" @click="savePush">{{ t('保存') }}</button>
+        <button v-if="status?.push.set" class="btn" @click="testPush">{{ t('推一条试试') }}</button>
+      </div>
+      <p v-if="pushMsg" class="hint" role="status">{{ pushMsg }}</p>
     </div>
 
     <div class="card">
@@ -250,6 +302,17 @@ onBeforeUnmount(() => clearInterval(timer))
 
 .devices .btn {
   margin-left: auto;
+}
+
+.push-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.push-row input {
+  flex: 1;
+  min-width: 220px;
 }
 
 .pick {

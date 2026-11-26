@@ -218,6 +218,8 @@ const api = {
   phoneEnable: (on: boolean): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:enable', on),
   phonePair: (): Promise<AiResult<{ code: string; expires: number; seconds: number }>> => ipcRenderer.invoke('phone:pair'),
   phoneForget: (id: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:forget', id),
+  phonePush: (kind: string, url: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:push', kind, url),
+  phonePushTest: (): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('phone:push-test'),
   /** 「让她操作安卓手机」：状态、开关和选手机、无线调试配对、连接 */
   androidStatus: (): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:status'),
   androidSet: (body: { enabled?: boolean; serial?: string }): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:set', body),

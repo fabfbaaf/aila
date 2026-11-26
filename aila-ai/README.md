@@ -257,6 +257,8 @@ data: {"type": "done"}
   - 配对：设置页拿 6 位配对码（5 分钟有效、输错 5 次作废、一个码配一台），手机换回自己的设备密钥（`data/phone.json` 只存哈希），设置页能删；不加跨域头，页面带 CSP，内容一律 textContent
   - 手机上聊天按桌面端的技能包开关来（桌面端每次聊天都带着，记在 `phone.json`；改开关时也推过来），关掉的技能包手机上也用不了；不带桌面端的记忆列表
   - 局域网里是 http：家里的网络用，公共 Wi-Fi 别开。第一次打开时 Windows 防火墙会问，选专用网络
+  - 手机上同意编程任务的操作（`POST /api/tasks/{id}/confirm`）：改文件、普通命令、网页操作能点；危险命令、读密钥、MCP、本机端口、电脑任务只能在电脑上（`gateway.phone_can_answer`，按命令原文和权限种类由代码判断）；手机上没有「以后都允许」。确认事件发给手机时带 `phone` 字段
+  - 提醒（`app/notify.py`）：Runtime 的事件观察者看到「等你同意」「做完 / 出错 / 停下」时，推给开着的手机页面（`/api/notify` SSE），填了推送地址时再推到通知栏（ntfy、Bark、企业微信、飞书机器人；地址存本机不回显，推出去的只有标题和状态；同一件事 10 秒内不重复）
   - 本机接口：`GET /phone`、`PUT /phone {enabled, skills}`、`POST /phone/pair`、`DELETE /phone/devices/{id}`
 - **她操作安卓手机**（`app/android/`、`tools/android.py`，「安卓手机」技能包）：通过 ADB 操作你的安卓手机。只在 设置 → 手机 里打开「让她操作安卓手机」、选好手机、找得到 adb（`AILA_ADB`、PATH、Android SDK 的常见位置）时才把工具给她（`phone_read / phone_tap / phone_type / phone_swipe / phone_key / phone_open_app`）。
   - 看屏幕：`uiautomator dump` 的界面树 → 带编号的按钮、输入框、可滑区域和屏幕上的文字（`android/ui.py`，纯计算）；按编号点，坐标由代码算，不让大模型报坐标；屏幕清单一分钟就算旧，要重新看

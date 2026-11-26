@@ -206,13 +206,20 @@ export function getPhone(aiUrl: string): Promise<AiResult<PhoneStatus>> {
 }
 
 /** 开关局域网的门，或者告诉它桌面端现在的技能包开关（关掉的手机上也用不了） */
-export function setPhone(aiUrl: string, body: { enabled?: boolean; skills?: Record<string, boolean> }): Promise<AiResult<PhoneStatus>> {
+export function setPhone(
+  aiUrl: string,
+  body: { enabled?: boolean; skills?: Record<string, boolean>; push?: { kind: string; url: string } }
+): Promise<AiResult<PhoneStatus>> {
   return attempt(async () => json<PhoneStatus>(await fetch(`${aiUrl}/phone`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(10000)
   })))
+}
+
+export function testPhonePush(aiUrl: string): Promise<AiResult<{ ok: boolean }>> {
+  return attempt(async () => json(await fetch(`${aiUrl}/phone/push-test`, { method: 'POST', signal: AbortSignal.timeout(15000) })))
 }
 
 export function newPhonePairing(aiUrl: string): Promise<AiResult<{ code: string; expires: number; seconds: number }>> {

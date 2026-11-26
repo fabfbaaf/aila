@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 if TYPE_CHECKING:
+    from .notify import Notifier
     from .phone import PhoneServer, PhoneStore
     from .android import Adb, AndroidSession, AndroidSettings
 
@@ -112,6 +113,7 @@ def get_runtime() -> Runtime:
                       memory_store=lambda: get_memory_store(), language=lambda: settings.language,
                       web_search=search_provider)
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
+    runtime.watchers.append(get_notifier().watch)  # 等你同意、做完了：告诉手机（app/notify.py）
     return runtime
 
 
@@ -397,13 +399,26 @@ def get_phone_server() -> "PhoneServer":
     return PhoneServer(PHONE_PORT, PHONE_HOST)
 
 
+@lru_cache
+def get_notifier() -> "Notifier":
+    """编程任务的通知（手机页面开着时弹一条，填了推送地址时推到通知栏）"""
+    from .notify import Notifier, send_push
+
+    def title_of(sid: str) -> str:
+        session = get_runtime().store.get(sid)
+        return session.title if session else ""
+
+    return Notifier(lambda: get_phone().enabled, lambda: (get_phone().push_kind, get_phone().push_url), title_of,
+                    lambda kind, url, title, text: send_push(http_client, kind, url, title, text))
+
+
 async def apply_phone() -> None:
     """按开关开、关局域网上的门（启动时、设置页拨开关时）"""
     from .phone.gateway import create_gateway, default_answer, default_chat
 
     server = get_phone_server()
     if get_phone().enabled:
-        await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer))
+        await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer, get_notifier()))
     else:
         await server.stop()
 

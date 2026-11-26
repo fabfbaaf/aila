@@ -2,8 +2,9 @@
 
 - 除了手机页面本身和配对，每个请求都要带设备密钥（Authorization: Bearer），对不上一律 401
 - 直接调本机服务里同样的函数（聊天、编程任务的 Runtime），不经过本机接口，所以不碰 LocalOnly
-- 开任务只能在你登记过、做过任务的项目里开（手机不能随便指一个文件夹），权限固定「先问再改」；
-  她要改文件、跑命令时照常在电脑上问你——手机上只显示「等你在电脑上同意」
+- 开任务只能在你登记过、做过任务的项目里开（手机不能随便指一个文件夹），权限固定「先问再改」
+- 编程任务要你同意的操作：改文件、普通命令、网页操作手机上能同意或拒绝（给你看的 diff、命令是代码生成的那份）；
+  危险命令、读可能存着密钥的文件、外部工具（MCP）、电脑任务只能在电脑上点；手机上没有「以后都允许」
 - 聊天里她要确认的操作（比如在电脑的浏览器里打开网页）手机上能回答：那是你在手机上和她说的话
 - 不加跨域头：只有这个门自己发的手机页面能用；页面带 CSP，只认自己的脚本
 """
@@ -12,16 +13,21 @@ import asyncio
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..runtime.permissions import dangerous, mentions_secret
 from ..runtime.runner import Runtime, RuntimeError_
+from ..runtime.session import Event
 from ..sse import with_heartbeat
 from ..i18n import localize_event, localize_summary
 from . import Device, PhoneStore
+
+if TYPE_CHECKING:
+    from ..notify import Notifier
 
 STATIC = Path(__file__).with_name("static")
 SID = re.compile(r"^[\w-]{1,64}$")
@@ -62,21 +68,71 @@ class SayIn(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
 
 
+class TaskConfirmIn(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    approved: bool
+
+
+# 这些只能在电脑上同意：读密钥、外部工具、本机端口
+DESK_ONLY_KINDS = {"secret", "secret_edit", "mcp", "browser_local"}
+
+
+def _call_args(events: list[Event], call_id: str) -> dict[str, Any]:
+    """这次确认对应的工具调用参数（从她那一步的 tool_calls 里找）"""
+    import json
+
+    for e in reversed(events):
+        if e.get("type") == "assistant":
+            for c in e.get("tool_calls") or []:
+                if c.get("id") == call_id:
+                    try:
+                        args = json.loads(c.get("arguments") or "{}")
+                    except ValueError:
+                        return {}
+                    return args if isinstance(args, dict) else {}
+    return {}
+
+
+def phone_can_answer(events: list[Event], confirm: Event) -> bool:
+    """这个确认能不能在手机上回答（危险的、碰密钥的只能在电脑上）"""
+    if events and events[0].get("kind") == "computer":
+        return False  # 电脑任务在你这台电脑上到处动：只在电脑上同意
+    kind = str(confirm.get("kind", ""))
+    if kind in DESK_ONLY_KINDS:
+        return False
+    if kind == "command":
+        command = str(_call_args(events, str(confirm.get("call_id", ""))).get("command", ""))
+        return bool(command.strip()) and not dangerous(command) and not mentions_secret(command)
+    return kind in ("edit", "browser_get", "browser_interact", "browser_external", "memory")
+
+
+def open_confirm(events: list[Event], cid: str) -> Event | None:
+    closed = {e.get("id") for e in events if e.get("type") == "confirm_end"}
+    return next((e for e in reversed(events) if e.get("type") == "confirm" and e.get("id") == cid and cid not in closed), None)
+
+
+def for_phone(events: list[Event], e: Event) -> Event:
+    """发给手机的事件：确认带上「手机上能不能点」"""
+    e = localize_event(e)
+    return {**e, "phone": phone_can_answer(events, e)} if e.get("type") == "confirm" else e
+
+
 Chat = Callable[[list[dict[str, str]]], Awaitable[StreamingResponse]]
 AnswerChat = Callable[[str, bool], bool]
 
 
-def _sse(events: AsyncIterator[dict[str, Any]]) -> StreamingResponse:
+def _sse(events: AsyncIterator[dict[str, Any]], localized: bool = False) -> StreamingResponse:
     import json
 
     async def body() -> AsyncIterator[str]:
         async for event in events:
-            yield f"data: {json.dumps(localize_event(event), ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps(event if localized else localize_event(event), ensure_ascii=False)}\n\n"
 
     return StreamingResponse(with_heartbeat(body()), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
-def create_gateway(store: PhoneStore, runtime: Callable[[], Runtime], chat: Chat, answer_chat: AnswerChat) -> FastAPI:
+def create_gateway(store: PhoneStore, runtime: Callable[[], Runtime], chat: Chat, answer_chat: AnswerChat,
+                   notifier: "Notifier | None" = None) -> FastAPI:
     app = FastAPI(title="艾拉 · 手机", docs_url=None, redoc_url=None, openapi_url=None)
 
     def device(authorization: str = Header(default="")) -> Device:
@@ -126,6 +182,13 @@ def create_gateway(store: PhoneStore, runtime: Callable[[], Runtime], chat: Chat
             raise HTTPException(404, "这个确认已经结束了。")
         return {"ok": True}
 
+    @app.get("/api/notify")
+    async def notify(_: Device = Depends(device)) -> StreamingResponse:
+        """手机页面开着时收提醒：她等你同意、做完了、出错了"""
+        if notifier is None:
+            raise HTTPException(404, "没有提醒。")
+        return _sse(notifier.follow(), localized=True)
+
     @app.get("/api/projects")
     async def projects(_: Device = Depends(device)) -> list[dict[str, str]]:
         return [{"name": name, "path": path} for name, path in runtime().find_project("")]
@@ -143,16 +206,37 @@ def create_gateway(store: PhoneStore, runtime: Callable[[], Runtime], chat: Chat
         except RuntimeError_ as err:
             raise HTTPException(404, str(err)) from err
         return {**localize_summary(session.summary()), "running": rt.running(sid),
-                "events": [localize_event(e) for e in session.events]}
+                "events": [for_phone(session.events, e) for e in session.events]}
 
     @app.get("/api/tasks/{sid}/events")
     async def task_events(after: int = -1, sid: str = Depends(session_id), _: Device = Depends(device)) -> StreamingResponse:
         rt = runtime()
         try:
-            rt.agent(sid)
+            session = rt.agent(sid).session
         except RuntimeError_ as err:
             raise HTTPException(404, str(err)) from err
-        return _sse(rt.subscribe(sid, after))
+
+        async def annotated() -> AsyncIterator[dict[str, Any]]:
+            async for e in rt.subscribe(sid, after):
+                yield for_phone(session.events, e)
+
+        return _sse(annotated(), localized=True)
+
+    @app.post("/api/tasks/{sid}/confirm")
+    async def task_confirm(req: TaskConfirmIn, sid: str = Depends(session_id), _: Device = Depends(device)) -> dict[str, bool]:
+        rt = runtime()
+        try:
+            events = rt.agent(sid).session.events
+        except RuntimeError_ as err:
+            raise HTTPException(404, str(err)) from err
+        confirm = open_confirm(events, req.id)
+        if confirm is None:
+            raise HTTPException(404, "这个确认已经结束了。")
+        if not phone_can_answer(events, confirm):
+            raise HTTPException(403, "这个操作要在电脑上同意。")
+        if not rt.confirms.answer(req.id, req.approved, False):  # 手机上没有「以后都允许」
+            raise HTTPException(404, "这个确认已经结束了。")
+        return {"ok": True}
 
     @app.post("/api/tasks", status_code=201)
     async def new_task(req: TaskIn, _: Device = Depends(device)) -> dict[str, Any]:

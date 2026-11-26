@@ -179,5 +179,17 @@ export const EN11: Record<string, string> = {
   "手机上：设置 → 开发者选项 → 无线调试 → 使用配对码配对设备，把显示的 IP:端口 和配对码填这里。": "On the phone: Settings → Developer options → Wireless debugging → Pair device with pairing code, then enter the IP:port and code shown.",
   "配对": "Pair",
   "配对成功后，填「无线调试」页面最上面的 IP:端口 连接。": "Once paired, enter the IP:port at the top of the Wireless debugging page to connect.",
-  "连接": "Connect"
+  "连接": "Connect",
+  // 推到手机通知栏
+  "存好了。": "Saved.",
+  "推了一条，看看手机上收到没。": "Sent one. Check whether your phone got it.",
+  "推到手机通知栏": "Push to the phone's notification bar",
+  "她等你同意、任务做完或出错时，手机上的页面开着会弹一条；页面关着时可以借一个推送服务推到通知栏。推出去的只有任务标题和状态，不带命令和代码。": "When she's waiting for your OK, or a task finishes or fails, the phone page shows a banner if it's open; when it's closed, a push service can deliver it to the notification bar. Pushes carry only the task title and status, never commands or code.",
+  "推一条试试": "Send a test push",
+  "不推": "Don't push",
+  "Bark（iPhone）": "Bark (iPhone)",
+  "企业微信机器人": "WeCom bot",
+  "飞书机器人": "Feishu bot",
+  "https://ntfy.sh/你自己起的一个难猜的名字（手机上装 ntfy 订阅同一个名字）": "https://ntfy.sh/a-hard-to-guess-name-you-pick (subscribe to the same name in the ntfy app)",
+  "https://api.day.app/你的 Bark 密钥": "https://api.day.app/your-Bark-key"
 }

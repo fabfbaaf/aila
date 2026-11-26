@@ -41,6 +41,7 @@ import {
   getPhone,
   setPhone,
   newPhonePairing,
+  testPhonePush,
   forgetPhone,
   getAndroid,
   setAndroid,
@@ -1377,6 +1378,13 @@ function registerIpc(): void {
       : MAIN_ONLY
   )
   ipcMain.handle('phone:pair', (e) => (fromMainWindow(e) ? newPhonePairing(AI_URL) : MAIN_ONLY))
+  // 推到手机通知栏：哪家、地址（地址只往 AI 服务那边存，不回显）
+  ipcMain.handle('phone:push', (e, kind: unknown, url: unknown) =>
+    fromMainWindow(e) && typeof kind === 'string' && /^(none|ntfy|bark|wecom|feishu)$/.test(kind) && typeof url === 'string' && url.length <= 2000
+      ? setPhone(AI_URL, { push: { kind, url } })
+      : MAIN_ONLY
+  )
+  ipcMain.handle('phone:push-test', (e) => (fromMainWindow(e) ? testPhonePush(AI_URL) : MAIN_ONLY))
   // 「让她操作安卓手机」：开关、选手机、无线调试配对和连接。只认主窗口，参数在这里先检查一遍
   const adbAddress = (v: unknown): v is string => typeof v === 'string' && /^[\w.-]{1,253}:\d{1,5}$/.test(v)
   ipcMain.handle('android:status', (e) => (fromMainWindow(e) ? getAndroid(AI_URL) : MAIN_ONLY))
