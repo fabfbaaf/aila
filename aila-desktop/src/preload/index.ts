@@ -222,6 +222,9 @@ const api = {
   phoneForget: (id: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:forget', id),
   phonePush: (kind: string, url: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:push', kind, url),
   phonePushTest: (): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('phone:push-test'),
+  /** 日历和邮件：设置页「试试连得上吗」 */
+  agendaTest: (what: 'calendar' | 'mail'): Promise<AiResult<{ ok: boolean; count: number; unread?: number }>> =>
+    ipcRenderer.invoke('agenda:test', what),
   /** 定时任务（设置 → 编程） */
   schedulesList: (): Promise<AiResult<{ items: ScheduleItem[]; projects: { name: string; path: string }[] }>> =>
     ipcRenderer.invoke('schedules:list'),

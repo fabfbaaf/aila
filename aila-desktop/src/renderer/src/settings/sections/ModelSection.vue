@@ -3,6 +3,7 @@ import { t } from '../../i18n'
 import { onActivated, ref } from 'vue'
 import type { AiSettings, AiSettingsUpdate } from '../../../../shared/settings'
 import { bridge } from '../../platform/bridge'
+import AgendaCard from './AgendaCard.vue'
 
 const api = bridge!
 const settings = ref<AiSettings | null>(null)
@@ -178,5 +179,7 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
         <span v-if="searchMsg" class="msg" :class="searchMsg.ok ? 'ok' : 'error'">{{ searchMsg.text }}</span>
       </div>
     </div>
+
+    <AgendaCard />
   </template>
 </template>

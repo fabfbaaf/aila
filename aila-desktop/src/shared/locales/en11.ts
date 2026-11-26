@@ -221,5 +221,21 @@ export const EN11: Record<string, string> = {
   "先跑项目的测试，没过才让她做（测试命令按项目自动识别）": "Run the project's tests first and only start her if they fail (test commands are detected from the project)",
   "只读：只看、只报告": "Read-only: just look and report",
   "先问再改：在新分支上改，要改时问你（手机上能点）": "Ask first: changes on a new branch, asks you before changing (you can approve from the phone)",
-  "工作区内自动：在新分支上改，不问（危险命令还是问）": "Auto in workspace: changes on a new branch without asking (dangerous commands still ask)"
+  "工作区内自动：在新分支上改，不问（危险命令还是问）": "Auto in workspace: changes on a new branch without asking (dangerous commands still ask)",
+  // 日历和邮件
+  "全天": "All day",
+  "{n} 分钟后：{title}（{time}）": "In {n} min: {title} ({time})",
+  "一共 {n} 个会": "{n} meetings in all",
+  "连上了：接下来 7 天日历上有 {n} 件事。": "Connected: {n} events in the next 7 days.",
+  "连上了：最近 7 天收件箱 {n} 封，没读的 {u} 封（没有标成已读）。": "Connected: {n} emails in the last 7 days, {u} unread (nothing was marked as read).",
+  "日历和邮件": "Calendar and mail",
+  "填好以后她能看你的日程和收件箱：早上说今天有什么会、会前 10 分钟提醒你，问她「邮箱里有什么要回的」也行。只读，不发信、不改日程、不会把信标成已读。": "Once set up she can see your schedule and inbox: she mentions today's meetings in the morning, reminds you 10 minutes before each, and you can ask \"anything in my inbox I need to reply to?\". Read-only: she never sends mail, changes your calendar, or marks mail as read.",
+  "日历订阅链接": "Calendar subscription link",
+  "webcal:// 或 https:// 开头的 ICS 链接": "An ICS link starting with webcal:// or https://",
+  "试试": "Test",
+  "QQ 邮箱 / 163：网页版邮箱打开日历 → 日历设置，找「订阅」「iCal / ICS 链接」，复制那条链接。链接本身就能看你的日程，别发给别人。": "QQ Mail / 163: open the calendar in web mail → calendar settings, find \"Subscribe\" or the \"iCal / ICS link\" and copy it. Anyone with the link can see your schedule, so don't share it.",
+  "授权码": "Authorization code",
+  "不是登录密码": "Not your login password",
+  "授权码在网页版邮箱：设置 → 账户（QQ 邮箱）或 设置 → POP3/SMTP/IMAP（163），打开 IMAP 服务后生成。QQ、163、126、foxmail 自动认服务器；别的邮箱在下面填 IMAP 服务器。": "Get the authorization code in web mail: Settings → Account (QQ Mail) or Settings → POP3/SMTP/IMAP (163); turn on IMAP, then generate it. QQ, 163, 126 and Foxmail servers are detected automatically; for others enter the IMAP server below.",
+  "IMAP 服务器（可不填）": "IMAP server (optional)"
 }

@@ -2,7 +2,8 @@
  * 「她知道你在忙什么」：每天第一次见面时说说昨天做了什么、今天有什么；晚上（可选）说说今天的日报。
  *
  * 材料都在本机：编程任务的会话（AI 服务的 /agent/sessions：标题、什么时候动过、在不在分支上、用量）、
- * 她记得的日程（记忆里 kind = event、今天到期的）、记下的提醒、今天聊了几句。不调大模型，话由这里拼出来：
+ * 她记得的日程（记忆里 kind = event、今天到期的）、你日历上今天的会（填了订阅链接的话）、记下的提醒、今天聊了几句。
+ * 不调大模型，话由这里拼出来：
  * 快、不花钱、说的数字都是真的。
  *
  * 只是纯函数（时间从外面传进来），什么时候说由 desktopKeeper 决定。
@@ -11,6 +12,7 @@
 import type { AgentSessionSummary } from '../shared/agent'
 import type { StoredMemory, StoredMessage } from '../shared/cloud'
 import type { Reminder } from '../shared/desktop'
+import type { AgendaEvent } from '../shared/settings'
 import { occasionLine, type Work } from '../shared/studio'
 import { mainLang, tm } from './lang'
 
@@ -31,6 +33,21 @@ export interface BriefingInput {
   works?: Work[]
   /** 今天是不是特别的日子（认识第 N 天、节日） */
   occasion?: string
+  /** 你日历上今天的安排（填了订阅链接才有） */
+  meetings?: AgendaEvent[]
+}
+
+/** 日历上一件事的时间：全天的写「全天」，别的写 10:00 */
+function clock(e: AgendaEvent): string {
+  if (e.allDay) return tm('全天')
+  const d = new Date(e.start)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** 会前提醒那一句：「8 分钟后：周会（10:00）」 */
+export function meetingReminder(e: AgendaEvent, now: Date): string {
+  const minutes = Math.max(1, Math.round((new Date(e.start).getTime() - now.getTime()) / 60_000))
+  return tm('{n} 分钟后：{title}（{time}）', { n: minutes, title: e.title, time: clock(e) })
 }
 
 /** 她做作品用的会话（工作目录是 …/works/<作品 id>）：不算你的任务 */
@@ -125,7 +142,12 @@ export function morningBriefing(input: BriefingInput, withGreeting = true): { te
 
   const events = todaysEvents(input.memories, now)
   const reminders = input.reminders.filter((r) => workday(new Date(r.at)) === today)
+  // 日历上今天还没过的会：说前两个，多的说个数
+  const meetings = (input.meetings ?? []).filter((e) => e.allDay || new Date(e.end) > now)
+  const meetingBits = meetings.slice(0, 2).map((e) => `${clock(e)} ${e.title}`)
+  if (meetings.length > 2) meetingBits.push(tm('一共 {n} 个会', { n: meetings.length }))
   const todayBits = [
+    ...meetingBits,
     ...events.slice(0, 2).map((m) => asYou(m.content)),
     ...(reminders.length ? [tm('{n} 个提醒', { n: reminders.length })] : [])
   ]

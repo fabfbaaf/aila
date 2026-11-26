@@ -18,6 +18,8 @@ import httpx
 if TYPE_CHECKING:
     from .notify import Notifier
     from .runtime.schedules import Scheduler, ScheduleStore
+    from .agenda import Calendar
+    from .tools.agenda import MeetingWatcher
     from .phone import PhoneServer, PhoneStore
     from .android import Adb, AndroidSession, AndroidSettings
 
@@ -48,6 +50,7 @@ from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
+from .tools.agenda import calendar_skill, mail_skill
 from .tools.android import android_skill
 from .tools.guide import guide_skill
 from .tools.schedule import schedule_skill
@@ -267,6 +270,7 @@ def get_registry() -> SkillRegistry:
         guide_skill(lambda: get_runtime()),
         android_skill(lambda: get_android_session(), android_ready),
         schedule_skill(lambda: get_schedules(), lambda: get_runtime().find_project("")),
+        calendar_skill(lambda: get_calendar()), mail_skill(lambda c, u, d: read_mail(c, u, d), lambda: mail_ready()),
     ])
     for skill in _mcp_skills:
         registry.add(skill)
@@ -301,6 +305,8 @@ def apply(updates: dict[str, str]) -> list[str]:
     if any(k in updates for k in SEARCH_KEYS):
         get_registry.cache_clear()
         reloaded.append("search")
+    if any(k.startswith(("AILA_CALENDAR", "AILA_MAIL")) for k in updates):
+        reloaded.append("agenda")  # 日历、邮件每次现取设置（get_calendar 按链接换），不用别的
     # 语音模型重新加载要几秒，放到后台；加载好之前还用旧的，新连接用新的
     if any(k in updates for k in TTS_KEYS):
         with _voice_lock:
@@ -491,3 +497,41 @@ def get_scheduler() -> "Scheduler":
         return session, result
 
     return Scheduler(get_schedules(), run_once)
+
+
+# ---------- 日历和邮件（只读，app/agenda.py、app/mail.py） ----------
+
+_calendar: "Calendar | None" = None
+
+
+def get_calendar() -> "Calendar | None":
+    """填了订阅链接就有；换了链接就换一个（缓存跟着链接走）"""
+    global _calendar
+    url = settings.calendar_url
+    if not url:
+        _calendar = None
+        return None
+    if _calendar is None or _calendar.url != url.replace("webcal://", "https://", 1):
+        from .agenda import Calendar
+
+        _calendar = Calendar(url, http_client)
+    return _calendar
+
+
+def mail_ready() -> bool:
+    return bool(settings.mail_user and settings.mail_pass)
+
+
+def read_mail(count: int = 10, unread_only: bool = False, days: int = 7) -> list:  # type: ignore[type-arg]
+    from .mail import recent
+
+    return recent(settings.mail_user, settings.mail_pass, settings.mail_host, count, unread_only, days)
+
+
+@lru_cache
+def get_meetings() -> "MeetingWatcher":
+    """会前 10 分钟提醒到手机（开了「允许手机连接」才提醒；推出去的不带会议标题）"""
+    from .tools.agenda import MeetingWatcher
+
+    return MeetingWatcher(get_calendar, lambda kind, sid, text, push: get_notifier().notice(kind, sid, text, push),
+                          lambda: get_phone().enabled)

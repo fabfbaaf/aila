@@ -179,6 +179,8 @@ export interface AiSettings {
   llm: { baseUrl: string; model: string; apiKeySet: boolean; coderModel?: string; coderFastModel?: string }
   search: { provider: 'bocha' | 'tavily' | 'none'; apiKeySet: boolean }
   computer: { inventory: boolean }
+  /** 日历和邮件（只读）：订阅链接、授权码不回显，只说填了没有（旧服务没有） */
+  agenda?: { calendarSet: boolean; mailUser: string; mailPassSet: boolean; mailHost: string }
   /** 性格：说话风格、怎么称呼你、口头禅（旧服务没有） */
   persona?: { style: PersonaStyle; call: string; catchphrase: string }
   voice: {
@@ -219,6 +221,21 @@ export interface AiSettingsUpdate {
   wakeThreshold?: number
   endSilence?: number
   asrLanguage?: 'zh' | 'auto'
+  /** 日历订阅链接、邮箱、授权码、IMAP 服务器（空字符串 = 清掉） */
+  calendarUrl?: string
+  mailUser?: string
+  mailPass?: string
+  mailHost?: string
+}
+
+/** 日历上的一件事（aila-ai/app/agenda.py），时间是带时区的 ISO 字符串 */
+export interface AgendaEvent {
+  uid: string
+  title: string
+  start: string
+  end: string
+  allDay: boolean
+  location: string
 }
 
 export interface AiResult<T> {

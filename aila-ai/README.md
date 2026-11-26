@@ -420,6 +420,11 @@ data: {"type": "done"}
   - 同一步里派几个时一起跑（最多 4 个），结果按调用顺序记进日志；打断时一起停，子会话也记成被打断
   - 子 Agent 自己的系统提示词、工具列表也固定，开头放主会话同一份环境说明：同一个项目派出去的助手之间互相命中缓存
   - 用量记在主会话里（`usage` 事件带 `purpose: "explore"`）：算进总数，但不算主 Agent 的一步，也不影响要不要压缩
+- **日历和邮件**（`app/agenda.py`、`app/mail.py`、`tools/agenda.py` 的「日历」「邮件」两个技能包、`routes/agenda.py`），都只读：
+  - 日历：订阅链接（`AILA_CALENDAR_URL`，ICS，webcal 换成 https），15 分钟最多取一次；自己解析 VEVENT（折行、转义、TZID / UTC / 全天、DURATION），重复的用 `dateutil.rrule` 展开（UNTIL 没写时区的先换成 UTC），排除 EXDATE、改期的（RECURRENCE-ID）用改过的、取消的不算
+  - 邮件：IMAP（`AILA_MAIL_USER` / `AILA_MAIL_PASS` 授权码 / 可选 `AILA_MAIL_HOST`），收件箱只读打开、`BODY.PEEK` 取信（不标已读），163 这几家先发 IMAP ID；每封最多 64KB、正文给她 1500 字；信的内容当外部数据
+  - 用在：对话里问日程、看收件箱；桌面端早上的问候（`GET /agenda/today`）、会前 10 分钟冒泡（`GET /agenda/upcoming`）；手机那边会前提醒（`MeetingWatcher`，推到通知栏的不带会议标题）
+  - 设置页「试试」：`POST /agenda/test-calendar`、`POST /agenda/test-mail`；链接和授权码不回显
 - **定时任务**（`runtime/schedules.py`、`routes/schedules.py`、对话里的「定时任务」技能包 `tools/schedule.py`）：每天几点（可选星期几）或每隔几小时，在登记过、做过任务的项目里开一个任务；`action=tests` 时先跑项目自带的测试（`code.fix.detect_tests`，和合并分支时一样，不由大模型决定），过了只提醒一声，没过才开任务并带上测试输出（标明只是数据）。权限默认只读；`ask` / `auto` 一定 `isolate`（新分支）。后台每 30 秒看一眼（`Scheduler`），下次时间由 `next_run` 算（纯计算）；关机错过的下次启动补跑一次，不攒；同一个不会同时跑两份。对话里设要你确认（`risk="write"`，确认内容由代码拼）。存在 `data/schedules.json`；接口 `GET/POST /agent/schedules`、`PUT/DELETE /agent/schedules/{id}`、`POST /agent/schedules/{id}/run`
 - **多智能体**（`runtime/workers.py`，`delegate` / `merge_work` / `discard_work` 工具）：大任务能拆成几块改的文件不重叠的活时，她在同一步里派几个子 Agent 一起做。
   - 每个子 Agent 在自己的 git 分支里改（`branch.py` 的 worktree 临时目录，带着你没提交的改动），你的代码一个字都不动；用「编程用的模型」，有自己的系统提示词和会话日志（`data/sessions/<id>.sub/`）

@@ -45,6 +45,9 @@ import {
   forgetPhone,
   getAndroid,
   setAndroid,
+  getAgendaToday,
+  getAgendaUpcoming,
+  testAgenda,
   listSchedules,
   addSchedule,
   changeSchedule,
@@ -1390,6 +1393,10 @@ function registerIpc(): void {
       : MAIN_ONLY
   )
   ipcMain.handle('phone:push-test', (e) => (fromMainWindow(e) ? testPhonePush(AI_URL) : MAIN_ONLY))
+  // 日历和邮件：设置页的「试试」（只认主窗口）
+  ipcMain.handle('agenda:test', (e, what: unknown) =>
+    fromMainWindow(e) && (what === 'calendar' || what === 'mail') ? testAgenda(AI_URL, what) : MAIN_ONLY
+  )
   // 定时任务（设置 → 编程）：只认主窗口；内容 AI 服务那边再检查一遍（项目只认登记过的、时间格式、权限）
   const scheduleId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{1,16}$/.test(v)
   const scheduleBody = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && JSON.stringify(v).length < 10000
@@ -1655,7 +1662,14 @@ app.whenReady().then(() => {
     gather: async () => {
       const r = await agentRelay.list()
       if (!r.ok || !r.data) return null
-      return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [] }
+      // 日历上今天的会（没填订阅链接、取不到就当没有）
+      const agenda = await getAgendaToday(AI_URL)
+      const meetings = agenda.ok && agenda.data ? agenda.data.events : []
+      return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [], meetings }
+    },
+    upcomingMeetings: async () => {
+      const r = await getAgendaUpcoming(AI_URL, 10)
+      return r.ok && r.data ? r.data.events : []
     },
     pollDiscoveries: async () => {
       const result = await discoveries.poll(AI_URL)

@@ -3,6 +3,7 @@ import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
 import type {
+  AgendaEvent,
   AgentRuleGroup,
   AiResult,
   AiSettings,
@@ -243,6 +244,23 @@ export function forgetPhone(aiUrl: string, id: string): Promise<AiResult<PhoneSt
     method: 'DELETE',
     signal: AbortSignal.timeout(5000)
   })))
+}
+
+// ---------- 日历和邮件（只读） ----------
+
+type AgendaList = { configured: boolean; events: AgendaEvent[]; error: string }
+
+export function getAgendaToday(aiUrl: string): Promise<AiResult<AgendaList>> {
+  return attempt(async () => json<AgendaList>(await fetch(`${aiUrl}/agenda/today`, { signal: AbortSignal.timeout(20000) })))
+}
+
+/** 接下来几分钟内开始的会（会前提醒） */
+export function getAgendaUpcoming(aiUrl: string, minutes = 10): Promise<AiResult<AgendaList>> {
+  return attempt(async () => json<AgendaList>(await fetch(`${aiUrl}/agenda/upcoming?minutes=${minutes}`, { signal: AbortSignal.timeout(20000) })))
+}
+
+export function testAgenda(aiUrl: string, what: 'calendar' | 'mail'): Promise<AiResult<{ ok: boolean; count: number; unread?: number }>> {
+  return attempt(async () => json(await fetch(`${aiUrl}/agenda/test-${what}`, { method: 'POST', signal: AbortSignal.timeout(40000) })))
 }
 
 // ---------- 定时任务（设置 → 编程） ----------
