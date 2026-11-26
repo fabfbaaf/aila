@@ -154,7 +154,7 @@ onBeforeUnmount(() => clearInterval(timer))
         <span>{{ t('允许手机连接') }}</span>
       </label>
       <p class="hint">{{ t('打开后在局域网上开一个端口（{port}）。局域网里是 http：家里的网络用，公共 Wi-Fi 别开。第一次打开时 Windows 可能问要不要允许它通过防火墙，选「专用网络」。', { port: status?.port ?? 8780 }) }}</p>
-      <p class="hint">{{ t('手机上能聊天、看任务、开任务（只能在登记过的项目里，固定「先问再改」）。她要改文件、跑命令时，还是要你在电脑上点同意。') }}</p>
+      <p class="hint">{{ t('手机上能聊天、看任务、开任务（只能在登记过的项目里，固定「先问再改」）。她要改文件、跑普通命令时手机上就能点同意；危险命令、碰密钥的还是要在电脑上点。') }}</p>
       <p v-if="error" class="msg error" role="alert">{{ error }}</p>
 
       <template v-if="status?.running">
@@ -216,7 +216,7 @@ onBeforeUnmount(() => clearInterval(timer))
       <template v-else-if="android">
         <label class="toggle">
           <input type="checkbox" :checked="android.enabled" :disabled="androidBusy" @change="setAndroid({ enabled: ($event.target as HTMLInputElement).checked })" />
-          <span>{{ t('让她操作安卓手机') }}</span>
+          <span>{{ t('打开') }}</span>
         </label>
         <p class="hint">{{ t('手机上先打开「开发者选项 → USB 调试」用线连上；或者打开「无线调试」，在下面配对、连接。') }}</p>
         <ul class="devices">
