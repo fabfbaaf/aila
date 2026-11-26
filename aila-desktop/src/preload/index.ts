@@ -1,3 +1,4 @@
+import type { ProjectAnswer, ProjectDocuments } from '../shared/evidence'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
@@ -294,6 +295,9 @@ const api = {
   studioShow: (id?: string): void => ipcRenderer.send('studio:show', id),
 
   // 代码库
+  codeDocuments: (id: string): Promise<AiResult<ProjectDocuments>> => ipcRenderer.invoke('code:documents', id),
+  codeSetDocuments: (id: string, linked: string[]): Promise<AiResult<ProjectDocuments>> => ipcRenderer.invoke('code:set-documents', id, linked),
+  codeEvidence: (id: string, query: string): Promise<AiResult<ProjectAnswer>> => ipcRenderer.invoke('code:evidence', id, query),
   codeList: (): Promise<AiResult<CodeProject[]>> => ipcRenderer.invoke('code:list'),
   codeFixes: (): Promise<AiResult<FixStats>> => ipcRenderer.invoke('code:fixes'),
   /** 弹出选文件夹的对话框；取消了返回 null */

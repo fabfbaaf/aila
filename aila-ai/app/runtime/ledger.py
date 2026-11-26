@@ -33,6 +33,7 @@ TOOL_LABELS = {
     "code_search": "按意思搜",
     "code_locate": "按报错定位",
     "code_symbol": "调用关系",
+    "project_evidence": "查项目资料和代码依据",
     "explore": "助手的报告",
     "job_output": "后台任务的输出",
     "job_stop": "后台任务的输出",

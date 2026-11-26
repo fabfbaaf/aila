@@ -126,6 +126,24 @@ describe('任务页网页截图', () => {
   })
 })
 
+it('项目依据随工具结果进入任务卡片，展开后可核对出处', async () => {
+  const evidence = [
+    { id: 'd1', document: '规格.md', heading: '刷新', page: null, version: '18dc01233211', text: '每两小时检查' },
+    { id: 'c1', file: 'poll.py', symbol: 'tick', start: 6, end: 7, depth: 0, text: 'INTERVAL = 6 * 3600',
+      from_id: null, relation: null, via: null }
+  ]
+  event('s1', { type: 'tool', seq: 2, id: 'p1', name: 'project_evidence', status: 'ok', content: '检索结果', evidence })
+  await settle()
+  const header = byClass(root, 'head')
+  expect(viewText(header)).toContain('2 条项目依据')
+  header.props.onClick()
+  await settle()
+  const sources = all(root, (item) => item.tag === 'details')
+  expect(sources.map(viewText).join(' ')).toContain('规格.md · 刷新')
+  expect(sources.map(viewText).join(' ')).toContain('poll.py:6–7')
+  expect(sources.map(viewText).join(' ')).toContain('INTERVAL = 6 * 3600')
+})
+
 describe('任务页预算', () => {
   it('保存先返回较大 seq 时补齐日志，晚到的流不会丢掉工具、用量或结束记录', async () => {
     const budget: AgentBudgetEvent = { type: 'budget', seq: 6, t: 3, amount: 0.02 }

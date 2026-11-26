@@ -17,6 +17,7 @@ import type {
   ScreenStatus
 } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
+import type { ProjectAnswer, ProjectDocuments } from '../shared/evidence'
 import { tm } from './lang'
 
 // ---------- 代码星图 ----------
@@ -52,6 +53,31 @@ export function codeLocateAll(aiUrl: string, text: string): Promise<AiResult<Loc
 }
 
 // ---------- 代码库 ----------
+
+export const codeDocuments = (aiUrl: string, id: string): Promise<AiResult<ProjectDocuments>> =>
+  codeGet<ProjectDocuments>(aiUrl, `/code/projects/${encodeURIComponent(id)}/documents`)
+
+export function setCodeDocuments(aiUrl: string, id: string, linked: string[]): Promise<AiResult<ProjectDocuments>> {
+  return attempt(async () =>
+    json<ProjectDocuments>(await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/documents`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ linked }),
+      signal: AbortSignal.timeout(10000)
+    }))
+  )
+}
+
+export function codeEvidence(aiUrl: string, id: string, query: string): Promise<AiResult<ProjectAnswer>> {
+  return attempt(async () =>
+    json<ProjectAnswer>(await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/evidence`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(90000)
+    }))
+  )
+}
 
 export function listCodeProjects(aiUrl: string): Promise<AiResult<CodeProject[]>> {
   return attempt(async () => json<CodeProject[]>(await fetch(`${aiUrl}/code/projects`, { signal: AbortSignal.timeout(5000) })))

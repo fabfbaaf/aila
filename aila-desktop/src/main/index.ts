@@ -20,11 +20,14 @@ import {
   addCodeProject,
   addKnowledge,
   codeChunk,
+  codeDocuments,
+  codeEvidence,
   codeGraph,
   codeLocateAll,
   codeOutline,
   codeProjectAction,
   setCodeIgnore,
+  setCodeDocuments,
   deleteKnowledge,
   forgetEpisodes,
   listEpisodes,
@@ -1079,6 +1082,15 @@ function registerIpc(): void {
 
   // 代码库：选文件夹由主进程弹窗，渲染层不能指定任意路径
   ipcMain.handle('code:list', () => listCodeProjects(AI_URL))
+  ipcMain.handle('code:documents', (e, id: string) =>
+    fromMainWindow(e) ? codeDocuments(AI_URL, String(id)) : MAIN_ONLY)
+  ipcMain.handle('code:set-documents', (e, id: string, linked: unknown) =>
+    fromMainWindow(e) && Array.isArray(linked) && linked.length <= 1000
+      && linked.every((doc) => typeof doc === 'string' && /^[0-9a-f]{32}$/.test(doc))
+      ? setCodeDocuments(AI_URL, String(id), linked) : MAIN_ONLY)
+  ipcMain.handle('code:evidence', (e, id: string, query: unknown) =>
+    fromMainWindow(e) && typeof query === 'string' && query.length <= 2000
+      ? codeEvidence(AI_URL, String(id), query) : MAIN_ONLY)
   ipcMain.handle('code:fixes', () => getFixStats(AI_URL))
   ipcMain.handle('code:add', async (e) => {
     if (!fromMainWindow(e)) return null

@@ -385,9 +385,9 @@ async def connect(prefer: str = "auto") -> Backend:
 
 
 def _local_runtime() -> Runtime:
-    from ..deps import get_code_projects, get_coder_fast_model, get_coder_model, settings
+    from ..deps import get_code_projects, get_coder_fast_model, get_coder_model, get_knowledge, settings
     from ..runtime.loop import AgentConfig
 
     config = AgentConfig(max_steps=settings.coder_max_steps, context_window=settings.coder_context)
-    return Runtime(settings.data_dir, get_coder_model, config=config, code_projects=get_code_projects,
+    return Runtime(settings.data_dir, get_coder_model, config=config, code_projects=get_code_projects, knowledge=get_knowledge,
                    fast_factory=get_coder_fast_model, computer_inventory=settings.computer_inventory)

@@ -19,11 +19,13 @@ from ..code.fix import FixError, git
 from ..computer import build_computer_context, computer_shell
 from ..config import ENV_FILE
 from ..confirm import Confirmations
+from ..knowledge import KnowledgeBase
 from ..llm import CoderModel
 from .branch import BranchError, BranchInfo, open_branch
 from .branch import discard as discard_branch
 from .branch import merge as merge_branch
 from .codetools import CodeAccess
+from .evidencetool import project_evidence_tool
 from ..extensions import ExtensionStore, skills_context
 from .commands import Command, load_commands, match
 from .skilltool import read_skill_tool
@@ -89,6 +91,7 @@ class Runtime:
         memory_store: "Callable[[], MemoryStore] | None" = None,
         language: Callable[[], str] = lambda: "zh",
         web_search: Callable[[], SearchProvider | None] | None = None,
+        knowledge: Callable[[], KnowledgeBase] | None = None,
     ) -> None:
         # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
         self.language = language
@@ -100,6 +103,7 @@ class Runtime:
         self.work_dir = data_dir / "worktrees"
         # 代码库（代码 RAG + 调用图）：给了就让她能按意思搜、按报错定位、看调用关系
         self.code_projects = code_projects
+        self.knowledge = knowledge
         self.rules = Rules(data_dir / "agent_rules.json")
         self.computer_rules = Rules(data_dir / "computer_rules.json")
         self.computer_inventory = computer_inventory
@@ -200,7 +204,10 @@ class Runtime:
             extra = [*plan_tools(session.events), *skill_tools]
             policy = ComputerPolicy(session.cwd, self.computer_rules, mode, data_dir=self.data_dir, env_file=ENV_FILE)
         else:
-            extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
+            access = CodeAccess(self.code_projects(), session.cwd) if self.code_projects else None
+            extra = access.tools() if access else []
+            if access and self.knowledge:
+                extra.append(project_evidence_tool(access, session.workdir, self.knowledge))
             # 联网搜索、带着问题读网页（读网页用快模型）；派出去查资料的助手也能用
             web = WebAccess(self.fast_factory, self.web_search).tools()
             explorer = Explorer(session, workspace.root, self.shell, [*extra, *web], self.rules, self.fast_factory,

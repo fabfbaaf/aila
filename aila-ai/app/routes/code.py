@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sqlite3
 from dataclasses import asdict
 from typing import Any
 
@@ -9,8 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..code import CodeProjects
+from ..code.evidence import answer, collect
 from ..code.fix import fix_stats
-from ..deps import get_code_projects
+from ..deps import get_code_projects, get_knowledge, get_model
+from ..i18n import current_language
+from ..knowledge import KnowledgeBase
+from ..llm import ChatModel
 
 log = logging.getLogger("aila")
 router = APIRouter()
@@ -109,6 +114,43 @@ def _project_index(projects: CodeProjects, project_id: str) -> Any:
     if projects.get(project_id) is None:
         raise HTTPException(status_code=404, detail="没有这个项目")
     return projects.index(project_id)
+
+
+class ProjectDocuments(BaseModel):
+    linked: list[str] = Field(max_length=1000)
+
+
+class EvidenceQuery(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+
+
+@router.get("/code/projects/{project_id}/documents")
+def project_documents(project_id: str, projects: CodeProjects = Depends(get_code_projects),
+                      kb: KnowledgeBase = Depends(get_knowledge)) -> dict[str, Any]:
+    if projects.get(project_id) is None:
+        raise HTTPException(status_code=404, detail="没有这个项目")
+    return {"documents": [asdict(doc) for doc in kb.documents()], "linked": kb.project_documents(project_id)}
+
+
+@router.put("/code/projects/{project_id}/documents")
+def set_project_documents(project_id: str, req: ProjectDocuments, projects: CodeProjects = Depends(get_code_projects),
+                          kb: KnowledgeBase = Depends(get_knowledge)) -> dict[str, Any]:
+    if projects.get(project_id) is None:
+        raise HTTPException(status_code=404, detail="没有这个项目")
+    try:
+        kb.set_project_documents(project_id, req.linked)
+    except sqlite3.IntegrityError as err:
+        raise HTTPException(status_code=422, detail="有资料已经删除，重新加载列表再试。") from err
+    return project_documents(project_id, projects, kb)
+
+
+@router.post("/code/projects/{project_id}/evidence")
+async def evidence(project_id: str, req: EvidenceQuery, projects: CodeProjects = Depends(get_code_projects),
+                   kb: KnowledgeBase = Depends(get_knowledge), model: ChatModel = Depends(get_model)) -> dict[str, Any]:
+    index = _project_index(projects, project_id)
+
+    sources = await asyncio.to_thread(collect, index, kb, project_id, req.query)
+    return await answer(model, req.query, sources, current_language())
 
 
 @router.get("/code/projects/{project_id}/graph")

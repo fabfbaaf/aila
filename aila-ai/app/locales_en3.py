@@ -298,4 +298,9 @@ EN3: dict[str, str] = {
     # 主动分享
     "找不到更新日志的日期": "No release date found in the changelog",
     "更新摘要格式不正确": "The update summary has an invalid format",
+    "有资料已经删除，重新加载列表再试。": "Some documents have been deleted. Reload the list.",
+    "工作区已经不在了。": "The workspace is no longer available.",
+    "没有找到相关的项目资料或代码。": "No relevant project documents or code were found.",
+    "查项目资料和代码依据": "Find project documents and code evidence",
+    "要给搜索的内容。": "Enter a search query.",
 }

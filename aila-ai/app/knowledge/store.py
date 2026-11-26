@@ -50,6 +50,12 @@ create table if not exists chunks (
     embedding blob
 );
 create index if not exists chunks_doc on chunks (doc_id);
+create table if not exists project_documents (
+    project_id text not null,
+    doc_id     text not null references documents (id) on delete cascade,
+    primary key (project_id, doc_id)
+);
+create index if not exists project_documents_doc on project_documents (doc_id);
 create virtual table if not exists chunks_fts using fts5 (body, tokenize = 'trigram');
 """
 
@@ -71,6 +77,7 @@ class Hit:
     page: int | None
     text: str
     score: float
+    sha256: str = ""
 
     @property
     def source(self) -> str:
@@ -142,14 +149,45 @@ class KnowledgeBase:
             self._vectors = None
         return deleted
 
-    def search(self, query: str, k: int = 5) -> list[Hit]:
+    def project_documents(self, project_id: str) -> list[str]:
+        with self._lock:
+            rows = self._db.execute(
+                "select doc_id from project_documents where project_id = ? order by doc_id", (project_id,)
+            )
+            return [row[0] for row in rows]
+
+    def set_project_documents(self, project_id: str, doc_ids: list[str]) -> None:
+        with self._lock, self._db:
+            self._db.execute("delete from project_documents where project_id = ?", (project_id,))
+            self._db.executemany(
+                "insert into project_documents (project_id, doc_id) values (?, ?)",
+                [(project_id, doc_id) for doc_id in dict.fromkeys(doc_ids)],
+            )
+
+    def search(self, query: str, k: int = 5, *, project_id: str | None = None) -> list[Hit]:
         query = query.strip()
         if not query:
             return []
         ranks: dict[int, float] = {}
         best_vector = 0.0
 
+        scope_sql = ""
+        scope_params: tuple[str, ...] = ()
+        if project_id is not None:
+            scope_sql = (
+                "select c.id from chunks c join project_documents p on p.doc_id = c.doc_id where p.project_id = ?"
+            )
+            scope_params = (project_id,)
+            with self._lock:
+                allowed = {row[0] for row in self._db.execute(scope_sql, scope_params)}
+            if not allowed:
+                return []
+
         matrix, ids = self._load_vectors()
+        if scope_sql:
+            eligible = [i for i, cid in enumerate(ids) if cid in allowed]
+            matrix = matrix[eligible]
+            ids = [ids[i] for i in eligible]
         embedder = self._embedder
         if embedder is not None and len(ids):
             scores = matrix @ embedder.embed_query(query)
@@ -162,8 +200,10 @@ class KnowledgeBase:
         keyword_hits = 0
         if fts:
             with self._lock:
+                scope = f" and rowid in ({scope_sql})" if scope_sql else ""
                 rows = self._db.execute(
-                    "select rowid from chunks_fts where chunks_fts match ? order by bm25(chunks_fts) limit ?", (fts, CANDIDATES)
+                    f"select rowid from chunks_fts where chunks_fts match ?{scope} order by bm25(chunks_fts) limit ?",
+                    (fts, *scope_params, CANDIDATES),
                 ).fetchall()
             keyword_hits = len(rows)
             for rank, (cid,) in enumerate(rows):
@@ -173,15 +213,17 @@ class KnowledgeBase:
             return []
         top = sorted(ranks.items(), key=lambda kv: -kv[1])[:k]
         with self._lock:
+            scope = f" and c.id in ({scope_sql})" if scope_sql else ""
             rows = {
                 r[0]: r[1:]
                 for r in self._db.execute(
-                    f"select c.id, d.name, c.heading, c.page, c.text from chunks c join documents d on d.id = c.doc_id "
-                    f"where c.id in ({','.join('?' * len(top))})",
-                    [cid for cid, _ in top],
+                    f"select c.id, d.name, c.heading, c.page, c.text, d.sha256 "
+                    f"from chunks c join documents d on d.id = c.doc_id "
+                    f"where c.id in ({','.join('?' * len(top))}){scope}",
+                    (*[cid for cid, _ in top], *scope_params),
                 )
             }
-        return [Hit(*rows[cid], score=round(score, 4)) for cid, score in top if cid in rows]
+        return [Hit(*rows[cid][:-1], round(score, 4), rows[cid][-1]) for cid, score in top if cid in rows]
 
     def close(self) -> None:
         self._db.close()

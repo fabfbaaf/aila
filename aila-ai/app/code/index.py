@@ -14,7 +14,8 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import numpy as np
 
 from ..knowledge.store import _fts_query
 from ..memory.embedder import Embedder
+from ..runtime.workspace import Workspace, WorkspaceError
 from .endpoints import Endpoint, is_test, link, scan
 from .ignore import clean, ignored
 from .imports import resolve as resolve_imports
@@ -151,8 +153,10 @@ def code_fts_query(query: str) -> str:
 
 class CodeIndex:
     def __init__(self, root: Path, db_path: Path | str, embedder: Callable[[], Embedder | None],
-                 ignore: Callable[[], list[str]] = list) -> None:
-        self.root = root.resolve()
+                 ignore: Callable[[], list[str]] = list, *, ignore_root: Path | None = None) -> None:
+        self._workspace = Workspace(root)
+        self.root = self._workspace.root
+        self._ignore_root = (ignore_root or self.root).resolve()
         self._ignore = ignore  # 「项目」页里给这个项目加的忽略（和项目里的 .ailaignore 合起来用）
         if isinstance(db_path, Path):
             db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,14 +185,14 @@ class CodeIndex:
                 for name in filenames:
                     rel = os.path.relpath(os.path.join(dirpath, name), self.root).replace(os.sep, "/")
                     files.append(rel)
-        patterns = clean([*self._ignore(), *read_ignore_file(self.root)])
+        patterns = clean([*self._ignore(), *read_ignore_file(self._ignore_root)])
+        prefix = self.root.relative_to(self._ignore_root)
+        local = read_ignore_file(self.root) if self._ignore_root != self.root else []
         picked = [f for f in files if language_of(f) and not any(part in IGNORE_DIRS for part in f.split("/")[:-1])
-                  and not ignored(f, patterns)]
+                  and not ignored((prefix / f).as_posix(), patterns) and not ignored(f, local)]
         return sorted(picked)[:MAX_FILES]
 
     def _git_files(self) -> list[str] | None:
-        if not (self.root / ".git").exists():
-            return None
         try:
             out = subprocess.run(
                 ["git", "-C", str(self.root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
@@ -207,6 +211,13 @@ class CodeIndex:
         """
         with self._refresh_lock:
             return self._refresh(embed)
+
+    @contextmanager
+    def refreshed_structure(self) -> Iterator[None]:
+        """多次读取调用图和位置时，共用一版结构。"""
+        with self._refresh_lock:
+            self._refresh(embed=False)
+            yield
 
     def embed_missing(self, batch: int = 128) -> int:
         """给还没有向量的块补算向量（后台慢慢做），返回补了几块"""
@@ -240,18 +251,23 @@ class CodeIndex:
 
         todo: list[tuple[str, bytes, str, float, int]] = []
         touched: list[tuple[float, int, str]] = []
+        present: set[str] = set()
         for rel in files:
+            path = self._source_path(rel)
+            if path is None:
+                continue
             try:
-                st = (self.root / rel).stat()
+                st = path.stat()
             except OSError:
                 continue
             if st.st_size > MAX_FILE_BYTES:
                 continue
+            present.add(rel)
             old = known.get(rel)
             if old and old[1] == st.st_mtime and old[2] == st.st_size:
                 continue  # 没改过：连读都不用读
             try:
-                data = (self.root / rel).read_bytes()
+                data = path.read_bytes()
             except OSError:
                 continue
             sha = hashlib.sha1(data).hexdigest()
@@ -259,8 +275,7 @@ class CodeIndex:
                 touched.append((st.st_mtime, st.st_size, rel))  # 只是保存了一下，内容没变
                 continue
             todo.append((rel, data, sha, st.st_mtime, st.st_size))
-        present = set(files)
-        removed = [p for p in known if p not in present or not (self.root / p).exists()]
+        removed = [p for p in known if p not in present]
 
         parsed = [(rel, data, sha, mtime, size, parse_file(rel, data)) for rel, data, sha, mtime, size in todo]
         texts = [embed_text(rel, c) for rel, *_, chunks in parsed for c in chunks]
@@ -558,24 +573,43 @@ class CodeIndex:
             key=lambda x: (-x["count"], x["name"]))[:MAX_LIBS]
         return {"nodes": nodes, "links": links, "libs": lib_list}
 
+    def endpoint_links(self) -> dict[tuple[str, str, str], set[str]]:
+        """只取 HTTP、IPC 关系，复用星图的静态识别和文件扫描缓存。"""
+        with self._lock:
+            files = self._db.execute("select path, lang, mtime, size from files order by path").fetchall()
+        return link({f: self._scan_of(f, lang, mtime, size)[0] for f, lang, mtime, size in files})
+
+    def _source_path(self, rel: str) -> Path | None:
+        try:
+            path = self._workspace.resolve(rel)
+        except (WorkspaceError, OSError, RuntimeError):
+            return None
+        if self._workspace.is_secret(path) or self._workspace.is_secret(self.root / rel):
+            return None
+        return path
+
     def _scan_of(self, rel: str, lang: str, mtime: float, size: int) -> tuple[list[Endpoint], list[str]]:
         """一个文件提供、请求的接口，和它 import 了什么：按修改时间和大小缓存，文件没变就不再读"""
         cached = self._endpoints.get(rel)
         if cached and cached[0] == mtime and cached[1] == size:
             return cached[2], cached[3]
+        path = self._source_path(rel)
+        if path is None:
+            return [], []
         try:
-            text = (self.root / rel).read_text(encoding="utf-8", errors="replace")
+            text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return [], []
         found, imported = scan(rel, text, lang), scan_imports(text, lang)
         self._endpoints[rel] = (mtime, size, found, imported)
         return found, imported
 
-    def outline(self, file: str) -> list[CodeChunk]:
+    def outline(self, file: str, *, include_module: bool = False) -> list[CodeChunk]:
         """一个文件里的函数和类（按出现的顺序），星图的全息面板用"""
         with self._lock:
             rows = self._db.execute(
-                f"select {COLUMNS} from chunks where file = ? and kind != 'module' order by start_line", (file,)
+                f"select {COLUMNS} from chunks where file = ? and (? or kind != 'module') order by start_line",
+                (file, include_module),
             ).fetchall()
         return [CodeChunk(*r) for r in rows]
 
@@ -594,6 +628,22 @@ class CodeIndex:
             out += nxt
             level = nxt
         return out
+
+    def indexed_lines(self, file: str) -> list[str]:
+        """代码依据用原始行。只有磁盘内容还和本次索引对得上才返回。"""
+        with self._lock:
+            row = self._db.execute("select sha1 from files where path = ?", (file,)).fetchone()
+        path = self._source_path(file)
+        if not row or path is None:
+            return []
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(MAX_FILE_BYTES + 1)
+        except OSError:
+            return []
+        if hashlib.sha1(data).hexdigest() != row[0]:
+            return []
+        return data.decode("utf-8", errors="replace").replace("\r\n", "\n").split("\n")
 
     def source(self, file: str, start: int, end: int) -> list[str]:
         """从磁盘读这几行（现在的样子，用户刚改过也是新的）"""
