@@ -82,6 +82,8 @@ def build() -> None:
         "--add-data", f"{ROOT / '.env.example'}{os.pathsep}.",
         # 使用说明（她查自己的功能用，app/guide）
         "--add-data", f"{ROOT / 'app' / 'guide' / 'guide.md'}{os.pathsep}app/guide",
+        # 手机上打开的页面（app/phone/static：局域网的门直接发这两个文件）
+        "--add-data", f"{ROOT / 'app' / 'phone' / 'static'}{os.pathsep}app/phone/static",
     ]
     for name in COLLECT_ALL:
         args += ["--collect-all", name]

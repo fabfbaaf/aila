@@ -237,5 +237,6 @@ export const EN11: Record<string, string> = {
   "授权码": "Authorization code",
   "不是登录密码": "Not your login password",
   "授权码在网页版邮箱：设置 → 账户（QQ 邮箱）或 设置 → POP3/SMTP/IMAP（163），打开 IMAP 服务后生成。QQ、163、126、foxmail 自动认服务器；别的邮箱在下面填 IMAP 服务器。": "Get the authorization code in web mail: Settings → Account (QQ Mail) or Settings → POP3/SMTP/IMAP (163); turn on IMAP, then generate it. QQ, 163, 126 and Foxmail servers are detected automatically; for others enter the IMAP server below.",
-  "IMAP 服务器（可不填）": "IMAP server (optional)"
+  "IMAP 服务器（可不填）": "IMAP server (optional)",
+  "手机上能聊天、看任务、开任务（只能在登记过的项目里，固定「先问再改」）。她要改文件、跑普通命令时手机上就能点同意；危险命令、碰密钥的还是要在电脑上点。": "From the phone you can chat, watch tasks and start tasks (only in registered projects, always in \"Ask first\" mode). When she wants to edit files or run ordinary commands you can approve on the phone; dangerous commands and anything touching keys still need the computer."
 }

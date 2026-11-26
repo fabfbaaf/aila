@@ -93,7 +93,7 @@ onActivated(load)
 
     <div class="row">
       <span class="label">{{ t('邮箱') }}</span>
-      <input v-model="mailUser" autocomplete="off" placeholder="you@qq.com / you@163.com" />
+      <input v-model="mailUser" type="text" autocomplete="off" placeholder="you@qq.com / you@163.com" />
     </div>
     <div class="row">
       <span class="label">{{ t('授权码') }}</span>
@@ -109,7 +109,7 @@ onActivated(load)
     <p class="hint">{{ t('授权码在网页版邮箱：设置 → 账户（QQ 邮箱）或 设置 → POP3/SMTP/IMAP（163），打开 IMAP 服务后生成。QQ、163、126、foxmail 自动认服务器；别的邮箱在下面填 IMAP 服务器。') }}</p>
     <div class="row">
       <span class="label">{{ t('IMAP 服务器（可不填）') }}</span>
-      <input v-model="mailHost" autocomplete="off" placeholder="imap.example.com" />
+      <input v-model="mailHost" type="text" autocomplete="off" placeholder="imap.example.com" />
     </div>
 
     <div class="actions">
