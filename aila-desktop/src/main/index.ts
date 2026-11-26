@@ -37,7 +37,11 @@ import {
   listKnowledge,
   listSkills,
   putAiSettings,
-  testLlm
+  testLlm,
+  getPhone,
+  setPhone,
+  newPhonePairing,
+  forgetPhone
 } from './ai'
 import { dirname, join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -1357,8 +1361,21 @@ function registerIpc(): void {
   ipcMain.handle('ai:settings:test', (e) => (fromMainWindow(e) ? testLlm(AI_URL) : MAIN_ONLY))
   ipcMain.handle('skills:list', () => listSkills(AI_URL, account?.skillOverrides() ?? {}))
   ipcMain.on('skills:set', (e, id: string, on: boolean) => {
-    if (fromMainWindow(e)) account?.setSkill(String(id), Boolean(on))
+    if (!fromMainWindow(e)) return
+    account?.setSkill(String(id), Boolean(on))
+    void setPhone(AI_URL, { skills: account?.skillOverrides() ?? {} }) // 手机上聊天也按新的开关来
   })
+  // 设置 → 手机：局域网的门开关、配对码、配过的手机。只认主窗口
+  ipcMain.handle('phone:status', (e) => (fromMainWindow(e) ? getPhone(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('phone:enable', (e, on: unknown) =>
+    fromMainWindow(e) && typeof on === 'boolean'
+      ? setPhone(AI_URL, { enabled: on, skills: account?.skillOverrides() ?? {} })
+      : MAIN_ONLY
+  )
+  ipcMain.handle('phone:pair', (e) => (fromMainWindow(e) ? newPhonePairing(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('phone:forget', (e, id: unknown) =>
+    fromMainWindow(e) && typeof id === 'string' && /^[0-9a-f]{1,32}$/.test(id) ? forgetPhone(AI_URL, id) : MAIN_ONLY
+  )
   ipcMain.handle('model:path', () => loadSettings().modelPath ?? null)
   ipcMain.on('model:choose', (e) => void chooseModel(BrowserWindow.fromWebContents(e.sender)))
   // 换回她自己的原创形象：忘掉选过的模型文件，角色窗口加载自带的那个

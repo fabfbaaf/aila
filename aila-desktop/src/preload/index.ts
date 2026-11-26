@@ -20,6 +20,7 @@ import type {
 } from '../shared/cloud'
 import type {
   AgentRuleGroup,
+  PhoneStatus,
   AiResult,
   AiSettings,
   AiSettingsUpdate,
@@ -211,6 +212,11 @@ const api = {
   agentPickFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:pick-folder'),
   agentTakeFocus: (): Promise<string | null> => ipcRenderer.invoke('agent:take-focus'),
   agentRules: (): Promise<AiResult<AgentRuleGroup[]>> => ipcRenderer.invoke('agent:rules'),
+  /** 设置 → 手机（局域网）：状态、开关、配对码、删掉一台手机 */
+  phoneStatus: (): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:status'),
+  phoneEnable: (on: boolean): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:enable', on),
+  phonePair: (): Promise<AiResult<{ code: string; expires: number; seconds: number }>> => ipcRenderer.invoke('phone:pair'),
+  phoneForget: (id: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:forget', id),
   agentMcp: (): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp'),
   agentMcpPreview: (json: string): Promise<AiResult<McpPreviewItem[]>> => ipcRenderer.invoke('agent:mcp:preview', json),
   agentMcpImport: (json: string): Promise<AiResult<McpServerInfo[]>> => ipcRenderer.invoke('agent:mcp:import', json),

@@ -20,7 +20,7 @@ from .i18n import localize
 
 from . import deps
 from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
-from .routes import agent, chat, code, computer, discoveries, extensions, knowledge, screen, settings, studio, voice
+from .routes import agent, chat, code, computer, discoveries, extensions, knowledge, phone, screen, settings, studio, voice
 from .routes.chat import ChatMessage, ChatRequest, build_messages
 from .security import LocalOnly
 
@@ -38,7 +38,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # 语音的两个模型占好几百 MB，不在这里加载：桌面端开着「说话」「唤醒」时调 /voice/warmup，或者第一次用到时再加载
     preload = asyncio.gather(asyncio.to_thread(get_embedder))
     deps.start_mcp()  # 外部 MCP 服务也在后台连接（设置页改了配置会重连，见 deps.restart_mcp）
+    await deps.apply_phone()  # 打开过「允许手机连接」的话，局域网上的门跟着开
     yield
+    await deps.get_phone_server().stop()
     await deps.stop_mcp()
     if deps.get_runtime.cache_info().currsize:  # 正在做的编程任务：打断（日志会补完整，下次可以接着做）
         await deps.get_runtime().shutdown()
@@ -68,3 +70,4 @@ app.include_router(computer.router)
 app.include_router(studio.router)
 app.include_router(discoveries.router)
 app.include_router(extensions.router)
+app.include_router(phone.router)

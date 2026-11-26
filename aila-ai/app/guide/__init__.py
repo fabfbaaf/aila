@@ -21,7 +21,7 @@ from typing import Any
 GUIDE = Path(__file__).with_name("guide.md")
 # 主窗口的页面、设置分区（和 aila-desktop/src/shared/shell.ts 对得上，桌面端测试会检查）
 PAGES = ("tasks", "chat", "projects", "knowledge", "memory", "studio", "settings")
-SECTIONS = ("model", "voice", "desktop", "extensions", "account", "appearance", "status", "agent")
+SECTIONS = ("model", "voice", "desktop", "extensions", "phone", "account", "appearance", "status", "agent")
 REPO_URL = "https://github.com/fabfbaaf/aila"
 TOP = 3
 

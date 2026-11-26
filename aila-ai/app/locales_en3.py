@@ -201,6 +201,16 @@ EN3: dict[str, str] = {
     "搜索「{0}」": 'Search the web for "{0}"',
     "读网页 {0}": "Read web page {0}",
     "快模型没有回答": "The fast model gave no answer",
+    # 手机连接
+    "这台手机还没配对，或者已经在电脑上被删掉了。": "This phone isn't paired, or it was removed on the computer.",
+    "没有这个任务。": "No such task.",
+    "配对码不对或者过期了。在电脑上 设置 → 手机 里拿一个新的。": "Wrong or expired pairing code. Get a new one on the computer in Settings → Phone.",
+    "最后一条必须是你说的话。": "The last message has to be yours.",
+    "这个确认已经结束了。": "That confirmation is already over.",
+    "只能在登记过的项目里开任务。": "Tasks can only be started in registered projects.",
+    "先打开「允许手机连接」。": "Turn on \"Allow phone connections\" first.",
+    "没有这台手机。": "No such phone.",
+    "端口 {0} 开不了（可能被别的程序占着）。": "Port {0} couldn't be opened (another program may be using it).",
     # 使用说明
     "正在翻使用说明": "Checking the user guide",
     "正在打开「{0}」": 'Opening "{0}"',

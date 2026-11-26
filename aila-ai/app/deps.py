@@ -11,9 +11,12 @@ import threading
 import time
 from dataclasses import replace
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from .phone import PhoneServer, PhoneStore
 
 from . import envfile
 from .config import ENV_FILE as CONFIG_ENV_FILE
@@ -368,3 +371,35 @@ def mcp_status() -> list[dict[str, Any]]:
         {"id": f"mcp:{c.id}", "name": c.name, "connected": f"mcp:{c.id}" in connected, "error": mcp_runner.hub.errors.get(c.id)}
         for c in mcp_runner.hub.configs
     ]
+
+
+# ---------- 手机连接（局域网，见 app/phone） ----------
+
+PHONE_PORT = int(os.getenv("AILA_PHONE_PORT", "8780"))
+# 默认开在所有网卡上（局域网里的手机要连）；AILA_PHONE_HOST 可以只开在某一个地址上（比如测试时只开 127.0.0.1）
+PHONE_HOST = os.getenv("AILA_PHONE_HOST", "0.0.0.0")  # noqa: S104
+
+
+@lru_cache
+def get_phone() -> "PhoneStore":
+    from .phone import PhoneStore
+
+    return PhoneStore.load(settings.data_dir / "phone.json")
+
+
+@lru_cache
+def get_phone_server() -> "PhoneServer":
+    from .phone import PhoneServer
+
+    return PhoneServer(PHONE_PORT, PHONE_HOST)
+
+
+async def apply_phone() -> None:
+    """按开关开、关局域网上的门（启动时、设置页拨开关时）"""
+    from .phone.gateway import create_gateway, default_answer, default_chat
+
+    server = get_phone_server()
+    if get_phone().enabled:
+        await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer))
+    else:
+        await server.stop()

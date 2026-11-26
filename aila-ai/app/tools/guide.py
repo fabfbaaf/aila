@@ -12,7 +12,7 @@ PAGE_NAMES = {
     "tasks": "任务", "chat": "对话", "projects": "项目", "knowledge": "资料", "memory": "记忆", "studio": "作品", "settings": "设置",
 }
 SECTION_NAMES = {
-    "model": "对话", "voice": "语音", "desktop": "桌面", "extensions": "技能和扩展", "account": "账号与同步",
+    "model": "对话", "voice": "语音", "desktop": "桌面", "extensions": "技能和扩展", "phone": "手机", "account": "账号与同步",
     "appearance": "形象", "status": "运行状态", "agent": "编程",
 }
 

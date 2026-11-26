@@ -17,6 +17,23 @@ export type SettingsSection =
   | 'agent'
   /** 扩展包：导入、开关、设置、卸载 */
   | 'extensions'
+  /** 手机连接（局域网）：开关、配对码、配过的手机 */
+  | 'phone'
+
+/** 设置 → 手机：AI 服务那边局域网的门（aila-ai/app/phone） */
+export interface PhoneStatus {
+  enabled: boolean
+  /** 端口真的开着 */
+  running: boolean
+  /** 开不了的原因（比如端口被占） */
+  error: string
+  port: number
+  /** 手机浏览器里打开的地址（这台电脑在局域网里的每个地址一个） */
+  addresses: string[]
+  devices: { id: string; name: string; created: number; lastSeen: number }[]
+  /** 正在等手机输入的配对码（过期时间是秒级时间戳） */
+  pairing: { code: string; expires: number } | null
+}
 
 /** 一个项目里「以后都允许」的命令；路径和命令都按原文删除。 */
 export interface AgentRuleGroup {

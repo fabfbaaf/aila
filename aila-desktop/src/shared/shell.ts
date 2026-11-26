@@ -39,6 +39,7 @@ export const SETTINGS_TABS: { id: SettingsSection; name: string }[] = [
   { id: 'desktop', name: '桌面' },
   // 技能包、扩展、外部工具（MCP）合在一页：以前分在三个地方，去「技能包」里找不到导入
   { id: 'extensions', name: '技能和扩展' },
+  { id: 'phone', name: '手机' },
   { id: 'account', name: '账号与同步' },
   { id: 'appearance', name: '形象' },
   { id: 'status', name: '运行状态' },

@@ -147,5 +147,22 @@ export const EN11: Record<string, string> = {
   "官方更新": "Official updates",
   "模型发布": "Model releases",
   "定价变化": "Pricing changes",
-  "联网能力": "Web access"
+  "联网能力": "Web access",
+  // 手机连接
+  "出错了。": "Something went wrong.",
+  "还没连过": "Never connected",
+  "手机": "Phone",
+  "手机和电脑连同一个 Wi-Fi 时，用手机浏览器和她聊天、看任务、开任务。不用装 App。": "When your phone and computer are on the same Wi-Fi, chat with her, watch tasks and start tasks from the phone's browser. No app to install.",
+  "允许手机连接": "Allow phone connections",
+  "打开后在局域网上开一个端口（{port}）。局域网里是 http：家里的网络用，公共 Wi-Fi 别开。第一次打开时 Windows 可能问要不要允许它通过防火墙，选「专用网络」。": "Turning this on opens a port ({port}) on your local network. Traffic is plain http, so use it on your home network, not public Wi-Fi. The first time, Windows may ask whether to allow it through the firewall: choose \"Private networks\".",
+  "手机上能聊天、看任务、开任务（只能在登记过的项目里，固定「先问再改」）。她要改文件、跑命令时，还是要你在电脑上点同意。": "From the phone you can chat, watch tasks and start tasks (only in registered projects, always in \"Ask first\" mode). When she wants to edit files or run commands, you still approve on the computer.",
+  "手机浏览器里打开": "Open in the phone's browser",
+  "没找到这台电脑在局域网里的地址：确认连着 Wi-Fi 或网线。": "Couldn't find this computer's local network address: check that it's on Wi-Fi or a cable.",
+  "配对一台手机": "Pair a phone",
+  "配对码": "Pairing code",
+  "{n} 秒内在手机上输入": "Enter it on the phone within {n} s",
+  "配过的手机": "Paired phones",
+  "还没有。": "None yet.",
+  "最近一次连：{when}": "Last connected: {when}",
+  "删掉以后那台手机马上连不上，要重新配对。": "A removed phone is cut off right away and has to pair again."
 }
