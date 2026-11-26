@@ -30,3 +30,5 @@ tree-sitter-java>=0.23
 # 终端版 aila：画界面、输入框
 rich>=13.7
 prompt_toolkit>=3.0.43
+# 日历里重复的会议（RRULE）展开；trafilatura 本来就依赖它，这里写明是因为 app/agenda.py 直接用
+python-dateutil>=2.8

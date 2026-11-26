@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionSummary } from '../shared/agent'
 import type { StoredMemory, StoredMessage } from '../shared/cloud'
-import { dailyReport, due, morningBriefing, workday, type BriefingInput } from './briefing'
+import { dailyReport, due, meetingReminder, morningBriefing, workday, type BriefingInput } from './briefing'
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0): Date => new Date(y, mo - 1, d, h, mi)
 const NOW = at(2026, 11, 17, 9, 30)
@@ -50,6 +50,17 @@ describe('每天第一次见面', () => {
     expect(r.text).toBe(
       '早上好。昨天一起做了 2 个任务：「修购物车总价」、「加打折函数」。「加打折函数」还在分支上，没合并。今天：你今天下午三点面试；1 个提醒。'
     )
+  })
+
+  it('日历上今天的会：说前两个、多的说个数，已经开完的不说；会前提醒那一句', () => {
+    const ev = (title: string, h: number, end = h + 1, allDay = false) => ({
+      uid: title, title, start: at(2026, 11, 17, h).toISOString(), end: at(2026, 11, 17, end).toISOString(), allDay, location: ''
+    })
+    const meetings = [ev('早会', 8, 9), ev('周会', 10), ev('评审', 14), ev('一对一', 16), ev('团建', 0, 24, true)]
+    const r = morningBriefing(input({ meetings }), false)
+    expect(r.detail).toBe(true)
+    expect(r.text).toBe('今天：10:00 周会；14:00 评审；一共 4 个会。')
+    expect(meetingReminder(ev('周会', 10), at(2026, 11, 17, 9, 52))).toBe('8 分钟后：周会（10:00）')
   })
 
   it('什么都没有就只打招呼；刚启动时（已经打过招呼）不再说早上好', () => {

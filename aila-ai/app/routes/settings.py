@@ -39,6 +39,9 @@ def read() -> dict[str, Any]:
         "search": {"provider": s.search_provider if s.search_provider in ("bocha", "tavily", "none") else "bocha",
                    "apiKeySet": bool(s.search_api_key)},
         "computer": {"inventory": s.computer_inventory},
+        # 订阅链接、授权码都不回显，只说填了没有；邮箱地址显示出来（你要认得是哪个邮箱）
+        "agenda": {"calendarSet": bool(s.calendar_url), "mailUser": s.mail_user, "mailPassSet": bool(s.mail_pass),
+                   "mailHost": s.mail_host},
         "persona": {"style": s.persona_style if s.persona_style in STYLES else "gentle", "call": s.persona_call,
                     "catchphrase": s.persona_catchphrase},
         "language": s.language,
@@ -84,6 +87,32 @@ class SettingsUpdate(BaseModel):
     wakeThreshold: float | None = Field(default=None, ge=0.05, le=0.6)
     endSilence: float | None = Field(default=None, ge=0.2, le=1.5)
     asrLanguage: Literal["zh", "auto"] | None = None
+    # 日历订阅链接、邮箱、授权码、IMAP 服务器（空字符串 = 清掉）
+    calendarUrl: str | None = Field(default=None, max_length=2000)
+    mailUser: str | None = Field(default=None, max_length=200)
+    mailPass: str | None = Field(default=None, max_length=200)
+    mailHost: str | None = Field(default=None, max_length=200)
+
+    @field_validator("calendarUrl")
+    @classmethod
+    def _calendar(cls, v: str | None) -> str | None:
+        if v and not v.strip().startswith(("https://", "http://", "webcal://")):
+            raise ValueError("日历订阅链接要以 https:// 或 webcal:// 开头")
+        return v.strip() if v is not None else v
+
+    @field_validator("mailUser")
+    @classmethod
+    def _mail(cls, v: str | None) -> str | None:
+        if v and "@" not in v:
+            raise ValueError("邮箱地址不对")
+        return v.strip() if v is not None else v
+
+    @field_validator("mailPass", "mailHost")
+    @classmethod
+    def _plain(cls, v: str | None) -> str | None:
+        if v is not None and any(c.isspace() for c in v.strip()):
+            raise ValueError("里面不应该有空格")
+        return v.strip() if v is not None else v
 
     @field_validator("llmBaseUrl")
     @classmethod
@@ -113,6 +142,7 @@ ENV_NAMES = {
     "computerInventory": "AILA_COMPUTER_INVENTORY",
     "personaStyle": "AILA_PERSONA_STYLE", "personaCall": "AILA_PERSONA_CALL", "personaCatchphrase": "AILA_PERSONA_CATCHPHRASE", "language": "AILA_LANGUAGE",
     "searchProvider": "SEARCH_PROVIDER", "searchApiKey": "SEARCH_API_KEY",
+    "calendarUrl": "AILA_CALENDAR_URL", "mailUser": "AILA_MAIL_USER", "mailPass": "AILA_MAIL_PASS", "mailHost": "AILA_MAIL_HOST",
     "ttsEngine": "AILA_TTS_ENGINE", "ttsSpeaker": "AILA_TTS_SPEAKER", "ttsSpeed": "AILA_TTS_SPEED",
     "wakeThreshold": "AILA_WAKE_THRESHOLD", "endSilence": "AILA_END_SILENCE", "asrLanguage": "AILA_ASR_LANGUAGE",
 }

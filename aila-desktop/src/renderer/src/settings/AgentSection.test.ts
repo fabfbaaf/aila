@@ -11,6 +11,8 @@ const computer = vi.hoisted(() => ({
   loadComputerContext: vi.fn()
 }))
 vi.mock('./computer', () => computer)
+// 定时任务那张卡片要桌面端的接口：这里当成不在桌面端（不显示），只测编程设置本身
+vi.mock('../platform/bridge', () => ({ bridge: null, isDesktop: false }))
 // 外部工具（MCP）那张卡片单独测；这里只要它不去连服务
 vi.mock('./mcp', () => {
   const empty = async () => ({ ok: true, data: [] })

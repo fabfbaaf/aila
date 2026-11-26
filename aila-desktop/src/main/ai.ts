@@ -2,7 +2,20 @@
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
-import type { AgentRuleGroup, AiResult, AiSettings, AiSettingsUpdate, AndroidStatus, CodeProject, FixStats, PhoneStatus, ScreenStatus } from '../shared/settings'
+import type {
+  AgendaEvent,
+  AgentRuleGroup,
+  AiResult,
+  AiSettings,
+  AiSettingsUpdate,
+  AndroidStatus,
+  CodeProject,
+  FixStats,
+  PhoneStatus,
+  ScheduleInput,
+  ScheduleItem,
+  ScreenStatus
+} from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 import { tm } from './lang'
 
@@ -206,13 +219,20 @@ export function getPhone(aiUrl: string): Promise<AiResult<PhoneStatus>> {
 }
 
 /** 开关局域网的门，或者告诉它桌面端现在的技能包开关（关掉的手机上也用不了） */
-export function setPhone(aiUrl: string, body: { enabled?: boolean; skills?: Record<string, boolean> }): Promise<AiResult<PhoneStatus>> {
+export function setPhone(
+  aiUrl: string,
+  body: { enabled?: boolean; skills?: Record<string, boolean>; push?: { kind: string; url: string } }
+): Promise<AiResult<PhoneStatus>> {
   return attempt(async () => json<PhoneStatus>(await fetch(`${aiUrl}/phone`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(10000)
   })))
+}
+
+export function testPhonePush(aiUrl: string): Promise<AiResult<{ ok: boolean }>> {
+  return attempt(async () => json(await fetch(`${aiUrl}/phone/push-test`, { method: 'POST', signal: AbortSignal.timeout(15000) })))
 }
 
 export function newPhonePairing(aiUrl: string): Promise<AiResult<{ code: string; expires: number; seconds: number }>> {
@@ -225,6 +245,44 @@ export function forgetPhone(aiUrl: string, id: string): Promise<AiResult<PhoneSt
     signal: AbortSignal.timeout(5000)
   })))
 }
+
+// ---------- 日历和邮件（只读） ----------
+
+type AgendaList = { configured: boolean; events: AgendaEvent[]; error: string }
+
+export function getAgendaToday(aiUrl: string): Promise<AiResult<AgendaList>> {
+  return attempt(async () => json<AgendaList>(await fetch(`${aiUrl}/agenda/today`, { signal: AbortSignal.timeout(20000) })))
+}
+
+/** 接下来几分钟内开始的会（会前提醒） */
+export function getAgendaUpcoming(aiUrl: string, minutes = 10): Promise<AiResult<AgendaList>> {
+  return attempt(async () => json<AgendaList>(await fetch(`${aiUrl}/agenda/upcoming?minutes=${minutes}`, { signal: AbortSignal.timeout(20000) })))
+}
+
+export function testAgenda(aiUrl: string, what: 'calendar' | 'mail'): Promise<AiResult<{ ok: boolean; count: number; unread?: number }>> {
+  return attempt(async () => json(await fetch(`${aiUrl}/agenda/test-${what}`, { method: 'POST', signal: AbortSignal.timeout(40000) })))
+}
+
+// ---------- 定时任务（设置 → 编程） ----------
+
+async function scheduleCall<T>(aiUrl: string, method: string, path: string, body?: unknown): Promise<AiResult<T>> {
+  return attempt(async () => json<T>(await fetch(`${aiUrl}/agent/schedules${path}`, {
+    method,
+    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    // 「现在跑一次」要先跑测试，可能要好一会儿
+    signal: AbortSignal.timeout(path.endsWith('/run') ? 660000 : 10000)
+  })))
+}
+
+export const listSchedules = (aiUrl: string): Promise<AiResult<{ items: ScheduleItem[]; projects: { name: string; path: string }[] }>> =>
+  scheduleCall(aiUrl, 'GET', '')
+export const addSchedule = (aiUrl: string, body: ScheduleInput): Promise<AiResult<ScheduleItem>> => scheduleCall(aiUrl, 'POST', '', body)
+export const changeSchedule = (aiUrl: string, id: string, body: Partial<ScheduleInput> & { enabled?: boolean }): Promise<AiResult<ScheduleItem>> =>
+  scheduleCall(aiUrl, 'PUT', `/${encodeURIComponent(id)}`, body)
+export const deleteSchedule = (aiUrl: string, id: string): Promise<AiResult<unknown>> => scheduleCall(aiUrl, 'DELETE', `/${encodeURIComponent(id)}`)
+export const runSchedule = (aiUrl: string, id: string): Promise<AiResult<ScheduleItem>> =>
+  scheduleCall(aiUrl, 'POST', `/${encodeURIComponent(id)}/run`)
 
 // ---------- 她操作安卓手机（设置 → 手机） ----------
 

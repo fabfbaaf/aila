@@ -125,6 +125,8 @@ class Runtime:
         self._agents: dict[str, Agent] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._listeners: dict[str, set[asyncio.Queue[Event | None]]] = {}
+        # 看所有会话事件的（比如通知：她等你同意、做完了，推到手机），不影响任务本身
+        self.watchers: list[Callable[[str, Event], None]] = []
         self._deleting: set[str] = set()
         self._operations: set[str] = set()
         # 正在 /review 的会话 → 这一轮结束后要换回的权限模式
@@ -679,6 +681,11 @@ class Runtime:
     def _publish(self, sid: str, event: Event) -> None:
         for q in self._listeners.get(sid, set()):
             q.put_nowait(event)
+        for watch in self.watchers:
+            try:
+                watch(sid, event)
+            except Exception:  # 看的人出错不能拖垮任务
+                log.exception("事件观察者出错")
 
     # ---------- 订阅 ----------
 

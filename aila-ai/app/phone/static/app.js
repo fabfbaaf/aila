@@ -194,7 +194,7 @@ function taskDot(s) {
 
 function taskLine(s) {
   const project = (s.cwd || '').split(/[\\/]/).filter(Boolean).pop() || ''
-  if (s.pending) return `${project} · 等你在电脑上同意：${s.pending.action || ''}`
+  if (s.pending) return `${project} · 等你同意：${s.pending.action || ''}（点开看）`
   if (s.running) return `${project} · 在做${s.activity ? `：${s.activity.tool} ${s.activity.target}` : ''}`
   return `${project} · ${s.outcome === 'done' ? '做完了' : s.outcome ? '停下了' : '还没开始'}`
 }
@@ -259,6 +259,77 @@ const toolLines = new Map()
 const END = { done: '这一轮做完了', error: '这一轮出错了', max_steps: '步数用完了', interrupted: '停下了', rejected: '你没同意，停下了',
   timeout: '一直没等到同意，停下了', denied: '被权限挡住了', budget: '花费到上限了' }
 
+const ANSWERED = { approved: '你同意了', rejected: '你没同意', timeout: '一直没等到回答', interrupted: '停下了' }
+const confirmCards = new Map()
+
+/** 确认里给你看的内容：是 diff 的话加减行上色（还是 textContent，不当 HTML） */
+function diffBlock(text) {
+  const pre = el('pre', '')
+  const lines = text.split('\n').slice(0, 60)
+  const isDiff = lines.some((l) => l.startsWith('@@'))
+  for (const line of lines) {
+    const cls = !isDiff ? '' : line.startsWith('+++') || line.startsWith('---') ? 'file'
+      : line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : line.startsWith('@@') ? 'hunk' : ''
+    pre.append(el('span', cls, `${line}\n`))
+  }
+  return pre
+}
+
+/** 编程任务要你同意的操作：改文件、普通命令手机上能点；危险的、碰密钥的只能在电脑上点（ev.phone 由电脑那边算） */
+function taskConfirm(ev) {
+  const card = el('div', 'ask')
+  card.append(el('div', 'q', `要${ev.action || '做这件事'}，可以吗？`))
+  if (ev.reason) card.append(el('div', 'note', ev.reason))
+  if (ev.detail) card.append(diffBlock(String(ev.detail)))
+  const row = el('div', 'row')
+  if (ev.phone) {
+    const sid = current
+    const answer = async (approved) => {
+      row.replaceChildren(el('span', 'note', approved ? '你同意了' : '你没同意'))
+      try {
+        await api(`/api/tasks/${encodeURIComponent(sid)}/confirm`, { method: 'POST', body: JSON.stringify({ id: ev.id, approved }) })
+      } catch (err) {
+        row.replaceChildren(el('span', 'err', err.message))
+      }
+    }
+    const yes = el('button', 'primary', '可以')
+    const no = el('button', '', '不要')
+    yes.onclick = () => answer(true)
+    no.onclick = () => answer(false)
+    row.append(yes, no)
+  } else {
+    row.append(el('span', 'note', '这个要在电脑上同意（危险命令、碰密钥的文件、外部工具）。'))
+  }
+  card.append(row)
+  confirmCards.set(ev.id, card)
+  return card
+}
+
+// ---------- 提醒：她等你同意、做完了（这个页面开着时） ----------
+
+function banner(n) {
+  const old = document.querySelector('.banner')
+  if (old) old.remove()
+  const b = el('button', 'banner')
+  b.append(el('b', '', n.title || '任务'), document.createTextNode(` ${n.text}`))
+  b.onclick = () => { b.remove(); openDetail(n.sid) }
+  document.body.append(b)
+  if (navigator.vibrate) navigator.vibrate(n.kind === 'confirm' ? [120, 80, 120] : 150)
+  setTimeout(() => b.remove(), 15000)
+  if (!$('tasks').classList.contains('hidden')) loadTasks()
+}
+
+async function followNotices() {
+  for (;;) {
+    try {
+      const res = await api('/api/notify')
+      await readEvents(res, (ev) => { if (ev.type === 'notice') banner(ev) })
+    } catch { /* 断了：过一会儿再连 */ }
+    if (!token) return
+    await new Promise((r) => setTimeout(r, 5000))
+  }
+}
+
 function closeDetail() {
   if (follow) follow.abort()
   follow = null
@@ -297,8 +368,13 @@ function show(ev) {
       break
     }
     case 'confirm':
-      box.append(el('div', 'line wait', `等你在电脑上同意：${ev.action || ''}`))
+      box.append(taskConfirm(ev))
       break
+    case 'confirm_end': {
+      const card = confirmCards.get(ev.id)
+      if (card) card.querySelector('.row')?.replaceChildren(el('span', 'note', ANSWERED[ev.result] || '结束了'))
+      break
+    }
     case 'turn_end':
       box.append(el('div', 'status', END[ev.reason] || '这一轮结束了'))
       break
@@ -313,6 +389,7 @@ async function openDetail(id) {
   current = id
   lastSeq = -1
   toolLines.clear()
+  confirmCards.clear()
   $('dEvents').replaceChildren()
   tab('detail')
   current = id
@@ -362,6 +439,7 @@ async function start() {
     const me = await (await api('/api/me')).json()
     showApp(me.name)
     renderHistory()
+    void followNotices()
   } catch (err) {
     if (token) { showApp(''); $('chat').replaceChildren(el('div', 'err', `连不上电脑：${err.message}`)) }
   }

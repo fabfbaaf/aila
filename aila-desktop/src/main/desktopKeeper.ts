@@ -12,7 +12,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { cleanPrefs, type DesktopPrefs, type DesktopStatus, type FocusState, type Presence, type Reminder } from '../shared/desktop'
 import type { Discovery } from '../shared/discoveries'
-import type { AiResult, CharacterEvent } from '../shared/settings'
+import type { AgendaEvent, AiResult, CharacterEvent } from '../shared/settings'
 import {
   daysKnown,
   diaryDue,
@@ -24,7 +24,7 @@ import {
   type LifeState,
   type Work
 } from '../shared/studio'
-import { dailyReport, due, isStudioSession, morningBriefing, workday, type BriefingInput } from './briefing'
+import { dailyReport, due, isStudioSession, meetingReminder, morningBriefing, workday, type BriefingInput } from './briefing'
 import type { StartWorkBody } from './studio'
 import { decidePresence, FocusWatch } from './presence'
 import { ReminderBook, SitTimer } from './reminders'
@@ -54,6 +54,8 @@ export interface DesktopKeeperOptions {
   savePrefs: (prefs: DesktopPrefs) => void
   /** 每天见面、日报要用的材料；AI 服务没开时返回 null（过一分钟再试） */
   gather: () => Promise<Omit<BriefingInput, 'now' | 'reminders'> | null>
+  /** 接下来 10 分钟内开始的会（填了日历订阅链接才有）：会前冒个泡提醒 */
+  upcomingMeetings?: () => Promise<AgendaEvent[]>
   loadBriefing: () => BriefingState
   saveBriefing: (state: BriefingState) => void
   /** 她的一天：作品、日记（AI 服务的接口）和记着的状态。不给就没有这些 */
@@ -241,7 +243,22 @@ export class DesktopKeeper {
     }
   }
 
+  /** 提醒过的会（uid + 开始时间），一个会只提醒一次 */
+  private meetingsTold = new Set<string>()
+
+  private async remindMeetings(): Promise<void> {
+    if (!this.o.upcomingMeetings) return
+    const now = new Date()
+    for (const e of await this.o.upcomingMeetings().catch(() => [])) {
+      const key = `${e.uid}@${e.start}`
+      if (e.allDay || this.meetingsTold.has(key) || new Date(e.start) < now) continue
+      this.meetingsTold.add(key)
+      this.deliver({ id: `meeting-${key}`, at: e.start, text: meetingReminder(e, now), createdAt: now.toISOString() }, false)
+    }
+  }
+
   private async everyMinute(): Promise<void> {
+    void this.remindMeetings()
     const idle = powerMonitor.getSystemIdleTime()
     const canTalk = this.presence.visible && !this.presence.quiet
     // 全屏、演示、免打扰时不打扰（打游戏、开会时不需要她来催）

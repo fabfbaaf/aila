@@ -20,6 +20,31 @@ export type SettingsSection =
   /** 手机连接（局域网）：开关、配对码、配过的手机 */
   | 'phone'
 
+/** 定时任务（aila-ai/app/runtime/schedules.py）：到点她自己开一个编程任务 */
+export interface ScheduleItem {
+  id: string
+  name: string
+  project: string
+  prompt: string
+  kind: 'daily' | 'interval'
+  time: string
+  /** 星期几：0 是周一 */
+  days: number[]
+  hours: number
+  /** run 直接做；tests 先跑测试，没过才做 */
+  action: 'run' | 'tests'
+  mode: 'read_only' | 'ask' | 'auto'
+  enabled: boolean
+  last_run: string
+  last_session: string
+  last_result: string
+  /** 「什么时候、做什么」，服务那边拼好的 */
+  describe: string
+  next: string | null
+}
+
+export type ScheduleInput = Pick<ScheduleItem, 'name' | 'project' | 'prompt' | 'kind' | 'time' | 'days' | 'hours' | 'action' | 'mode'>
+
 /** 设置 → 手机 →「让她操作安卓手机」：ADB 找没找到、连着哪些手机、选的哪台（aila-ai/app/android） */
 export interface AndroidStatus {
   enabled: boolean
@@ -44,7 +69,11 @@ export interface PhoneStatus {
   devices: { id: string; name: string; created: number; lastSeen: number }[]
   /** 正在等手机输入的配对码（过期时间是秒级时间戳） */
   pairing: { code: string; expires: number } | null
+  /** 推到手机通知栏：哪家、填没填地址（地址不回显） */
+  push: { kind: PushKind; set: boolean }
 }
+
+export type PushKind = 'none' | 'ntfy' | 'bark' | 'wecom' | 'feishu'
 
 /** 一个项目里「以后都允许」的命令；路径和命令都按原文删除。 */
 export interface AgentRuleGroup {
@@ -150,6 +179,8 @@ export interface AiSettings {
   llm: { baseUrl: string; model: string; apiKeySet: boolean; coderModel?: string; coderFastModel?: string }
   search: { provider: 'bocha' | 'tavily' | 'none'; apiKeySet: boolean }
   computer: { inventory: boolean }
+  /** 日历和邮件（只读）：订阅链接、授权码不回显，只说填了没有（旧服务没有） */
+  agenda?: { calendarSet: boolean; mailUser: string; mailPassSet: boolean; mailHost: string }
   /** 性格：说话风格、怎么称呼你、口头禅（旧服务没有） */
   persona?: { style: PersonaStyle; call: string; catchphrase: string }
   voice: {
@@ -190,6 +221,21 @@ export interface AiSettingsUpdate {
   wakeThreshold?: number
   endSilence?: number
   asrLanguage?: 'zh' | 'auto'
+  /** 日历订阅链接、邮箱、授权码、IMAP 服务器（空字符串 = 清掉） */
+  calendarUrl?: string
+  mailUser?: string
+  mailPass?: string
+  mailHost?: string
+}
+
+/** 日历上的一件事（aila-ai/app/agenda.py），时间是带时区的 ISO 字符串 */
+export interface AgendaEvent {
+  uid: string
+  title: string
+  start: string
+  end: string
+  allDay: boolean
+  location: string
 }
 
 export interface AiResult<T> {

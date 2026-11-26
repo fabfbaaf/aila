@@ -41,9 +41,18 @@ import {
   getPhone,
   setPhone,
   newPhonePairing,
+  testPhonePush,
   forgetPhone,
   getAndroid,
   setAndroid,
+  getAgendaToday,
+  getAgendaUpcoming,
+  testAgenda,
+  listSchedules,
+  addSchedule,
+  changeSchedule,
+  deleteSchedule,
+  runSchedule,
   pairAndroid,
   connectAndroid
 } from './ai'
@@ -1377,6 +1386,29 @@ function registerIpc(): void {
       : MAIN_ONLY
   )
   ipcMain.handle('phone:pair', (e) => (fromMainWindow(e) ? newPhonePairing(AI_URL) : MAIN_ONLY))
+  // 推到手机通知栏：哪家、地址（地址只往 AI 服务那边存，不回显）
+  ipcMain.handle('phone:push', (e, kind: unknown, url: unknown) =>
+    fromMainWindow(e) && typeof kind === 'string' && /^(none|ntfy|bark|wecom|feishu)$/.test(kind) && typeof url === 'string' && url.length <= 2000
+      ? setPhone(AI_URL, { push: { kind, url } })
+      : MAIN_ONLY
+  )
+  ipcMain.handle('phone:push-test', (e) => (fromMainWindow(e) ? testPhonePush(AI_URL) : MAIN_ONLY))
+  // 日历和邮件：设置页的「试试」（只认主窗口）
+  ipcMain.handle('agenda:test', (e, what: unknown) =>
+    fromMainWindow(e) && (what === 'calendar' || what === 'mail') ? testAgenda(AI_URL, what) : MAIN_ONLY
+  )
+  // 定时任务（设置 → 编程）：只认主窗口；内容 AI 服务那边再检查一遍（项目只认登记过的、时间格式、权限）
+  const scheduleId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{1,16}$/.test(v)
+  const scheduleBody = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && JSON.stringify(v).length < 10000
+  ipcMain.handle('schedules:list', (e) => (fromMainWindow(e) ? listSchedules(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('schedules:add', (e, body: unknown) =>
+    fromMainWindow(e) && scheduleBody(body) ? addSchedule(AI_URL, body as never) : MAIN_ONLY
+  )
+  ipcMain.handle('schedules:change', (e, id: unknown, body: unknown) =>
+    fromMainWindow(e) && scheduleId(id) && scheduleBody(body) ? changeSchedule(AI_URL, id, body as never) : MAIN_ONLY
+  )
+  ipcMain.handle('schedules:delete', (e, id: unknown) => (fromMainWindow(e) && scheduleId(id) ? deleteSchedule(AI_URL, id) : MAIN_ONLY))
+  ipcMain.handle('schedules:run', (e, id: unknown) => (fromMainWindow(e) && scheduleId(id) ? runSchedule(AI_URL, id) : MAIN_ONLY))
   // 「让她操作安卓手机」：开关、选手机、无线调试配对和连接。只认主窗口，参数在这里先检查一遍
   const adbAddress = (v: unknown): v is string => typeof v === 'string' && /^[\w.-]{1,253}:\d{1,5}$/.test(v)
   ipcMain.handle('android:status', (e) => (fromMainWindow(e) ? getAndroid(AI_URL) : MAIN_ONLY))
@@ -1630,7 +1662,14 @@ app.whenReady().then(() => {
     gather: async () => {
       const r = await agentRelay.list()
       if (!r.ok || !r.data) return null
-      return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [] }
+      // 日历上今天的会（没填订阅链接、取不到就当没有）
+      const agenda = await getAgendaToday(AI_URL)
+      const meetings = agenda.ok && agenda.data ? agenda.data.events : []
+      return { sessions: r.data, memories: account?.memories.list() ?? [], messages: account?.history.visible() ?? [], meetings }
+    },
+    upcomingMeetings: async () => {
+      const r = await getAgendaUpcoming(AI_URL, 10)
+      return r.ok && r.data ? r.data.events : []
     },
     pollDiscoveries: async () => {
       const result = await discoveries.poll(AI_URL)

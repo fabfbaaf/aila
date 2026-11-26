@@ -16,6 +16,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 if TYPE_CHECKING:
+    from .notify import Notifier
+    from .runtime.schedules import Scheduler, ScheduleStore
+    from .agenda import Calendar
+    from .tools.agenda import MeetingWatcher
     from .phone import PhoneServer, PhoneStore
     from .android import Adb, AndroidSession, AndroidSettings
 
@@ -46,8 +50,10 @@ from .tools.reminders import reminder_skill
 from .tools.mcp import McpHub, load_config
 from .tools.reader import make_resolver
 from .tools.search import BochaSearch, FreeSearch, MockSearch, SearchProvider, TavilySearch
+from .tools.agenda import calendar_skill, mail_skill
 from .tools.android import android_skill
 from .tools.guide import guide_skill
+from .tools.schedule import schedule_skill
 from .tools.web import web_skill
 from .tools.x_browser import x_browser_skill
 
@@ -112,6 +118,7 @@ def get_runtime() -> Runtime:
                       memory_store=lambda: get_memory_store(), language=lambda: settings.language,
                       web_search=search_provider)
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
+    runtime.watchers.append(get_notifier().watch)  # 等你同意、做完了：告诉手机（app/notify.py）
     return runtime
 
 
@@ -262,6 +269,8 @@ def get_registry() -> SkillRegistry:
         computer_skill(), computer_task_skill(lambda: get_runtime()), x_browser_skill(get_browser()),
         guide_skill(lambda: get_runtime()),
         android_skill(lambda: get_android_session(), android_ready),
+        schedule_skill(lambda: get_schedules(), lambda: get_runtime().find_project("")),
+        calendar_skill(lambda: get_calendar()), mail_skill(lambda c, u, d: read_mail(c, u, d), lambda: mail_ready()),
     ])
     for skill in _mcp_skills:
         registry.add(skill)
@@ -296,6 +305,8 @@ def apply(updates: dict[str, str]) -> list[str]:
     if any(k in updates for k in SEARCH_KEYS):
         get_registry.cache_clear()
         reloaded.append("search")
+    if any(k.startswith(("AILA_CALENDAR", "AILA_MAIL")) for k in updates):
+        reloaded.append("agenda")  # 日历、邮件每次现取设置（get_calendar 按链接换），不用别的
     # 语音模型重新加载要几秒，放到后台；加载好之前还用旧的，新连接用新的
     if any(k in updates for k in TTS_KEYS):
         with _voice_lock:
@@ -397,13 +408,26 @@ def get_phone_server() -> "PhoneServer":
     return PhoneServer(PHONE_PORT, PHONE_HOST)
 
 
+@lru_cache
+def get_notifier() -> "Notifier":
+    """编程任务的通知（手机页面开着时弹一条，填了推送地址时推到通知栏）"""
+    from .notify import Notifier, send_push
+
+    def title_of(sid: str) -> str:
+        session = get_runtime().store.get(sid)
+        return session.title if session else ""
+
+    return Notifier(lambda: get_phone().enabled, lambda: (get_phone().push_kind, get_phone().push_url), title_of,
+                    lambda kind, url, title, text: send_push(http_client, kind, url, title, text))
+
+
 async def apply_phone() -> None:
     """按开关开、关局域网上的门（启动时、设置页拨开关时）"""
     from .phone.gateway import create_gateway, default_answer, default_chat
 
     server = get_phone_server()
     if get_phone().enabled:
-        await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer))
+        await server.start(create_gateway(get_phone(), get_runtime, default_chat, default_answer, get_notifier()))
     else:
         await server.stop()
 
@@ -450,3 +474,64 @@ def get_android_session() -> "AndroidSession | None":
 
         _android_session = AndroidSession(adb, s.serial)
     return _android_session
+
+
+# ---------- 定时和自动触发的编程任务（app/runtime/schedules.py） ----------
+
+
+@lru_cache
+def get_schedules() -> "ScheduleStore":
+    from .runtime.schedules import ScheduleStore
+
+    return ScheduleStore(settings.data_dir / "schedules.json")
+
+
+@lru_cache
+def get_scheduler() -> "Scheduler":
+    from .runtime.schedules import Scheduler, run_schedule
+
+    async def run_once(s):  # noqa: ANN001, ANN202
+        session, result = await run_schedule(get_runtime(), s)
+        if not session:  # 没开任务（测试都过了、没开成）：也告诉你一声；开了任务的，做完时任务自己会提醒
+            get_notifier().notice("schedule", "", f"定时任务「{s.name}」：{result}", f"定时任务「{s.name}」：{result}")
+        return session, result
+
+    return Scheduler(get_schedules(), run_once)
+
+
+# ---------- 日历和邮件（只读，app/agenda.py、app/mail.py） ----------
+
+_calendar: "Calendar | None" = None
+
+
+def get_calendar() -> "Calendar | None":
+    """填了订阅链接就有；换了链接就换一个（缓存跟着链接走）"""
+    global _calendar
+    url = settings.calendar_url
+    if not url:
+        _calendar = None
+        return None
+    if _calendar is None or _calendar.url != url.replace("webcal://", "https://", 1):
+        from .agenda import Calendar
+
+        _calendar = Calendar(url, http_client)
+    return _calendar
+
+
+def mail_ready() -> bool:
+    return bool(settings.mail_user and settings.mail_pass)
+
+
+def read_mail(count: int = 10, unread_only: bool = False, days: int = 7) -> list:  # type: ignore[type-arg]
+    from .mail import recent
+
+    return recent(settings.mail_user, settings.mail_pass, settings.mail_host, count, unread_only, days)
+
+
+@lru_cache
+def get_meetings() -> "MeetingWatcher":
+    """会前 10 分钟提醒到手机（开了「允许手机连接」才提醒；推出去的不带会议标题）"""
+    from .tools.agenda import MeetingWatcher
+
+    return MeetingWatcher(get_calendar, lambda kind, sid, text, push: get_notifier().notice(kind, sid, text, push),
+                          lambda: get_phone().enabled)

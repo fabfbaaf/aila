@@ -22,6 +22,8 @@ import type {
   AgentRuleGroup,
   PhoneStatus,
   AndroidStatus,
+  ScheduleInput,
+  ScheduleItem,
   AiResult,
   AiSettings,
   AiSettingsUpdate,
@@ -218,6 +220,19 @@ const api = {
   phoneEnable: (on: boolean): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:enable', on),
   phonePair: (): Promise<AiResult<{ code: string; expires: number; seconds: number }>> => ipcRenderer.invoke('phone:pair'),
   phoneForget: (id: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:forget', id),
+  phonePush: (kind: string, url: string): Promise<AiResult<PhoneStatus>> => ipcRenderer.invoke('phone:push', kind, url),
+  phonePushTest: (): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('phone:push-test'),
+  /** 日历和邮件：设置页「试试连得上吗」 */
+  agendaTest: (what: 'calendar' | 'mail'): Promise<AiResult<{ ok: boolean; count: number; unread?: number }>> =>
+    ipcRenderer.invoke('agenda:test', what),
+  /** 定时任务（设置 → 编程） */
+  schedulesList: (): Promise<AiResult<{ items: ScheduleItem[]; projects: { name: string; path: string }[] }>> =>
+    ipcRenderer.invoke('schedules:list'),
+  schedulesAdd: (body: ScheduleInput): Promise<AiResult<ScheduleItem>> => ipcRenderer.invoke('schedules:add', body),
+  schedulesChange: (id: string, body: Partial<ScheduleInput> & { enabled?: boolean }): Promise<AiResult<ScheduleItem>> =>
+    ipcRenderer.invoke('schedules:change', id, body),
+  schedulesDelete: (id: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('schedules:delete', id),
+  schedulesRun: (id: string): Promise<AiResult<ScheduleItem>> => ipcRenderer.invoke('schedules:run', id),
   /** 「让她操作安卓手机」：状态、开关和选手机、无线调试配对、连接 */
   androidStatus: (): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:status'),
   androidSet: (body: { enabled?: boolean; serial?: string }): Promise<AiResult<AndroidStatus>> => ipcRenderer.invoke('android:set', body),

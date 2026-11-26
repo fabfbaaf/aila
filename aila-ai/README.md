@@ -257,6 +257,8 @@ data: {"type": "done"}
   - 配对：设置页拿 6 位配对码（5 分钟有效、输错 5 次作废、一个码配一台），手机换回自己的设备密钥（`data/phone.json` 只存哈希），设置页能删；不加跨域头，页面带 CSP，内容一律 textContent
   - 手机上聊天按桌面端的技能包开关来（桌面端每次聊天都带着，记在 `phone.json`；改开关时也推过来），关掉的技能包手机上也用不了；不带桌面端的记忆列表
   - 局域网里是 http：家里的网络用，公共 Wi-Fi 别开。第一次打开时 Windows 防火墙会问，选专用网络
+  - 手机上同意编程任务的操作（`POST /api/tasks/{id}/confirm`）：改文件、普通命令、网页操作能点；危险命令、读密钥、MCP、本机端口、电脑任务只能在电脑上（`gateway.phone_can_answer`，按命令原文和权限种类由代码判断）；手机上没有「以后都允许」。确认事件发给手机时带 `phone` 字段
+  - 提醒（`app/notify.py`）：Runtime 的事件观察者看到「等你同意」「做完 / 出错 / 停下」时，推给开着的手机页面（`/api/notify` SSE），填了推送地址时再推到通知栏（ntfy、Bark、企业微信、飞书机器人；地址存本机不回显，推出去的只有标题和状态；同一件事 10 秒内不重复）
   - 本机接口：`GET /phone`、`PUT /phone {enabled, skills}`、`POST /phone/pair`、`DELETE /phone/devices/{id}`
 - **她操作安卓手机**（`app/android/`、`tools/android.py`，「安卓手机」技能包）：通过 ADB 操作你的安卓手机。只在 设置 → 手机 里打开「让她操作安卓手机」、选好手机、找得到 adb（`AILA_ADB`、PATH、Android SDK 的常见位置）时才把工具给她（`phone_read / phone_tap / phone_type / phone_swipe / phone_key / phone_open_app`）。
   - 看屏幕：`uiautomator dump` 的界面树 → 带编号的按钮、输入框、可滑区域和屏幕上的文字（`android/ui.py`，纯计算）；按编号点，坐标由代码算，不让大模型报坐标；屏幕清单一分钟就算旧，要重新看
@@ -418,6 +420,12 @@ data: {"type": "done"}
   - 同一步里派几个时一起跑（最多 4 个），结果按调用顺序记进日志；打断时一起停，子会话也记成被打断
   - 子 Agent 自己的系统提示词、工具列表也固定，开头放主会话同一份环境说明：同一个项目派出去的助手之间互相命中缓存
   - 用量记在主会话里（`usage` 事件带 `purpose: "explore"`）：算进总数，但不算主 Agent 的一步，也不影响要不要压缩
+- **日历和邮件**（`app/agenda.py`、`app/mail.py`、`tools/agenda.py` 的「日历」「邮件」两个技能包、`routes/agenda.py`），都只读：
+  - 日历：订阅链接（`AILA_CALENDAR_URL`，ICS，webcal 换成 https），15 分钟最多取一次；自己解析 VEVENT（折行、转义、TZID / UTC / 全天、DURATION），重复的用 `dateutil.rrule` 展开（UNTIL 没写时区的先换成 UTC），排除 EXDATE、改期的（RECURRENCE-ID）用改过的、取消的不算
+  - 邮件：IMAP（`AILA_MAIL_USER` / `AILA_MAIL_PASS` 授权码 / 可选 `AILA_MAIL_HOST`），收件箱只读打开、`BODY.PEEK` 取信（不标已读），163 这几家先发 IMAP ID；每封最多 64KB、正文给她 1500 字；信的内容当外部数据
+  - 用在：对话里问日程、看收件箱；桌面端早上的问候（`GET /agenda/today`）、会前 10 分钟冒泡（`GET /agenda/upcoming`）；手机那边会前提醒（`MeetingWatcher`，推到通知栏的不带会议标题）
+  - 设置页「试试」：`POST /agenda/test-calendar`、`POST /agenda/test-mail`；链接和授权码不回显
+- **定时任务**（`runtime/schedules.py`、`routes/schedules.py`、对话里的「定时任务」技能包 `tools/schedule.py`）：每天几点（可选星期几）或每隔几小时，在登记过、做过任务的项目里开一个任务；`action=tests` 时先跑项目自带的测试（`code.fix.detect_tests`，和合并分支时一样，不由大模型决定），过了只提醒一声，没过才开任务并带上测试输出（标明只是数据）。权限默认只读；`ask` / `auto` 一定 `isolate`（新分支）。后台每 30 秒看一眼（`Scheduler`），下次时间由 `next_run` 算（纯计算）；关机错过的下次启动补跑一次，不攒；同一个不会同时跑两份。对话里设要你确认（`risk="write"`，确认内容由代码拼）。存在 `data/schedules.json`；接口 `GET/POST /agent/schedules`、`PUT/DELETE /agent/schedules/{id}`、`POST /agent/schedules/{id}/run`
 - **多智能体**（`runtime/workers.py`，`delegate` / `merge_work` / `discard_work` 工具）：大任务能拆成几块改的文件不重叠的活时，她在同一步里派几个子 Agent 一起做。
   - 每个子 Agent 在自己的 git 分支里改（`branch.py` 的 worktree 临时目录，带着你没提交的改动），你的代码一个字都不动；用「编程用的模型」，有自己的系统提示词和会话日志（`data/sessions/<id>.sub/`）
   - 做完交回报告和改了哪些文件；她用 `merge_work` 收回：按改文件的权限问你，给你看的 diff 由 git 算出来；收回 = 把改过的文件按字节写回（不提交），这期间同一个文件被改过（她自己或别的子 Agent）就不收、告诉你是哪些；`discard_work` 不要了

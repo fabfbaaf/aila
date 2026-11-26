@@ -41,6 +41,7 @@ main { flex: 1; overflow-y: auto; padding: 12px 16px; }
 .ask .q { font-weight: 600; }
 .ask pre { white-space: pre-wrap; font-size: 12px; color: var(--muted); margin: 6px 0; max-height: 160px; overflow: auto; }
 .ask .row { display: flex; gap: 8px; }
+.ask pre .add { color: var(--ok); } .ask pre .del { color: var(--bad); } .ask pre .hunk { color: var(--cyan); } .ask pre .file { color: var(--text); }
 .err { color: var(--bad); font-size: 13px; margin: 6px 0; }
 .task { display: block; width: 100%; text-align: left; margin: 8px 0; padding: 10px 12px; }
 .task .t { font-weight: 600; }
@@ -59,6 +60,9 @@ main { flex: 1; overflow-y: auto; padding: 12px 16px; }
 .code { font-size: 28px; letter-spacing: 10px; text-align: center; }
 .form { display: flex; flex-direction: column; gap: 10px; }
 .note { color: var(--muted); font-size: 12px; }
+.banner { position: fixed; left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top)); z-index: 10; text-align: left;
+  background: #2a2350; border-color: var(--accent); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
+.banner b { color: var(--accent); margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -86,7 +90,7 @@ main { flex: 1; overflow-y: auto; padding: 12px 16px; }
     <div id="newTask" class="form hidden">
       <select id="ntProject"></select>
       <textarea id="ntText" rows="4" placeholder="要她做什么"></textarea>
-      <div class="note">手机上开的任务是「先问再改」：她要改文件、跑命令时，要你在电脑上点同意。</div>
+      <div class="note">手机上开的任务是「先问再改」：她要改文件、跑普通命令时手机上就能点同意；危险命令、碰密钥的还是要在电脑上点。</div>
       <button id="ntGo" class="primary">开始</button>
       <div id="ntErr" class="err"></div>
     </div>

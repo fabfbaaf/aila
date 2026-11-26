@@ -67,6 +67,9 @@ class PhoneStore:
     pairing: Pairing | None = None
     # 桌面端的技能包开关：手机上聊天也按它来（桌面端每次聊天都带着，这里记下最新的一份）
     skills: dict[str, bool] = field(default_factory=dict)
+    # 推到手机通知栏（app/notify.py）：哪家（none / ntfy / bark / wecom / feishu）和地址（地址里常带密钥，不回显）
+    push_kind: str = "none"
+    push_url: str = ""
     _saved_seen: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -77,6 +80,8 @@ class PhoneStore:
             data = json.loads(path.read_text(encoding="utf-8"))
             store.enabled = bool(data.get("enabled"))
             store.skills = {str(k): bool(v) for k, v in (data.get("skills") or {}).items()}
+            store.push_kind = str(data.get("push_kind") or "none")
+            store.push_url = str(data.get("push_url") or "")
             store.devices = [Device(**{k: d[k] for k in ("id", "name", "token_hash", "created", "last_seen") if k in d})
                              for d in data.get("devices", []) if isinstance(d, dict)]
         except FileNotFoundError:
@@ -87,7 +92,8 @@ class PhoneStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"enabled": self.enabled, "skills": self.skills, "devices": [asdict(d) for d in self.devices]}
+        data = {"enabled": self.enabled, "skills": self.skills, "push_kind": self.push_kind, "push_url": self.push_url,
+                "devices": [asdict(d) for d in self.devices]}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path)
