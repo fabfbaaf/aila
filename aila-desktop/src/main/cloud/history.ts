@@ -1,6 +1,6 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
-import { dirname } from 'path'
+import { readFileSync } from 'fs'
 import type { StoredMessage } from '../../shared/cloud'
+import { Saver } from './persist'
 
 /** 本地最多留这么多条（云端是全量的） */
 const MAX_LOCAL = 2000
@@ -13,9 +13,11 @@ const SAVE_DELAY_MS = 300
 export class HistoryStore {
   private messages: StoredMessage[] = []
   private byId = new Map<string, StoredMessage>()
-  private saveTimer: ReturnType<typeof setTimeout> | null = null
+  private saver: Saver
 
-  constructor(private file: string | null) {}
+  constructor(private file: string | null) {
+    this.saver = new Saver(file, () => JSON.stringify(this.messages), SAVE_DELAY_MS)
+  }
 
   load(): void {
     if (!this.file) return
@@ -84,16 +86,9 @@ export class HistoryStore {
     this.saveNow()
   }
 
-  /** 立刻写盘（退出前调用） */
-  saveNow(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer)
-    this.saveTimer = null
-    if (!this.file) return
-    mkdirSync(dirname(this.file), { recursive: true })
-    // 先写临时文件再改名：写到一半断电也不会把原来的记录弄坏
-    const tmp = this.file + '.tmp'
-    writeFileSync(tmp, JSON.stringify(this.messages), 'utf-8')
-    renameSync(tmp, this.file)
+  /** 立刻写盘（退出前调用）。写不进去时记下错误、过一会儿再试（persist.ts） */
+  saveNow(): boolean {
+    return this.saver.now()
   }
 
   private insert(m: StoredMessage): void {
@@ -115,8 +110,7 @@ export class HistoryStore {
   }
 
   private scheduleSave(): void {
-    if (!this.file || this.saveTimer) return
-    this.saveTimer = setTimeout(() => this.saveNow(), SAVE_DELAY_MS)
+    this.saver.schedule()
   }
 }
 

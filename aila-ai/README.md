@@ -35,7 +35,7 @@ aila                          # 在当前目录开一个会话，交互着做
 aila -p "这个项目是做什么的"   # 做完就退出：回答打到标准输出，过程打到标准错误，退出码 0 = 做完了
 aila -c                       # 接着这个目录最近的会话
 aila -r                       # 列出这个目录的会话，选一个接着做（aila -r 会话id 直接打开）
-aila --mode auto              # 权限模式：read_only 只读 / ask 先问再改（默认）/ auto 工作区内自动
+aila --mode auto              # 权限模式：read_only 只读 / ask 先问再改（默认）/ auto 工作区内自动 / full 全部放开
 aila --branch                 # 在新分支上做：你的代码不动；/merge 跑测试并合并，/merge 直接 不跑测试，/discard 放弃
 aila --budget 0.5             # 这个会话累计花费到 0.5 元后，在下一步开始前停下
 # 交互模式里 /trace 看上一轮的执行轨迹（每一步多久、命中多少缓存），/context 看上下文账本
@@ -394,7 +394,7 @@ data: {"type": "done"}
 - **工具**：`read_file`（带行号、分段读）、`list_files`（遵守 .gitignore）、`search`（正则，不搜密钥文件）、`edit_file`（原文要一字不差且唯一，保留 CRLF 和编码）、`write_file`、`run_command`（`background=true` 启动开发服务器等常驻命令，每个会话最多同时 3 个）、`todo_write`、`job_output`（按任务号看新输出和退出状态）、`job_stop`（停掉后台任务和它的子进程，用完记得停）。后台任务跨轮保留，运行时关闭时一起停掉。
   - 路径不出项目目录、不写 .git；**读过才能改**，读过之后文件被你改过就要重读（不会拿旧内容覆盖你的改动）
   - 命令：Windows 上用 Git Bash（没有就用 PowerShell），每次新进程、不接输入、超时杀整棵进程树；去掉艾拉自己的密钥环境变量；GBK 输出也认得
-- **权限**：读不用问；读 `.env`、私钥这类文件要问（内容会发给大模型，`cat .env` 这种命令也一样）。三种模式：只读 / 先问再改 / 工作区内自动。明显只读的命令（`git status`、`ls`，不带 `; & | >` 这些）直接跑；危险命令（删除、强推、reset --hard、发布、下载即执行、改系统设置、结束进程）任何模式都要问，也不能「以后都允许」；其他命令可以按项目记住（一字不差，存在 `data/agent_rules.json`）。确认时给你看的 diff、命令都由代码生成。
+- **权限**：读不用问；读 `.env`、私钥这类文件要问（内容会发给大模型，`cat .env` 这种命令也一样）。四种模式：只读 / 先问再改 / 工作区内自动 / 全部放开（在自动之上，开本机网页端口、在网页上点和提交、用 MCP 外部工具也不问；电脑任务不能选）。明显只读的命令（`git status`、`ls`，不带 `; & | >` 这些）直接跑；危险命令（删除、强推、reset --hard、发布、下载即执行、改系统设置、结束进程）任何模式都要问，也不能「以后都允许」；其他命令可以按项目记住（一字不差，存在 `data/agent_rules.json`）。确认时给你看的 diff、命令都由代码生成。
 - **循环**：一步 = 一次模型请求 + 它要的工具；一轮最多 `AILA_CODER_MAX_STEPS` 步。你拒绝（或者半小时没回答）一个操作，这一轮立刻结束，同一步里后面的调用也不执行，等你说怎么办。钩子：`turn_start`、`pre_step`、`post_step`、`pre_tool`、`post_tool`、`turn_end`（以后她的动作、星图标出改过的文件都挂在这里）。
 - **打断和出错**：一轮在后台任务里跑；打断时正在跑的前台命令连进程树一起停，常驻的后台命令继续跑；没执行的工具调用记成「被打断」，说了一半的话也记下来——日志始终能推出合法的消息，接着说不会被模型服务拒绝。
 - **外部工具（MCP）**（`runtime/mcp.py`）：接 MCP 生态里现成的工具服务（数据库、浏览器、GitHub……）。自己写的最小 stdio 客户端（JSON-RPC，一行一条），不加依赖：初始化、分页列工具、调工具、回应服务端的 ping；远程（url）服务暂不支持。配置和对话那边（`app/tools/mcp.py`，每个服务是一个技能包）共用 `aila-ai/mcp.json`：`servers`、`mcpServers`（Claude Desktop）两种写法都认，字段有 `command`、`args`、`env`、`disabled`、`readOnly`（整个服务只读）、`name`（显示名），这边另外用 `alwaysAllow`、`timeout`；写回时保留原来的写法和不认识的字段。两边各自连服务；设置页加、改、停用、删了服务以后，对话那边自动断开重连（`deps.restart_mcp`），不用重启 AI 服务；远程（url）服务目前只有对话里能用，只有你能加服务（设置页 → 编程，或者手改文件），她没有加服务的工具。服务子进程的环境变量去掉艾拉自己的密钥，再加上配置里给它的；`env` 的值不回传给界面。工具名是 `mcp__服务__工具`，排在工具列表最后，**只在一轮开始前对齐**（变了才换，一轮里不变）。权限：服务标了只读（`readOnlyHint`）的不用问；其他的只读模式不让用，先问再改和工作区内自动都要问（在项目以外做事），给你看的是代码拼的服务名、工具名和参数，可以选「这个工具以后都不用问」（记在 `alwaysAllow`）。结果只当数据，最多 2 万字；默认 120 秒超时。接口：`GET /agent/mcp`、`POST /agent/mcp/preview|import {json}`、`POST /agent/mcp/{name}/restart`、`PUT /agent/mcp/{name}/disabled`、`DELETE /agent/mcp/{name}`、`DELETE /agent/mcp/{name}/allow {tool}`；终端 `/mcp`、`/mcp restart 名字`

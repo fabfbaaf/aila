@@ -1,9 +1,11 @@
 """权限：每次工具调用之前决定 允许 / 先问用户 / 拒绝。
 
-三种模式（会话里随时可以换）：
+四种模式（会话里随时可以换）：
   read_only  只读：不改文件；命令只允许明显只读的那些（git status、ls……）
   ask        先问再改（默认）：读不用问；改文件、跑命令要问，明显只读的命令和你允许过的命令不用问
   auto       工作区内自动：改文件、跑命令都不问，危险命令除外
+  full       全部放开：在 auto 之上，打开本机端口、在网页上点和提交、用外部工具（MCP）也不问；
+             危险命令和密钥文件照样问（下面「不管哪种模式」那几条不变）
 
 不管哪种模式：
 - 危险命令（删除、强推、改系统设置、下载就执行……）始终要问，也不能「以后都允许」
@@ -36,9 +38,11 @@ from typing import Literal, Protocol
 
 from .workspace import SAFE_ENV_EXAMPLES, SECRET_DIRS, SECRET_NAME
 
-Mode = Literal["read_only", "ask", "auto"]
-MODES: tuple[Mode, ...] = ("read_only", "ask", "auto")
-MODE_LABELS = {"read_only": "只读", "ask": "先问再改", "auto": "工作区内自动"}
+Mode = Literal["read_only", "ask", "auto", "full"]
+MODES: tuple[Mode, ...] = ("read_only", "ask", "auto", "full")
+MODE_LABELS = {"read_only": "只读", "ask": "先问再改", "auto": "工作区内自动", "full": "全部放开"}
+# 改文件、跑普通命令都不问的模式（电脑任务不能选）
+AUTO_MODES: tuple[Mode, ...] = ("auto", "full")
 
 
 @dataclass(frozen=True)
@@ -177,7 +181,7 @@ class Policy:
                 return Decision("deny", "现在是只读模式，不能派人改代码（可以派 role=review 的审查员）。")
             return Decision("allow")
         if kind == "browser_local":
-            if command in self.browser_rules.commands(self.project):
+            if self.mode == "full" or command in self.browser_rules.commands(self.project):
                 return Decision("allow")
             return Decision("ask", f"访问本机的 {command} 端口", can_remember=True)
         if kind == "browser_read":
@@ -185,7 +189,8 @@ class Policy:
         if kind in ("browser_get", "browser_interact", "browser_external"):
             if self.mode == "read_only":
                 return Decision("deny", "现在是只读模式，只能打开和查看网页、截图、翻页。")
-            if kind == "browser_get" or (kind == "browser_interact" and self.mode == "auto"):
+            if (kind == "browser_get" or self.mode == "full"
+                    or (kind == "browser_interact" and self.mode == "auto")):
                 return Decision("allow")
             reason = "这个网页操作可能会在公网网站上产生变化" if kind == "browser_external" else "要操作本机开发页面"
             return Decision("ask", reason)
@@ -194,7 +199,7 @@ class Policy:
         if kind == "edit":
             if self.mode == "read_only":
                 return Decision("deny", "现在是只读模式，不能改文件。需要改的话请用户切换模式。")
-            if self.mode == "auto" or self.edits_allowed:
+            if self.mode in AUTO_MODES or self.edits_allowed:
                 return Decision("allow")
             return Decision("ask", can_remember=True)
         if kind == "command":
@@ -205,13 +210,13 @@ class Policy:
             # command 这里是工具名（mcp__服务__工具）
             if self.mode == "read_only":
                 return Decision("deny", "现在是只读模式，这个外部工具可能会改东西，不能用。")
-            if self.mcp and self.mcp.allowed(command):
+            if self.mode == "full" or (self.mcp and self.mcp.allowed(command)):
                 return Decision("allow")
             return Decision("ask", "这是外部工具（MCP），会在项目以外做事", can_remember=True)
         if kind == "memory":
             if self.mode == "read_only":
                 return Decision("deny", "现在是只读模式，不能记项目记忆。")
-            if self.mode == "auto":
+            if self.mode in AUTO_MODES:
                 return Decision("allow")
             return Decision("ask", "记下的话以后每个会话都会带上")
         return Decision("ask")
@@ -230,7 +235,7 @@ class Policy:
             return Decision("allow")
         if self.mode == "read_only":
             return Decision("deny", "现在是只读模式，只能执行查看类的命令（git status、ls 这类）。")
-        if self.mode == "auto" or command.strip() in self.rules.commands(self.project):
+        if self.mode in AUTO_MODES or command.strip() in self.rules.commands(self.project):
             return Decision("allow")
         return Decision("ask", can_remember=True)
 

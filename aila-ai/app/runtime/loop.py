@@ -20,6 +20,7 @@ import inspect
 import time
 import json
 import logging
+from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal
@@ -52,6 +53,30 @@ MAX_DENIED = 3
 INTERRUPTED = "被用户打断了，没有执行。"
 # 一步里连着的可以一起跑的调用（子 Agent），最多同时跑几个
 MAX_PARALLEL = 4
+# 一直在网页上找：最近 BROWSER_WINDOW 步里有 BROWSER_NUDGE 步在用浏览器，就在工具结果后面提醒她换个办法
+# （以前她看不到 iframe 里的东西，来回开网页、写临时检查页，把步数用光了）
+BROWSER_WINDOW = 12
+BROWSER_NUDGE = 8
+BROWSER_HINT = "\n\n（最近 {total} 步里有 {n} 步在用浏览器。要找的东西网页上一直看不到的话，换个办法：读源码、search 搜、跑命令或脚本、browser_screenshot 看图。）"
+
+
+class BrowserStreak:
+    """记着最近用过的工具：一直在用浏览器找东西时，给这个工具结果后面接一句提醒；提醒过以后隔一个窗口才再提醒"""
+
+    def __init__(self) -> None:
+        self.recent: deque[str] = deque(maxlen=BROWSER_WINDOW)
+        self.since_hint = BROWSER_WINDOW
+
+    def note(self, name: str) -> str:
+        self.recent.append(name)
+        self.since_hint += 1
+        if not name.startswith("browser_") or self.since_hint < BROWSER_WINDOW:
+            return ""
+        n = sum(1 for t in self.recent if t.startswith("browser_"))
+        if n < BROWSER_NUDGE:
+            return ""
+        self.since_hint = 0
+        return BROWSER_HINT.format(total=len(self.recent), n=n)
 DEFAULT_CONTEXT_WINDOW = 128_000
 
 
@@ -104,6 +129,8 @@ class Agent:
         self.system = system
         # 这一步说到一半的话（被打断时记下来）
         self._partial = ""
+        # 看是不是一直在网页上找
+        self._browser = BrowserStreak()
 
     # ---------- 一轮 ----------
 
@@ -382,7 +409,7 @@ class Agent:
             "id": call.id,
             "name": call.name,
             "status": status or ("ok" if outcome.ok else "error"),
-            "content": outcome.content,
+            "content": outcome.content + self._browser.note(call.name),
             **outcome.extra,
         })
 

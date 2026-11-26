@@ -275,15 +275,20 @@ def create_gateway(store: PhoneStore, runtime: Callable[[], Runtime], chat: Chat
 
 
 async def default_chat(messages: list[dict[str, str]]) -> StreamingResponse:
-    """和电脑上一样的聊天（同一个模型、技能包开关、记忆库），只是不带桌面端那边的记忆列表"""
+    """和电脑上一样的聊天（同一个模型、技能包开关、记忆库）。
+    关于你的记忆用记忆库里那份（桌面端推过来的）：以前这里传空列表，不但手机上她什么都不记得，
+    还会把记忆库里的记忆对齐成空的"""
     from .. import deps
-    from ..routes.chat import ChatRequest, chat
+    from ..routes.chat import ChatRequest, MemoryIn, chat
 
     embedder = await asyncio.to_thread(deps.get_embedder)
+    store = deps.get_memory_store()
+    facts = await asyncio.to_thread(store.facts)
+    memories = [MemoryIn(id=m.id, content=m.content, kind=m.kind, expiresAt=m.expires_at, updatedAt=m.updated_at) for m in facts]
     # 技能包开关用桌面端的（关掉的手机上也用不了）
-    req = ChatRequest(messages=messages, skills=deps.get_phone().skills)
+    req = ChatRequest(messages=messages, skills=deps.get_phone().skills, memories=memories)
     return await chat(req, model=deps.get_model(), registry=deps.get_registry(),
-                      embedder=embedder, confirms=deps.get_confirmations(), store=deps.get_memory_store())
+                      embedder=embedder, confirms=deps.get_confirmations(), store=store)
 
 
 def default_answer(confirm_id: str, approved: bool) -> bool:

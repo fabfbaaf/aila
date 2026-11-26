@@ -90,7 +90,7 @@ import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
-import { forAi } from './cloud/keeper'
+import { forAi, type MemoryForAi } from './cloud/keeper'
 import type { StoredMemory } from '../shared/cloud'
 import type { SocketLike } from './cloud/sync'
 import { createServiceKeeper, serviceLocator } from './serviceNode'
@@ -98,6 +98,7 @@ import { ModelDownloader } from './models'
 import { registerServiceIpc } from './serviceIpc'
 import { openWorkPreview, revealWork, studio, WORK_ID } from './studio'
 import type { LifeState } from '../shared/studio'
+import { createMainLog } from './mainLog'
 
 // 桌面窗口：透明、无边框、置顶，只在角色身上响应鼠标
 const WIN_WIDTH = 300
@@ -112,6 +113,10 @@ const HIDE_SHORTCUT = 'Alt+Shift+H'
 // 开发调试：AILA_USER_DATA=文件夹 时数据放那里（打包后无效）。在真窗口里试东西不碰你自己的记忆、对话和设置，
 // 也不和已经开着的艾拉抢「只开一个」的锁。要在下面任何 getPath('userData') 之前设
 if (process.env['AILA_USER_DATA'] && !app.isPackaged) app.setPath('userData', process.env['AILA_USER_DATA'])
+// 主进程的日志（装好的艾拉没有控制台）：没接住的异常记一行，照常按 Electron 默认的方式处理
+const mainLog = createMainLog(app.getPath('userData'))
+process.on('uncaughtExceptionMonitor', (err) => mainLog.write(`没接住的错误：${err?.stack ?? err}`))
+process.on('unhandledRejection', (reason) => mainLog.write(`没接住的 Promise 错误：${reason instanceof Error ? reason.stack : String(reason)}`))
 const AI_URL = process.env['AILA_AI_URL'] ?? AI_SERVICE_URL
 const locateAi = serviceLocator({ packaged: app.isPackaged, appPath: app.getAppPath(), userData: app.getPath('userData') })
 let servicePhase = ''
@@ -123,7 +128,7 @@ const serviceKeeper = createServiceKeeper({
     const up = state.phase === 'ready' || state.phase === 'external'
     // AI 服务刚起来：把记忆推过去一次（它重启、换了数据目录也能对上）
     if (up && servicePhase !== 'ready' && servicePhase !== 'external') {
-      if (account) pushFacts(account.memories.list())
+      if (account) void recoverThenPushFacts(account)
       pushLanguage()
     }
     servicePhase = state.phase
@@ -136,6 +141,24 @@ const serviceKeeper = createServiceKeeper({
  * 一个接一个地推，后改的不会被先改的盖掉
  */
 let factsPush: Promise<unknown> = Promise.resolve()
+
+/**
+ * AI 服务刚起来：先看它的记忆库里有没有本地丢了的记忆（以前存不进文件，重启就空了），取回来，再推过去。
+ * 先推的话，空的列表会把那边留着的也删掉
+ */
+async function recoverThenPushFacts(acc: Account): Promise<void> {
+  try {
+    const res = await fetch(`${AI_URL}/memory/facts`, { signal: AbortSignal.timeout(10_000) })
+    if (res.ok) {
+      const n = acc.recoverMemories(((await res.json()) as { memories?: MemoryForAi[] }).memories ?? [])
+      if (n) mainLog.write(`本地的记忆是空的，从 AI 服务的记忆库里取回了 ${n} 条`)
+    }
+  } catch {
+    // 取不到就算了：照常推本地的
+  }
+  pushFacts(acc.memories.list())
+}
+
 function pushFacts(list: StoredMemory[]): void {
   const body = JSON.stringify({ memories: forAi(list) })
   factsPush = factsPush.then(() =>
@@ -176,7 +199,7 @@ let tray: Tray | null = null
 let desktop: DesktopKeeper | null = null
 /** 拖到她身上的文件（只能读刚拖进来的） */
 const drops = new Drops()
-const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto']
+const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto', 'full']
 const agentRelay = new AgentRelay(AI_URL, {
   emit: (sid, e) => mainWin?.webContents.send('agent:event', sid, e),
   ended: (sid, error) => mainWin?.webContents.send('agent:stream-end', sid, error),
@@ -867,6 +890,8 @@ function secretBox(): SecretBox {
 function createAccount(): Account {
   return new Account({
     dataDir: app.getPath('userData'),
+    onSaveProblem: (problem, file) =>
+      mainLog.write(problem ? `存不进文件 ${file}：${problem.error}（过一会儿再试）` : `${file} 又存上了`),
     box: secretBox(),
     openSocket: (url, token) =>
       new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } }) as unknown as SocketLike,
@@ -936,7 +961,8 @@ async function relayChat(id: number, messages: ChatMessage[]): Promise<void> {
   try {
     // 带上她记得的事，AI 服务会挑出和这次话题相关的几条
     // 还有用户对技能包的开关：关掉的技能包里的工具不会给大模型
-    const extra = { memories: account?.memoriesForChat() ?? [], skills: account?.skillOverrides() ?? {} }
+    // 还有认识多久了：她按这个决定拘谨还是放松
+    const extra = { memories: account?.memoriesForChat() ?? [], skills: account?.skillOverrides() ?? {}, bond: account?.bond() }
     await streamChat(
       AI_URL,
       messages,
@@ -1013,6 +1039,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('history:load', () => account?.history.visible() ?? [])
+  ipcMain.handle('bond:get', () => account?.bond() ?? null)
   ipcMain.on('history:append', (_e, m: unknown) => {
     if (isStoredMessage(m)) {
       account?.append({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })

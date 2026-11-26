@@ -23,7 +23,7 @@ from ..discoveries import Discoveries, mock_topics
 from .discoveries import get_discoveries
 from ..memory.episodes import Line, chat_context
 from ..memory.store import EPISODE, MemoryStore
-from ..persona import system_prompt
+from ..persona import bond_note, system_prompt
 from ..i18n import localize, localize_event
 from ..sse import with_heartbeat
 from ..tags import Event
@@ -51,12 +51,21 @@ class MemoryIn(BaseModel):
         return Memory(self.id, self.content, self.kind, _aware(self.expiresAt), _aware(self.updatedAt))
 
 
+class Bond(BaseModel):
+    """认识第几天（从 0 算）、对方说过几句"""
+
+    days: int = Field(ge=0, le=100_000)
+    talks: int = Field(ge=0, le=10_000_000)
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=200)
     # 她记得的所有事：这里挑出和这次话题相关的几条放进提示词
     memories: list[MemoryIn] = Field(default_factory=list, max_length=2000)
     # 用户对技能包的开关（覆盖默认值），比如 {"web": false, "mcp:time": true}
     skills: dict[str, bool] = Field(default_factory=dict)
+    # 认识多久了（桌面端算）：她按这个决定拘谨还是放松（persona.bond_note）
+    bond: Bond | None = None
 
 
 def _aware(t: datetime | None) -> datetime | None:
@@ -96,15 +105,20 @@ def build_messages(history: list[ChatMessage], max_history: int, context: str = 
 
 
 async def memory_context(req: ChatRequest, embedder: Any, store: MemoryStore | None = None) -> str:
-    """今天的日期 + 和最近几句话相关的记忆 + 更早对话的摘要和相关的经历（记忆库里的）"""
+    """今天的日期 + 认识多久 + 和最近几句话相关的记忆 + 更早对话的摘要和相关的经历（记忆库里的）"""
     now = datetime.now().astimezone()
     query = "\n".join(m.content for m in req.messages if m.role == "user")[-300:]
     memories = [m.to_memory() for m in req.memories]
     try:
-        return await asyncio.to_thread(chat_context, store, memories, query, embedder, now)
+        context = await asyncio.to_thread(chat_context, store, memories, query, embedder, now)
     except Exception as err:  # 记忆库坏了也照常聊天：退回到不查库的挑法
         log.warning("记忆库读不了：%s", err)
-        return await asyncio.to_thread(chat_context, None, memories, query, embedder, now)
+        context = await asyncio.to_thread(chat_context, None, memories, query, embedder, now)
+    if req.bond is None:
+        return context
+    # 日期是第一行，认识多久接在它后面
+    first, _, rest = context.partition("\n")
+    return f"{first}\n{bond_note(req.bond.days, req.bond.talks)}" + (f"\n{rest}" if rest else "")
 
 
 def sse(event: Event) -> str:
@@ -232,6 +246,17 @@ async def memory_facts(req: FactsIn, store: MemoryStore = Depends(get_memory_sto
     """桌面端的全部记忆（正本在桌面端）对齐到记忆库：记忆变了、AI 服务刚启动时推一次。删掉的在这里也删掉"""
     changed = await asyncio.to_thread(store.sync_facts, [m.to_memory() for m in req.memories])
     return {"changed": changed, "total": len(req.memories)}
+
+
+@router.get("/memory/facts")
+async def memory_facts_list(store: MemoryStore = Depends(get_memory_store)) -> dict[str, list[dict[str, Any]]]:
+    """记忆库里的记忆：桌面端本地的丢了（存不进文件、重启就空了）时从这里取回来，再推回来对齐"""
+    facts = await asyncio.to_thread(store.facts)
+    return {"memories": [{
+        "id": m.id, "content": m.content, "kind": m.kind,
+        "expiresAt": m.expires_at.isoformat() if m.expires_at else None,
+        "updatedAt": (m.updated_at or datetime.now().astimezone()).isoformat(),
+    } for m in facts]}
 
 
 @router.get("/memory/episodes")

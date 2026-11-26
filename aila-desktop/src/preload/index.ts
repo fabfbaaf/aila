@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import { AI_SERVICE_URL, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
+import { AI_SERVICE_URL, type Bond, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
 import type { StagePhase } from '../shared/entrance'
 import type { IntroCue, IntroScene } from '../shared/intro'
@@ -106,6 +106,8 @@ const api = {
   // 对话记录（本地保存，登录后同步到云端）
   historyLoad: (): Promise<StoredMessage[]> => ipcRenderer.invoke('history:load'),
   historyAppend: (m: StoredMessage): void => ipcRenderer.send('history:append', m),
+  /** 认识多久了：桌面上的台词按熟不熟换着说 */
+  bond: (): Promise<Bond | null> => ipcRenderer.invoke('bond:get'),
   onHistoryRemote: (cb: (changes: RemoteChanges) => void): Unsubscribe => listen('history:remote', cb),
   /** 主窗口的对话记录页：记录变了（说了新的话、别的设备同步过来）就重新读 */
   onHistoryChanged: (cb: () => void): Unsubscribe => listen('history:changed', cb),

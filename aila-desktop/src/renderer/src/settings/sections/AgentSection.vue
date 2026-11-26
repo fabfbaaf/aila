@@ -11,7 +11,7 @@ import { loadComputerContext, loadComputerSettings, saveComputerInventory } from
 import { bridge } from '../../platform/bridge'
 import SchedulesCard from './SchedulesCard.vue'
 
-const modes: AgentMode[] = ['read_only', 'ask', 'auto']
+const modes: AgentMode[] = ['read_only', 'ask', 'auto', 'full']
 const groups = ref<AgentRuleGroup[]>([])
 const projects = computed(() => groups.value.filter((group) => group.commands.length))
 const loading = ref(false)
@@ -143,7 +143,7 @@ onActivated(loadComputer)
     <p class="lead">{{ t('每个任务可以单独切换权限模式。这里能查看和撤销你选过的「以后都允许」。') }}</p>
 
     <div class="card">
-      <h3>{{ t('三种权限模式') }}</h3>
+      <h3>{{ t('四种权限模式') }}</h3>
       <dl class="modes">
         <div v-for="mode in modes" :key="mode">
           <dt>{{ MODE_LABELS[mode] }}</dt>

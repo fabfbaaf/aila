@@ -4,7 +4,7 @@
   aila -p "任务"              做完就退出：最后的回答打到标准输出，过程打到标准错误；退出码 0 = 做完了
   aila -c                     接着这个目录最近的会话
   aila -r [会话id]            接着某个会话（不给 id 就列出这个目录最近的会话）
-  选项：--mode read_only|ask|auto  --cwd 目录  --local（不连 AI 服务）  --service（一定连 AI 服务）
+  选项：--mode read_only|ask|auto|full  --cwd 目录  --local（不连 AI 服务）  --service（一定连 AI 服务）
         --json（-p 时按行输出 JSON 事件，给脚本用）
 
 她做事的时候按 Esc（或 Ctrl+C）打断；要你确认时按 1 可以 / 2 以后都可以 / 3 或 Esc 不要。
@@ -99,7 +99,7 @@ class SlashCompleter(Completer):
         elif text.startswith("/mode "):
             word = text[6:]
             for mode in MODES:
-                if self.computer() and mode == "auto":
+                if self.computer() and mode in ("auto", "full"):
                     continue
                 if mode.startswith(word):
                     yield Completion(mode, start_position=-len(word), display_meta=MODE_LABELS[mode])
@@ -356,7 +356,7 @@ class Terminal:
                 mode = next_mode(self.info.get("mode", "ask"), arg, computer=self.info.get("kind") == "computer")
                 if mode is None:
                     self.console.print(Text("可选：" + "、".join(f"{k}（{v}）" for k, v in MODE_LABELS.items()
-                                                        if self.info.get("kind") != "computer" or k != "auto"), style="dim"))
+                                                        if self.info.get("kind") != "computer" or k in ("read_only", "ask")), style="dim"))
                 else:
                     await self.backend.set_mode(self.sid, mode)
                     self.info["mode"] = mode
@@ -648,7 +648,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("-c", "--continue", dest="cont", action="store_true", help="接着这个目录最近的会话")
     p.add_argument("-r", "--resume", nargs="?", const="", help="接着某个会话（不给 id 就列出来）")
     p.add_argument("--cwd", default=os.getcwd(), help="项目目录（默认当前目录）")
-    p.add_argument("--mode", choices=MODES, help="权限模式：read_only 只读 / ask 先问再改（默认）/ auto 工作区内自动")
+    p.add_argument("--mode", choices=MODES, help="权限模式：read_only 只读 / ask 先问再改（默认）/ auto 工作区内自动 / full 全部放开")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--local", action="store_true", help="不连 AI 服务，在终端里自己跑")
     g.add_argument("--service", action="store_true", help="一定连 AI 服务（没开就报错）")
@@ -657,7 +657,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--computer", action="store_true", help="开电脑任务：从用户目录开始，只读或先问再改")
     p.add_argument("--budget", type=_budget_arg, help="会话累计花费上限（元），不填就不限")
     args = p.parse_args(argv)
-    if args.computer and args.mode == "auto":
+    if args.computer and args.mode in ("auto", "full"):
         p.error("电脑任务只能选 read_only 或 ask。")
     if args.computer and args.branch:
         p.error("电脑任务不能在新分支上做。")

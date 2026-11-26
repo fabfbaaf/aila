@@ -66,6 +66,7 @@ export const EN2: Record<string, string> = {
   编程: 'Coding',
   '每个任务可以单独切换权限模式。这里能查看和撤销你选过的「以后都允许」。': 'Each task can switch permission mode on its own. Here you can review and undo the "always allow" choices you made.',
   三种权限模式: 'Three permission modes',
+  四种权限模式: 'Four permission modes',
   '危险命令不管哪种模式都要问，也不能「以后都允许」。只读模式下会拒绝执行。读可能存着密钥的文件也要问。':
     'Dangerous commands always ask, in every mode, and can never be "always allowed". Read-only mode refuses them. Reading files that may hold secrets also asks.',
   '电脑任务只有「只读」和「先问再改」，不提供工作区内自动。受保护的位置每次都要确认，也不能记住授权。':

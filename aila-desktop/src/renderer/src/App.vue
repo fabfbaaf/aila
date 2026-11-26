@@ -7,7 +7,7 @@ import ChatInput from './components/ChatInput.vue'
 import type { BubbleAsk } from './components/bubble'
 import type { CharacterEvent } from '../../shared/settings'
 import type { Discovery } from '../../shared/discoveries'
-import { BUILTIN_GESTURES, type ConfirmAsk } from '../../shared/chat'
+import { BUILTIN_GESTURES, isClose, type ConfirmAsk } from '../../shared/chat'
 import { cleanMotions } from '../../shared/extensions'
 import type { AgentProgress } from '../../shared/agent'
 import { pendingFixOf, type LocatedError } from '../../shared/workbench'
@@ -25,7 +25,7 @@ import type { Avatar } from './avatar/types'
 import { loadVrmAvatar } from './avatar/VrmAvatar'
 import { Live2DUnavailable, loadLive2DAvatar } from './avatar/Live2DAvatar'
 import type { LoadedModel } from '../../shared/model'
-import { applyExtensionLines, lines, pick } from './persona/lines'
+import { applyExtensionLines, lines, pick, setClose } from './persona/lines'
 import { bridge } from './platform/bridge'
 import { Speaker } from './voice/Speaker'
 import { VoiceController } from './voice/VoiceController'
@@ -933,6 +933,16 @@ async function loadCompanion(): Promise<void> {
   applyExtensionLines(c?.lines)
 }
 
+let bondTimer = 0
+async function refreshBond(): Promise<void> {
+  if (!bridge?.bond) return // 浏览器调试、旧的预加载
+  try {
+    setClose(isClose(await bridge.bond()))
+  } catch {
+    // 问不到就按原来的
+  }
+}
+
 onMounted(async () => {
   stage = new Stage(stageEl.value!, behavior)
   stage.onStep = (dt) => {
@@ -949,6 +959,9 @@ onMounted(async () => {
   }
   stage.setAvatar(new PlaceholderAvatar())
   stage.start()
+  // 熟不熟：桌面上的台词跟着换（熟了掺着说孩子气一点的）。认识的天数会变，每小时再问一次
+  void refreshBond()
+  bondTimer = window.setInterval(() => void refreshBond(), 3_600_000)
   if (import.meta.env.DEV) {
     // 开发调试入口：控制台里可以直接操作舞台、行为、对话和语音
     ;(window as unknown as Record<string, unknown>).__aila = {
@@ -1083,6 +1096,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  clearInterval(bondTimer)
   document.removeEventListener('mousemove', onMouseMove)
   // 开发时改了 preload 没重启，旧的订阅函数不返回退订函数：跳过，别让卸载出错
   for (const off of subscriptions.splice(0)) if (typeof off === 'function') off()

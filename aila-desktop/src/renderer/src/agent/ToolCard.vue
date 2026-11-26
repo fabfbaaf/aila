@@ -10,6 +10,8 @@ const props = defineProps<{
   sessionId?: string
   loadScreenshot?: (sid: string, name: string) => Promise<string>
   computer?: boolean
+  /** 任务页顶上「收起代码」：改文件的卡片默认只显示一行（+几 −几），点开才看 diff */
+  foldCode?: boolean
 }>()
 const emit = defineEmits<{ answer: [approved: boolean, remember: boolean] }>()
 
@@ -26,10 +28,12 @@ const isCommand = computed(() => props.item.name === 'run_command')
 const isExplore = computed(() => props.item.name === 'explore' || props.item.name === 'delegate')
 const asking = computed(() => !!props.item.confirm && !props.item.confirm.result && props.item.status === 'asking')
 
-/** 默认展开：改文件（看 diff）、命令（看输出）、出错、待办、助手的报告；读文件、搜索这些只看一行 */
+/** 默认展开：改文件（看 diff，收起代码时不展开）、命令（看输出）、出错、待办、助手的报告；读文件、搜索这些只看一行 */
 const open = computed(
-  () => manual.value ?? (isEdit.value || isCommand.value || isExplore.value || failed.value || props.item.name === 'todo_write')
+  () => manual.value ?? ((isEdit.value && !props.foldCode) || isCommand.value || isExplore.value || failed.value || props.item.name === 'todo_write')
 )
+// 顶上换了「收起 / 展开代码」：之前单独点开、收起过的卡片也跟着变
+watch(() => props.foldCode, () => { manual.value = null })
 const screenshot = ref('')
 const screenshotStatus = ref('')
 watch(
