@@ -78,7 +78,7 @@ aila-server/    云端后端：Java 21 + Spring Boot 4 + PostgreSQL，账号和�
 
 ## 快速开始
 
-**直接装**：Windows 上用安装包（`艾拉 Setup 版本号.exe`，自己打包见 [aila-desktop/README.md](aila-desktop/README.md)「打包」）。双击安装，开始菜单里点「艾拉」，不用装 Python、Node；AI 服务在安装包里，由桌面端启动。装好后在「设置 → 对话」填大模型密钥，语音模型在「设置 → 语音」里点「下载语音模型」（约 460MB）。安装包没有代码签名，Windows 会提示「已保护你的电脑」，点「更多信息 → 仍要运行」。
+**直接装**：Windows 上用安装包（`艾拉 Setup 版本号.exe`，自己打包见 [aila-desktop/README.md](aila-desktop/README.md)「打包」）。双击安装，开始菜单里点「艾拉」，不用装 Python、Node；AI 服务在安装包里，由桌面端启动。装好后在「设置 → 对话」填大模型密钥；她说话用的语音合成已经带在安装包里，听你说话（识别、唤醒词）要在「设置 → 语音」里点「下载语音模型」（约 280MB）。安装包没有代码签名，Windows 会提示「已保护你的电脑」，点「更多信息 → 仍要运行」。
 
 **从源码跑**：需要 Node.js 20+、Python 3.11+；用同步功能还要 Java 21。
 

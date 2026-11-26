@@ -84,7 +84,7 @@ def test_unknown_group_is_an_error(tmp_path: Path) -> None:
 def test_entry_routes_download_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     got: list[tuple[list[str], Path]] = []
     monkeypatch.setenv("AILA_MODELS_DIR", str(tmp_path))
-    monkeypatch.setattr(md, "run", lambda groups, models_dir, say=None: got.append((groups, models_dir)))
+    monkeypatch.setattr(md, "run", lambda groups, models_dir, say=None, bundled=None: got.append((groups, models_dir)))
     assert entry(["--download-models", "tts-kokoro"]) == 0
     assert got == [(["tts-kokoro"], tmp_path)]
 

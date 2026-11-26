@@ -160,7 +160,13 @@ def _voice() -> Any:
 
     # 合成越快她开口越早：用一半逻辑核，最多 8 个（实测 4 → 8 线程，短句 330 → 230 毫秒）
     threads = min(8, max(2, (os.cpu_count() or 4) // 2))
-    cfg = TtsConfig(settings.models_dir, settings.tts_engine, settings.tts_speaker, settings.tts_speed, threads)
+    # 模型先找下载的，再找安装包里带的（安装包带着 melo，装好就能说话）
+    from .models_download import find
+    from .routes.settings import TTS_ENGINES
+
+    dirs = next((e["dirs"] for e in TTS_ENGINES if e["id"] == settings.tts_engine), [])
+    base = find(settings.models_dir, settings.bundled_models_dir, *dirs)
+    cfg = TtsConfig(base, settings.tts_engine, settings.tts_speaker, settings.tts_speed, threads)
     return _load("tts", lambda: Voice(cfg))
 
 

@@ -261,7 +261,13 @@ describe('服务定位与 IPC 边界', () => {
       executable: join(res, 'aila-ai', 'aila-ai.exe'),
       args: [],
       cwd: home,
-      env: { AILA_ENV_FILE: join(home, '.env'), AILA_DATA_DIR: join(home, 'data'), AILA_MODELS_DIR: join(home, 'models'), AILA_MCP_CONFIG: join(home, 'mcp.json') }
+      env: {
+        AILA_ENV_FILE: join(home, '.env'),
+        AILA_DATA_DIR: join(home, 'data'),
+        AILA_MODELS_DIR: join(home, 'models'),
+        AILA_BUNDLED_MODELS_DIR: join(res, 'models'),
+        AILA_MCP_CONFIG: join(home, 'mcp.json')
+      }
     })
     // exe 不在（安装包坏了）：找不到，不去猜系统 Python
     expect(locateService({ ...location, file: () => false })).toBeNull()

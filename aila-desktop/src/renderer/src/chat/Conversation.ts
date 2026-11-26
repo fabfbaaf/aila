@@ -358,7 +358,7 @@ export class Conversation {
 
   /** 收到一个字：攒成句子，句子完整了就去合成 */
   private pushChar(item: Extract<Item, { kind: 'char' }>): void {
-    const cut = sentenceCut(this.buildingText, item.ch, this.sentenceCount === 0)
+    const cut = sentenceCut(this.buildingText, item.ch, this.sentenceCount)
     if (cut === 'before') this.closeSentence()
     this.building.push(item)
     this.buildingText += item.ch
