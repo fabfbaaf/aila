@@ -2,6 +2,7 @@
 # 装好的艾拉在 设置 → 运行状态 里「检查更新」看的就是这里最新的发布（aila-desktop/src/shared/update.ts）。
 #
 # - 标签要和 aila-desktop/package.json 的 version 一样，不一样就停下（免得装好以后版本号对不上，一直提示有新版）
+# - 带语音合成模型 MeloTTS（MIT，打包前下载）；识别、唤醒词装好以后在 设置 → 语音 里下
 # - 不带 Live2D 运行库：它的许可要每个人自己同意，装好以后在 设置 → 形象 里按说明装（npm run setup:live2d）
 # - 没有代码签名证书：Windows 会弹「已保护你的电脑」，点「更多信息 → 仍要运行」
 name: 发布
@@ -41,6 +42,9 @@ jobs:
           python -m venv .venv
           .venv\Scripts\python -m pip install -q -r requirements-dev.txt
           .venv\Scripts\python scripts\build_service.py
+      - name: 下语音合成模型（MeloTTS，打进安装包，装好就能说话）
+        working-directory: aila-ai
+        run: .venv\Scripts\python -m app --download-models tts
 
       - uses: actions/setup-node@v5
         with:
