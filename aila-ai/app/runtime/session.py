@@ -80,7 +80,7 @@ class Session:
         for e in reversed(self.events):
             if e["type"] in ("mode", "start") and e.get("mode"):
                 mode = str(e["mode"])
-                return "ask" if self.kind == "computer" and mode == "auto" else mode
+                return "ask" if self.kind == "computer" and mode in ("auto", "full") else mode
         return "ask"
 
     @property

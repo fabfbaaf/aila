@@ -55,7 +55,7 @@ from ..sse import with_heartbeat
 
 router = APIRouter(prefix="/agent")
 
-ModeName = Literal["read_only", "ask", "auto"]
+ModeName = Literal["read_only", "ask", "auto", "full"]
 
 
 def _budget_input(value: object) -> float | None:
@@ -137,7 +137,7 @@ async def create_session(req: NewSession, rt: Runtime = Depends(get_runtime)) ->
         session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind)
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
-    modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k != "auto"}
+    modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k in ("read_only", "ask")}
     shell = computer_shell() if session.kind == "computer" else rt.shell
     return {**session.summary(), "shell": shell.label, "modes": modes}
 

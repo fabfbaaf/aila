@@ -143,7 +143,7 @@ class Runtime:
             raise RuntimeError_(str(err)) from err
         if kind not in ("project", "computer"):
             raise RuntimeError_("不认识的任务类型。")
-        if kind == "computer" and mode == "auto":
+        if kind == "computer" and mode in ("auto", "full"):
             raise RuntimeError_("电脑任务只能选只读或先问再改。")
         if kind == "computer" and isolate:
             raise RuntimeError_("电脑任务不能在新分支上做。")
@@ -240,7 +240,7 @@ class Runtime:
         if mode not in MODES:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         agent = self.agent(sid)
-        if agent.session.kind == "computer" and mode == "auto":
+        if agent.session.kind == "computer" and mode in ("auto", "full"):
             raise RuntimeError_("电脑任务只能选只读或先问再改。")
         if sid in self._reviewing:
             # /review 这一轮必须只读：先记下，这一轮结束后再换

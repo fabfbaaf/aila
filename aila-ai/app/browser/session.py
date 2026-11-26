@@ -64,6 +64,13 @@ GET_FORM_URL_JS = r"""
 }
 """
 
+# 页面里嵌的 iframe：主页面的快照看不到里面，她以前为了看 iframe 里的东西会一遍遍开网页、
+# 写临时检查页。现在把每个 iframe 的网址和正文节选也带上（只有文字，没有编号）
+MAX_FRAMES = 4
+MAX_FRAME_TEXT = 1_500
+FRAME_WAIT_SECONDS = 2.0
+FRAME_TEXT_JS = "(n) => (document.body ? document.body.innerText : '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, n)"
+
 
 async def start_playwright(factory: Any) -> Any:
     """起 Playwright 的驱动进程。Windows 上它偶尔起来了却不回话，start() 就一直等下去（测试里卡过）：
@@ -475,7 +482,25 @@ class BrowserSession:
         self._snapshot = Snapshot.parse(raw)
         self._snapshot_page = page
         self._last_used = time.monotonic()
-        return self._snapshot.render()
+        return self._snapshot.render() + await frames_text(page)
+
+
+async def frames_text(page: Any) -> str:
+    """页面里嵌的 iframe 的网址和正文节选；读不到的（还在加载、跨域出错）跳过，没有就是空字符串"""
+    main = getattr(page, "main_frame", None)
+    frames = [f for f in (getattr(page, "frames", None) or []) if f is not main and not f.is_detached()]
+    blocks: list[str] = []
+    for frame in frames[:MAX_FRAMES]:
+        try:
+            text = await asyncio.wait_for(frame.evaluate(FRAME_TEXT_JS, MAX_FRAME_TEXT), FRAME_WAIT_SECONDS)
+        except Exception:
+            continue
+        blocks.append(f"[iframe {len(blocks) + 1}] {frame.url}\n{text or '（没有文字）'}")
+    if not blocks:
+        return ""
+    more = f"\n（还有 {len(frames) - MAX_FRAMES} 个 iframe 没列出来）" if len(frames) > MAX_FRAMES else ""
+    return ("\n\n页面里嵌的 iframe（只有文字，里面的元素没有编号；要操作就用 browser_open 直接打开它的网址）：\n"
+            + "\n\n".join(blocks) + more)
 
 
 def _coding_url(url: str) -> tuple[SplitResult, int]:

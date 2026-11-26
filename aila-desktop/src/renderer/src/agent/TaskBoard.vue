@@ -93,7 +93,7 @@ function submitBatch(): void {
       </label>
       <div class="batch-row">
         <select v-model="batchMode" :aria-label="t('权限模式')">
-          <option v-for="m in (['read_only', 'ask', 'auto'] as AgentMode[])" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
+          <option v-for="m in (['read_only', 'ask', 'auto', 'full'] as AgentMode[])" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
         <span class="hint">{{ t('每个任务都开在新分支上；你的代码不动，做完在各自的任务里合并') }}</span>
         <button type="button" class="ghost" @click="batchOpen = false">{{ t('算了') }}</button>

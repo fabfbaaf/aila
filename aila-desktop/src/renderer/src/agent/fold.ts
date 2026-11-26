@@ -97,7 +97,7 @@ export type Item =
   | { kind: 'undo'; key: string; result: AgentUndoEvent }
   | { kind: 'note'; key: string; text: string }
 
-export const MODE_NOTE: Record<string, string> = localized({ read_only: '只读', ask: '先问再改', auto: '工作区内自动' })
+export const MODE_NOTE: Record<string, string> = localized({ read_only: '只读', ask: '先问再改', auto: '工作区内自动', full: '全部放开' })
 
 export function actionOf(name: string, args: Record<string, unknown>): string {
   const s = (k: string): string => String(args[k] ?? '')

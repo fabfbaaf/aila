@@ -102,7 +102,7 @@ class WorkerPolicy:
                 return Decision("deny", f"这条命令{why}，子 Agent 没法问用户，不执行。需要的话写进报告。")
             if mentions_secret(command):
                 return Decision("deny", "这条命令会读可能存着密钥的文件，子 Agent 没法问用户，不执行。")
-            if read_only_command(command) or self.mode == "auto" or command.strip() in self.rules.commands(self.project):
+            if read_only_command(command) or self.mode in ("auto", "full") or command.strip() in self.rules.commands(self.project):
                 return Decision("allow")
             return Decision("deny", "这条命令要用户同意，子 Agent 没法问。不要换着法子试，写进报告，主 Agent 收回改动后再跑。")
         return Decision("deny", "子 Agent 不能用这个工具。")

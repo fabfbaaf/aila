@@ -176,7 +176,7 @@ let tray: Tray | null = null
 let desktop: DesktopKeeper | null = null
 /** 拖到她身上的文件（只能读刚拖进来的） */
 const drops = new Drops()
-const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto']
+const AGENT_MODES: AgentMode[] = ['read_only', 'ask', 'auto', 'full']
 const agentRelay = new AgentRelay(AI_URL, {
   emit: (sid, e) => mainWin?.webContents.send('agent:event', sid, e),
   ended: (sid, error) => mainWin?.webContents.send('agent:stream-end', sid, error),

@@ -1,11 +1,11 @@
 // 编程 Agent（工作窗口）：主进程、预加载和渲染层共用的类型。事件的含义见 aila-ai 的 /agent 接口
 
-export type AgentMode = 'read_only' | 'ask' | 'auto'
+export type AgentMode = 'read_only' | 'ask' | 'auto' | 'full'
 export type AgentKind = 'project' | 'computer'
 
-/** 电脑任务没有工作区内自动；旧会话没有 kind 时仍按项目处理。 */
+/** 电脑任务没有工作区内自动和全部放开；旧会话没有 kind 时仍按项目处理。 */
 export function agentModes(kind: AgentKind = 'project'): AgentMode[] {
-  return kind === 'computer' ? ['read_only', 'ask'] : ['read_only', 'ask', 'auto']
+  return kind === 'computer' ? ['read_only', 'ask'] : ['read_only', 'ask', 'auto', 'full']
 }
 
 /** 开会话前供用户预览的环境说明；实际会话会把同样的说明固定在开头。 */
@@ -17,13 +17,15 @@ export interface ComputerContext {
 export const MODE_LABELS: Record<AgentMode, string> = {
   read_only: '只读',
   ask: '先问再改',
-  auto: '工作区内自动'
+  auto: '工作区内自动',
+  full: '全部放开'
 }
 
 export const MODE_HINTS: Record<AgentMode, string> = {
   read_only: '只看不改：不改文件，只跑查看类的命令',
   ask: '改文件、跑命令之前先问你（默认）',
-  auto: '项目里改文件、跑命令都不问；危险命令照样要问'
+  auto: '项目里改文件、跑命令都不问；危险命令照样要问',
+  full: '什么都不问：改文件、跑命令、开本机网页、在网页上点、用外部工具都直接做；只有危险命令（删除、推送、发布、改系统设置）和密钥文件还要问'
 }
 
 export interface AgentUsage {

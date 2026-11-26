@@ -49,7 +49,7 @@ const newModes = computed(() => agentModes(newKind.value))
 const currentModes = computed(() => agentModes(current.value?.kind))
 watch(newKind, (kind) => {
   if (kind === 'computer') {
-    if (newMode.value === 'auto') newMode.value = 'ask'
+    if (newMode.value === 'auto' || newMode.value === 'full') newMode.value = 'ask'
     newIsolate.value = false
   }
 })
@@ -125,6 +125,44 @@ const undoTarget = computed(() => {
 
 /** 中间看什么：过程（对话和卡片）还是轨迹（时间线） */
 const view = ref<'chat' | 'trace'>('chat')
+
+/** 收起代码：她改文件的卡片只显示一行「改 xx（+3 −1）」，点开才看 diff。默认收起，记在这台电脑上 */
+const FOLD_KEY = 'aila.agent.foldCode'
+function readFold(): boolean {
+  try {
+    return localStorage.getItem(FOLD_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+const foldCode = ref(readFold())
+watch(foldCode, (v) => {
+  try {
+    localStorage.setItem(FOLD_KEY, v ? '1' : '0')
+  } catch { /* 存不了就只这次有效 */ }
+})
+
+/**
+ * 切走再回来（看板、轨迹、主窗口别的页面）时，滚动的地方会回到最上面（她第一句话那里）：
+ * 记着走之前是不是贴着底——贴着底就回到最新，没贴着就回到原来看的位置
+ */
+const stick = ref(true)
+let savedTop = 0
+function onScroll(): void {
+  const el = scroller.value
+  if (!el || !el.isConnected || !el.clientHeight) return
+  stick.value = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  savedTop = el.scrollTop
+}
+function restoreScroll(): void {
+  void nextTick(() => {
+    const el = scroller.value
+    if (!el) return
+    if (stick.value) el.scrollTop = el.scrollHeight
+    else el.scrollTop = savedTop
+  })
+}
+watch(view, (v) => { if (v === 'chat') restoreScroll() })
 /** 正在做的一轮，时间线要一直往右长：每秒走一下 */
 const now = ref(Date.now() / 1000)
 let clock = 0
@@ -235,7 +273,7 @@ async function startNew(path?: string): Promise<void> {
   creating.value = true
   try {
     const computer = newKind.value === 'computer'
-    const mode = computer && newMode.value === 'auto' ? 'ask' : newMode.value
+    const mode = computer && (newMode.value === 'auto' || newMode.value === 'full') ? 'ask' : newMode.value
     const s = await source.create(computer ? undefined : path, mode, computer ? false : newIsolate.value, budget, newKind.value)
     await refreshList()
     await open(s.id)
@@ -605,7 +643,7 @@ let boardTimer = 0
 
 watch(board, (on) => {
   window.clearInterval(boardTimer)
-  if (!on) return
+  if (!on) return restoreScroll()
   void refreshList()
   // 看板开着时勤快一点刷：别的任务在做什么只能靠列表摘要
   boardTimer = window.setInterval(() => {
@@ -747,10 +785,13 @@ function when(ts?: number): string {
 
 function nearBottom(): boolean {
   const el = scroller.value
-  return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  // 不在屏幕上（切到看板、轨迹或别的页面了）：按走之前的位置算
+  if (!el || !el.isConnected || !el.clientHeight) return stick.value
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120
 }
 
 function scrollToBottom(): void {
+  stick.value = true
   const el = scroller.value
   if (el) el.scrollTop = el.scrollHeight
 }
@@ -777,7 +818,10 @@ onMounted(async () => {
 
 // 在主窗口里切到别的页面时，任务页还留着（KeepAlive）：这时不能再听 1 / 2 / Esc，
 // 不然在设置里打个「1」就替你同意了
-onActivated(() => window.addEventListener('keydown', onKey))
+onActivated(() => {
+  window.addEventListener('keydown', onKey)
+  restoreScroll()
+})
 onDeactivated(() => {
   window.removeEventListener('keydown', onKey)
   closeUndoPreview()
@@ -889,12 +933,16 @@ onBeforeUnmount(() => {
           <button :class="{ on: view === 'chat' }" @click="view = 'chat'">{{ tr('过程') }}</button>
           <button :class="{ on: view === 'trace' }" :title="tr('按时间看每一步花了多久')" @click="view = 'trace'">{{ tr('轨迹') }}</button>
         </div>
+        <button v-if="view === 'chat'" type="button" class="fold-toggle" :aria-pressed="foldCode"
+          :title="foldCode ? tr('改文件的卡片只显示一行，点卡片能单独看') : tr('改文件的卡片都展开 diff')" @click="foldCode = !foldCode">
+          {{ foldCode ? tr('展开代码') : tr('收起代码') }}
+        </button>
       </header>
 
       <div v-if="current && view === 'trace'" class="scroll">
         <TraceView :turns="trace" />
       </div>
-      <div v-else ref="scroller" class="scroll">
+      <div v-else ref="scroller" class="scroll" @scroll.passive="onScroll">
         <div v-if="current" class="transcript">
           <div v-if="!t.items.length" class="hello">
             <template v-if="current.kind === 'computer'">
@@ -928,7 +976,7 @@ onBeforeUnmount(() => {
               @approve="(pause: boolean) => planAction('approve', pause)"
               @reject="planAction('reject')"
             />
-            <ToolCard v-else-if="item.kind === 'tool'" :item="item" :session-id="current.id" :computer="current?.kind === 'computer'"
+            <ToolCard v-else-if="item.kind === 'tool'" :item="item" :session-id="current.id" :computer="current?.kind === 'computer'" :fold-code="foldCode"
               :load-screenshot="source.screenshot" @answer="(a: boolean, r: boolean) => answer(item, a, r)" />
             <div v-else-if="item.kind === 'merge'" class="merge" :class="{ ok: item.merged }">
               <div class="merge-head">{{ item.merged ? tr('✓ 合并了') : tr('■ 没有合并') }}</div>
@@ -1751,6 +1799,20 @@ code {
   background: var(--raised);
   color: var(--text);
   box-shadow: var(--ui-shadow-s);
+}
+
+.fold-toggle {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r);
+  background: transparent;
+  color: var(--dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.fold-toggle:hover {
+  color: var(--text);
 }
 
 .scroll {

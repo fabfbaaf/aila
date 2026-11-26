@@ -238,5 +238,11 @@ export const EN11: Record<string, string> = {
   "不是登录密码": "Not your login password",
   "授权码在网页版邮箱：设置 → 账户（QQ 邮箱）或 设置 → POP3/SMTP/IMAP（163），打开 IMAP 服务后生成。QQ、163、126、foxmail 自动认服务器；别的邮箱在下面填 IMAP 服务器。": "Get the authorization code in web mail: Settings → Account (QQ Mail) or Settings → POP3/SMTP/IMAP (163); turn on IMAP, then generate it. QQ, 163, 126 and Foxmail servers are detected automatically; for others enter the IMAP server below.",
   "IMAP 服务器（可不填）": "IMAP server (optional)",
-  "手机上能聊天、看任务、开任务（只能在登记过的项目里，固定「先问再改」）。她要改文件、跑普通命令时手机上就能点同意；危险命令、碰密钥的还是要在电脑上点。": "From the phone you can chat, watch tasks and start tasks (only in registered projects, always in \"Ask first\" mode). When she wants to edit files or run ordinary commands you can approve on the phone; dangerous commands and anything touching keys still need the computer."
+  "手机上能聊天、看任务、开任务（只能在登记过的项目里，固定「先问再改」）。她要改文件、跑普通命令时手机上就能点同意；危险命令、碰密钥的还是要在电脑上点。": "From the phone you can chat, watch tasks and start tasks (only in registered projects, always in \"Ask first\" mode). When she wants to edit files or run ordinary commands you can approve on the phone; dangerous commands and anything touching keys still need the computer.",
+  "全部放开": "Full access",
+  "什么都不问：改文件、跑命令、开本机网页、在网页上点、用外部工具都直接做；只有危险命令（删除、推送、发布、改系统设置）和密钥文件还要问": "Asks for nothing: edits, commands, local pages, clicking on web pages and external tools all go ahead. Only dangerous commands (delete, push, publish, system settings) and key files still ask",
+  "展开代码": "Expand code",
+  "收起代码": "Collapse code",
+  "改文件的卡片只显示一行，点卡片能单独看": "File-change cards show one line; click a card to see its diff",
+  "改文件的卡片都展开 diff": "File-change cards show their full diff"
 }

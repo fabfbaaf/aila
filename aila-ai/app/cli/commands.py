@@ -6,7 +6,7 @@ from ..runtime.permissions import MODE_LABELS, MODES
 
 COMMANDS: dict[str, str] = {
     "/help": "看所有命令和快捷键",
-    "/mode": "换权限模式：/mode read_only | ask | auto；不带参数就换到下一个（Shift+Tab 也行）",
+    "/mode": "换权限模式：/mode read_only | ask | auto | full；不带参数就换到下一个（Shift+Tab 也行）",
     "/compact": "压缩上下文：用一份交接说明代替前面的对话（快满时会自动做）",
     "/new": "在这个目录开一个新会话",
     "/resume": "接着以前的会话做：/resume 关键词 筛选这个目录的会话，/resume 编号 或 会话id 打开它",
@@ -50,7 +50,7 @@ INIT_PROMPT = (
     "已经有 AGENTS.md 的话先读，在它的基础上改进。写具体的命令和路径，不写空话，控制在 100 行以内。"
 )
 
-MODE_CYCLE = {"ask": "auto", "auto": "read_only", "read_only": "ask"}
+MODE_CYCLE = {"ask": "auto", "auto": "full", "full": "read_only", "read_only": "ask"}
 
 
 def parse(text: str) -> tuple[str, str]:
@@ -66,8 +66,8 @@ def next_mode(mode: str, arg: str = "", *, computer: bool = False) -> str | None
         if computer:
             return "read_only" if mode == "ask" else "ask"
         return MODE_CYCLE.get(mode, "ask")
-    arg = {"只读": "read_only", "先问再改": "ask", "自动": "auto", "readonly": "read_only"}.get(arg, arg)
-    return arg if arg in MODES and (not computer or arg != "auto") else None
+    arg = {"只读": "read_only", "先问再改": "ask", "自动": "auto", "全部放开": "full", "readonly": "read_only"}.get(arg, arg)
+    return arg if arg in MODES and (not computer or arg in ("read_only", "ask")) else None
 
 
 def changed_files(events: list[dict[str, Any]]) -> list[tuple[str, int]]:
