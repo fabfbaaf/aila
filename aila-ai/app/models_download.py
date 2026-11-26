@@ -59,10 +59,13 @@ def _say(line: str) -> None:
     print(line, flush=True)
 
 
-def download(asset: Asset, models_dir: Path, client, say: Say = _say) -> None:
+def download(asset: Asset, models_dir: Path, client, say: Say = _say, bundled: Path | None = None) -> None:
     dest = models_dir / asset.target
     if dest.exists():
         say(f"已存在，跳过：{asset.target}")
+        return
+    if bundled is not None and (bundled / asset.target).exists():
+        say(f"安装包里带着，跳过：{asset.target}")
         return
 
     name = asset.url.rsplit("/", 1)[1]
@@ -105,16 +108,25 @@ def download_embedder(models_dir: Path, say: Say = _say) -> None:
     say("完成：embed")
 
 
-def missing(models_dir: Path) -> list[str]:
-    """默认的语音模型里还没下载的（按类别：kws、vad、asr、tts）"""
-    return [a.group for a in ASSETS if not (models_dir / a.target).exists()]
+def missing(models_dir: Path, bundled: Path | None = None) -> list[str]:
+    """默认的语音模型里还没有的（按类别：kws、vad、asr、tts）。安装包里带着的（bundled，比如语音合成）不算缺"""
+    return [a.group for a in ASSETS
+            if not (models_dir / a.target).exists() and not (bundled is not None and (bundled / a.target).exists())]
+
+
+def find(models_dir: Path, bundled: Path | None, *names: str) -> Path:
+    """这几个模型目录在哪个文件夹里：先看下载的（你可能换过新版），再看安装包里带的；都没有就当在下载的那个里"""
+    for base in (models_dir, bundled):
+        if base is not None and any((base / n).exists() for n in names):
+            return base
+    return models_dir
 
 
 def groups_of() -> list[str]:
     return sorted({a.group for a in ASSETS + OPTIONAL} | {"embed"})
 
 
-def run(groups: list[str], models_dir: Path, say: Say = _say) -> None:
+def run(groups: list[str], models_dir: Path, say: Say = _say, bundled: Path | None = None) -> None:
     """groups 为空：默认的语音四个 + 向量模型（约 460MB）；否则只下指定的几类"""
     import httpx
 
@@ -124,7 +136,7 @@ def run(groups: list[str], models_dir: Path, say: Say = _say) -> None:
         raise ValueError(f"没有这一类：{groups}，可选 {groups_of()}")
     with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(30, read=120)) as client:
         for asset in selected:
-            download(asset, models_dir, client, say)
+            download(asset, models_dir, client, say, bundled)
     if not groups or "embed" in groups:
         download_embedder(models_dir, say)
     say("全部完成")
@@ -134,7 +146,8 @@ def main(argv: list[str]) -> int:
     from .config import load_settings
 
     try:
-        run(argv, load_settings().models_dir)
+        s = load_settings()
+        run(argv, s.models_dir, bundled=s.bundled_models_dir)
     except Exception as e:  # noqa: BLE001 —— 命令行入口：说清楚哪里错了，返回非零
         print(f"下载失败：{e}", file=sys.stderr, flush=True)
         return 1

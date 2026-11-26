@@ -26,8 +26,10 @@ TTS_ENGINES = [
 
 
 def _engines() -> list[dict[str, Any]]:
-    models = deps.settings.models_dir
-    return [{"id": e["id"], "name": e["name"], "installed": any((models / d).exists() for d in e["dirs"])} for e in TTS_ENGINES]
+    s = deps.settings
+    bases = [b for b in (s.models_dir, s.bundled_models_dir) if b is not None]  # 下载的、安装包里带的
+    return [{"id": e["id"], "name": e["name"], "installed": any((b / d).exists() for b in bases for d in e["dirs"])}
+            for e in TTS_ENGINES]
 
 
 @router.get("")
@@ -55,7 +57,7 @@ def read() -> dict[str, Any]:
             "endSilence": s.end_silence,
             "asrLanguage": s.asr_language,
             # 默认要的语音模型里还没下载的（安装包不带模型，设置页据此显示「下载语音模型」）
-            "modelsMissing": missing_models(s.models_dir),
+            "modelsMissing": missing_models(s.models_dir, s.bundled_models_dir),
         },
         "status": dict(status),
         "mcp": mcp_status(),

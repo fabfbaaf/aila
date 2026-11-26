@@ -24,7 +24,7 @@ from .discoveries import get_discoveries
 from ..memory.episodes import Line, chat_context
 from ..memory.store import EPISODE, MemoryStore
 from ..persona import system_prompt
-from ..i18n import localize_event
+from ..i18n import localize, localize_event
 from ..sse import with_heartbeat
 from ..tags import Event
 from ..tools import SkillRegistry
@@ -124,8 +124,8 @@ def health(model: ChatModel = Depends(get_model), registry: SkillRegistry = Depe
 
 @router.get("/skills")
 def skills(registry: SkillRegistry = Depends(get_registry)) -> list[dict[str, Any]]:
-    """所有技能包和默认开关（桌面端右键菜单里显示）"""
-    return registry.describe()
+    """所有技能包和默认开关（桌面端右键菜单里显示）；英文界面时名字和说明换成英文"""
+    return [{**s, "name": localize(s["name"]), "description": localize(s["description"])} for s in registry.describe()]
 
 
 @router.post("/chat")

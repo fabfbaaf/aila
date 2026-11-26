@@ -45,6 +45,8 @@ export function packagedCommand(location: Pick<ServiceLocation, 'resourcesPath' 
       AILA_ENV_FILE: join(home, '.env'),
       AILA_DATA_DIR: join(home, 'data'),
       AILA_MODELS_DIR: join(home, 'models'),
+      // 安装包里带的模型（语音合成 melo）：没下载过也能说话
+      AILA_BUNDLED_MODELS_DIR: join(resourcesPath, 'models'),
       AILA_MCP_CONFIG: join(home, 'mcp.json')
     }
   }

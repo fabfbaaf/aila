@@ -50,6 +50,8 @@ class Settings:
     mail_user: str = ""
     mail_pass: str = ""
     mail_host: str = ""
+    # 安装包里带的模型（语音合成 melo，在程序目录的 resources/models）；先找下载的（models_dir），再找这里
+    bundled_models_dir: Path | None = None
 
     @property
     def mock(self) -> bool:
@@ -93,4 +95,5 @@ def load_settings() -> Settings:
         mail_user=os.getenv("AILA_MAIL_USER", "").strip(),
         mail_pass=os.getenv("AILA_MAIL_PASS", "").strip(),
         mail_host=os.getenv("AILA_MAIL_HOST", "").strip(),
+        bundled_models_dir=Path(os.environ["AILA_BUNDLED_MODELS_DIR"]) if os.getenv("AILA_BUNDLED_MODELS_DIR") else None,
     )

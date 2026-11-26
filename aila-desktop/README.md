@@ -45,12 +45,12 @@ cd ..\aila-desktop
 npm.cmd run dist
 ```
 
-产物在 `dist\installer\艾拉 Setup 0.1.0.exe`，约 260MB（装好后约 800MB；AI 服务目录约 500MB，大头是文字识别用的 OpenCV 和浏览器驱动）。第一次打包时 electron-builder 会从它的 GitHub 发布页下载 NSIS 和改图标的工具，之后用缓存。
+产物在 `dist\installer\艾拉 Setup 版本号.exe`（版本号取 `package.json`），约 360MB（装好后约 800MB；AI 服务目录约 500MB，大头是文字识别用的 OpenCV 和浏览器驱动）。第一次打包时 electron-builder 会从它的 GitHub 发布页下载 NSIS 和改图标的工具，之后用缓存。
 
 - 装给当前用户，不用管理员权限；开始菜单和桌面有「艾拉」快捷方式。图标是 `scripts/make-icon.mjs` 用代码画的（和托盘一样的紫色圆环）
 - 用户的东西都不写安装目录：大模型密钥（`.env`）、会话、记忆、代码索引、下载的语音模型都在 `%APPDATA%\aila-desktop\ai\` 下面（`AILA_ENV_FILE`、`AILA_DATA_DIR`、`AILA_MODELS_DIR`、`AILA_MCP_CONFIG` 由桌面端指过去，见 `main/serviceNode.ts` 的 `packagedCommand`）。桌面端自己的设置、登录、聊天记录在 `%APPDATA%\aila-desktop` 本身，和开发时、本机测试版是同一个文件夹；AI 服务那边的不一样（开发时用仓库 `aila-ai` 里的 `.env` 和 `data\`），所以在开发的电脑上装了安装包，要在设置里重新填一次密钥
-- 语音模型不放进安装包（约 460MB）：「设置 → 语音」里点「下载语音模型」，下完 AI 服务自动重启一次
-- 开发用的 VRM 示例模型不打进去，她用自带的原创形象（`out/renderer/avatar/aila.vrm`）；装了 Live2D 运行库的话一起带上（见「Live2D 模型」）
+- 语音合成模型 MeloTTS（MIT，约 180MB）打在安装包里（`resources/models`，AI 服务按 `AILA_BUNDLED_MODELS_DIR` 找到它）：装好就能出声说话。听你说话要的识别、唤醒词模型还是在「设置 → 语音」里点「下载语音模型」（带着的合成模型会跳过），下完 AI 服务自动重启一次
+- 开发用的 VRM 示例模型不打进去，她用自带的原创形象（`out/renderer/avatar/aila.vrm`）；装了 Live2D 运行库的话一起带上（见「Live2D 模型」）。Live2D 的示例模型（比如真央）许可不允许打进安装包：装好后在「设置 → 形象」里选你自己下载的 `.model3.json`
 - 没有代码签名证书：Windows 会弹「已保护你的电脑」，点「更多信息 → 仍要运行」
 - 卸载会删掉安装目录，`%APPDATA%\aila-desktop` 留着（下次装还在）。要彻底删：卸载后再删掉这个文件夹
 

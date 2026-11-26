@@ -25,6 +25,10 @@ extraResources:
   # PyInstaller 打的 AI 服务目录（serviceNode.ts 的 packagedCommand 用它）
   - from: ../aila-ai/dist/aila-ai
     to: aila-ai
+  # 语音合成模型 MeloTTS（MIT，约 180MB）：装好就能说话，不用先下载（AI 服务按 AILA_BUNDLED_MODELS_DIR 找到它）。
+  # 识别、唤醒词还是在「设置 → 语音」里下载；Matcha（训练数据只许非商业）、Kokoro（大、慢）不带
+  - from: ../aila-ai/models/vits-melo-tts-zh_en
+    to: models/vits-melo-tts-zh_en
 # 复用 npm 已经装好的 Electron，打包时不用再下载
 electronDist: node_modules/electron/dist
 win:

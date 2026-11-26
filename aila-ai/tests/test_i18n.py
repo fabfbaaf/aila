@@ -75,3 +75,11 @@ def test_ledger_labels(monkeypatch) -> None:  # noqa: ANN001
     assert localize_labels(rows) == [{"key": "tool:read_file", "label": "Tool results: Read files", "tokens": 3},
                                      {"label": "Read file 读文件.md"}]
     assert rows[0]["label"] == "工具结果：读文件"
+
+
+def test_skill_names_in_english(monkeypatch) -> None:  # noqa: ANN001
+    """设置里、右键菜单里的技能包名字和说明：英文界面时是英文"""
+    monkeypatch.setattr(deps, "settings", replace(deps.settings, language="en"))
+    skills = {s["id"]: s for s in TestClient(__import__("app.main", fromlist=["app"]).app).get("/skills").json()}
+    assert skills["web"]["name"] == "Web" and skills["calendar"]["name"] == "Calendar"
+    assert all(not re.search(r"[一-鿿]", s["name"] + s["description"]) for s in skills.values() if not s["id"].startswith("mcp:"))

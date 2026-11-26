@@ -54,7 +54,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await deps.http_client.aclose()
 
 
-app = FastAPI(title="艾拉 AI 服务", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="艾拉 AI 服务", version="0.3.0", lifespan=lifespan)  # 和桌面端 package.json 的版本一致
 app.add_middleware(LocalOnly)  # 浏览器里别的网页不能调用这些接口
 
 

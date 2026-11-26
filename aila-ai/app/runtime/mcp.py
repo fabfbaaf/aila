@@ -241,7 +241,7 @@ class StdioClient:
             result = await self.request("initialize", {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "aila", "title": "艾拉", "version": "0.4.0"},
+                "clientInfo": {"name": "aila", "title": "艾拉", "version": "0.3.0"},
             }, timeout)
             self.server_info = result.get("serverInfo", {}) if isinstance(result, dict) else {}
             await self.notify("notifications/initialized")
