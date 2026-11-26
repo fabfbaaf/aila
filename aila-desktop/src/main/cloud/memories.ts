@@ -1,7 +1,10 @@
 import { randomUUID } from 'crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
-import { dirname } from 'path'
-import type { MemoryOp, StoredMemory } from '../../shared/cloud'
+import { readFileSync, statSync } from 'fs'
+import type { MemoryForAi } from './keeper'
+import type { MemoryKind, MemoryOp, StoredMemory } from '../../shared/cloud'
+import { Saver } from './persist'
+
+const KINDS: readonly MemoryKind[] = ['profile', 'preference', 'event', 'other']
 
 const SAVE_DELAY_MS = 300
 
@@ -15,9 +18,11 @@ const SAVE_DELAY_MS = 300
  */
 export class MemoryStore {
   private items = new Map<string, StoredMemory>()
-  private saveTimer: ReturnType<typeof setTimeout> | null = null
+  private saver: Saver
 
-  constructor(private file: string | null) {}
+  constructor(private file: string | null) {
+    this.saver = new Saver(file, () => JSON.stringify([...this.items.values()]), SAVE_DELAY_MS)
+  }
 
   load(): void {
     if (!this.file) return
@@ -116,14 +121,34 @@ export class MemoryStore {
     this.saveNow()
   }
 
-  saveNow(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer)
-    this.saveTimer = null
-    if (!this.file) return
-    mkdirSync(dirname(this.file), { recursive: true })
-    const tmp = this.file + '.tmp'
-    writeFileSync(tmp, JSON.stringify([...this.items.values()]), 'utf-8')
-    renameSync(tmp, this.file)
+  /** 立刻写盘。写不进去时记下错误、过一会儿再试（persist.ts） */
+  saveNow(): boolean {
+    return this.saver.now()
+  }
+
+  /**
+   * 取回丢了的记忆：本地一条都没有（以前存不进文件，重启就空了），AI 服务的记忆库里还留着的，拿回来。
+   * 只要比本地文件新的：你在这台电脑上「忘掉一切」以后，文件是那时写的，更早的不会被拿回来。返回取回了几条
+   */
+  recover(remote: MemoryForAi[], now = new Date()): number {
+    if (this.items.size) return 0
+    let since = 0
+    try {
+      if (this.file) since = statSync(this.file).mtimeMs
+    } catch {
+      since = 0 // 没有文件：从没存上过
+    }
+    const at = now.toISOString()
+    let n = 0
+    for (const m of remote) {
+      const updated = Date.parse(m.updatedAt)
+      if (!m.id || !m.content || this.items.has(m.id) || !(updated > since)) continue
+      const kind = (KINDS as readonly string[]).includes(m.kind) ? (m.kind as MemoryKind) : 'other'
+      this.items.set(m.id, { id: m.id, content: m.content, kind, expiresAt: m.expiresAt, createdAt: m.updatedAt || at, updatedAt: m.updatedAt || at, dirty: true })
+      n++
+    }
+    if (n) this.scheduleSave()
+    return n
   }
 
   private remove(m: StoredMemory, at: string): void {
@@ -135,7 +160,6 @@ export class MemoryStore {
   }
 
   private scheduleSave(): void {
-    if (!this.file || this.saveTimer) return
-    this.saveTimer = setTimeout(() => this.saveNow(), SAVE_DELAY_MS)
+    this.saver.schedule()
   }
 }

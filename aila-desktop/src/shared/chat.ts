@@ -82,6 +82,17 @@ export type ChatEvent =
 
 export const AI_SERVICE_URL = 'http://127.0.0.1:8765'
 
+/** 认识多久了：第一次见面到现在几天（从 0 算）、你跟她说过几句 */
+export interface Bond {
+  days: number
+  talks: number
+}
+
+/** 很熟了（和 aila-ai 的 persona.BOND_STAGES 最后一档一样）：桌面上的台词掺着说孩子气一点的 */
+export function isClose(b: Bond | null | undefined): boolean {
+  return !!b && b.days >= 14 && b.talks >= 200
+}
+
 /** 增量解析 SSE：网络数据块可能在任意位置断开，凑满一个事件（空行结尾）才回调 */
 export class SseParser {
   private buf = ''

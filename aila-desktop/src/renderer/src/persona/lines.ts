@@ -116,8 +116,35 @@ export function greeting(hour: number): string {
   return t('已经这么晚了……再不睡的话，明天会很累的。')
 }
 
-/** 随便挑一句；是文字的话换成现在的语言 */
+/**
+ * 熟了以后（shared/chat.ts 的 isClose：认识两周、你跟她说过两百句以上）掺着说的：
+ * 孩子气一点，敢闹点小别扭，但还是她——话少、不卖萌。一半一半，原来的那些也还会说
+ */
+const CLOSE: Record<string, string[]> = {
+  chatOpen: ['嗯？想聊什么？', '……在呢。'],
+  pokeHead: ['……又戳。头发真的会乱的。', '（捂住头）……不、不给戳了。'],
+  pokeBody: ['……干嘛啦。', '嗯？……是想我了吗。……开玩笑的。'],
+  dragEnd: ['……这里风景不错。', '好，就待这儿了。'],
+  wake: ['……欢迎回来。', '你回来了……刚才有点无聊。'],
+  wakeHere: ['……来啦。', '嗯，我在。今天想做什么？'],
+  lateNight: ['……又熬夜。说好的早点睡呢。', '再不睡我要生气了……一点点。', '……那我陪你写完这段，然后就去睡，好不好。'],
+  testsRecovered: ['……全过了。我就说可以的。', '过了！……咳，嗯，过了。']
+}
+
+let close = false
+
+/** 熟不熟（App.vue 启动时、之后每小时问一次主进程） */
+export function setClose(on: boolean): void {
+  close = on
+}
+
+/** 随便挑一句；是文字的话换成现在的语言。熟了以后，有「熟了的说法」的那几种一半时候换着说 */
 export function pick<T>(list: readonly T[]): T {
+  if (close && Math.random() < 0.5) {
+    const key = Object.keys(pools).find((k) => pools[k] === (list as unknown))
+    const warm = key ? CLOSE[key] : undefined
+    if (warm?.length) return t(warm[Math.floor(Math.random() * warm.length)]) as T
+  }
   const one = list[Math.floor(Math.random() * list.length)]
   return (typeof one === 'string' ? t(one) : one) as T
 }

@@ -29,6 +29,8 @@ export interface AccountStatus {
   pending: number
   devices?: DeviceInfo[]
   currentDeviceId?: string
+  /** 聊天记录或记忆存不进文件时的错误（存上了就没有）：重启会丢，运行状态页上提醒 */
+  saveError?: string
 }
 
 export interface AuthForm {

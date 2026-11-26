@@ -18,6 +18,7 @@ import {
 import { ApiError, CloudApi, NetworkError, type TokenResponse } from './api'
 import { HistoryStore } from './history'
 import { forAi, MemoryKeeper, type ExtractRequest, type MemoryForAi } from './keeper'
+import { onSaveProblem, saveProblems, type SaveProblem } from './persist'
 import { MemoryStore } from './memories'
 import { SyncEngine, type SocketLike } from './sync'
 import { tm } from '../lang'
@@ -33,6 +34,8 @@ interface SavedState {
   deviceId: string
   /** 技能包开关（没登录也能改，登录后跟着账号同步） */
   skills?: SkillOverrides
+  /** 第一次见面的时间：她按认识多久决定拘谨还是放松 */
+  firstMet?: string
   account?: {
     email: string
     displayName: string
@@ -51,6 +54,8 @@ export interface AccountDeps {
   onMemories(list: StoredMemory[]): void
   /** 请本地 AI 服务整理记忆 */
   extractMemories(req: ExtractRequest): Promise<MemoryOp[]>
+  /** 聊天记录、记忆存不进文件（problem 是 null：又存上了），主进程记进日志 */
+  onSaveProblem?(problem: SaveProblem | null, file: string): void
 }
 
 /**
@@ -79,6 +84,33 @@ export class Account {
       onChanged: () => this.memoriesChanged()
     })
     this.state = this.loadState()
+    // 聊天记录、记忆存不进文件（或者又存上了）：运行状态页跟着变，日志里记一笔
+    onSaveProblem((problem, file) => {
+      deps.onSaveProblem?.(problem, file)
+      this.notify()
+    })
+  }
+
+  /** 认识多久了：第一次见面到现在几天（从 0 算）、对方说过几句。没记过第一次见面就按最早的聊天记录算，记下来 */
+  bond(now = new Date()): { days: number; talks: number } {
+    const said = this.history.visible().filter((m) => m.role === 'user')
+    if (!this.state.firstMet) {
+      this.state.firstMet = said[0]?.createdAt ?? now.toISOString()
+      try {
+        this.saveState()
+      } catch {
+        // 存不上下次再算一遍，结果一样
+      }
+    }
+    const days = Math.max(0, Math.floor((now.getTime() - Date.parse(this.state.firstMet)) / 86_400_000)) || 0
+    return { days, talks: said.length }
+  }
+
+  /** AI 服务记忆库里还留着、本地丢了的记忆：取回来（见 MemoryStore.recover）。返回取回了几条 */
+  recoverMemories(remote: MemoryForAi[]): number {
+    const n = this.memories.recover(remote)
+    if (n) this.memoriesChanged()
+    return n
   }
 
   /** 每次对话带给 AI 服务的记忆（它会挑出相关的几条） */
@@ -135,7 +167,8 @@ export class Account {
       email: a?.email,
       displayName: a?.displayName,
       pending: this.history.unsynced().length,
-      currentDeviceId: this.state.deviceId
+      currentDeviceId: this.state.deviceId,
+      saveError: saveProblems()[0]?.error
     }
   }
 

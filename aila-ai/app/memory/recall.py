@@ -2,6 +2,8 @@
 
 不是所有记忆都塞进去：多了浪费 token，还会让她在不相关的时候硬提往事。挑选规则：
 - 身份类（profile）最近的几条总是带上：她应该一直知道你是谁
+- 喜好类（preference）最近的几条也总是带上：以前只按相似度挑，聊别的时你的喜好从来进不了提示词，
+  她也就从来不会主动提（「又在找吃播？」）
 - 两天内要发生的事（event）总是带上：她可以主动关心「明天的面试准备好了吗」
 - 其余按和最近几句话的相似度挑：最相似的 3 条（只要不是完全无关）+ 相似度很高的
 - 过期的不要（「上周三的面试」已经没用了）
@@ -22,6 +24,7 @@ from .embedder import Embedder
 
 MAX_RECALL = 8
 ALWAYS_PROFILE = 3
+ALWAYS_PREFERENCE = 3
 UPCOMING = timedelta(days=2)
 # 按相似度取前几条；低于 FLOOR 的算完全无关，不要
 TOP_RELATED = 3
@@ -51,6 +54,8 @@ def recall(memories: list[Memory], query: str, embedder: Embedder | None, now: d
 
     picked: dict[str, Memory] = {}
     for m in [m for m in alive if m.kind == "profile"][:ALWAYS_PROFILE]:
+        picked[m.id] = m
+    for m in [m for m in alive if m.kind == "preference"][:ALWAYS_PREFERENCE]:
         picked[m.id] = m
     for m in alive:
         if m.kind == "event" and m.expires_at is not None and m.expires_at - now <= UPCOMING:
@@ -117,7 +122,8 @@ def describe(memories: list[Memory], now: datetime, earlier: str = "", episodes:
         for m in memories:
             when = f"（到 {m.expires_at.month} 月 {m.expires_at.day} 日）" if m.expires_at else ""
             lines.append(f"- {m.content}{when}")
-        lines.append("自然地用上这些，比如称呼、关心近况；不要每次都提，也不要说「根据我的记忆」。")
+        lines.append("这些是你自己记得的事，像老朋友一样用：话题沾边时主动接上（对方又在找吃的视频，就提一句对方上次喜欢的那类），"
+                     "关心对方说过的计划进展得怎么样。一次对话里自然地提一两次就够，不硬拐话题，不说「根据我的记忆」「你之前告诉过我」。")
     if earlier:
         lines.append("")
         lines.append("更早聊过的（太久的对话只留了摘要）：")

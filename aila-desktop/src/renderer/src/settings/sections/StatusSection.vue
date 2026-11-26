@@ -214,6 +214,9 @@ onDeactivated(() => { ++activation; unsubscribe?.(); clearInterval(logTimer) })
       </span>
       <span v-else class="hint" style="margin: 0">{{ t('没登录，数据只在这台电脑上') }}</span>
     </div>
+    <p v-if="store.account?.saveError" class="msg error" role="alert">
+      {{ t('聊天记录和记忆存不进文件（{error}），她会一直重试；没存上之前关掉艾拉会丢。详细的在用户数据文件夹的 logs/main.log 里。', { error: store.account.saveError }) }}
+    </p>
   </div>
 
   <div v-if="ai" class="card">
