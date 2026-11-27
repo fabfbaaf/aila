@@ -96,6 +96,8 @@ export type Item =
   | EndItem
   | { kind: 'undo'; key: string; result: AgentUndoEvent }
   | { kind: 'note'; key: string; text: string }
+  /** 换了别家的模型接着做：这一行带着去另一个任务的按钮（sid） */
+  | { kind: 'handoff'; key: string; text: string; sid: string; link: string }
 
 export const MODE_NOTE: Record<string, string> = localized({ read_only: '只读', ask: '先问再改', auto: '工作区内自动', full: '全部放开' })
 
@@ -366,6 +368,22 @@ export class Transcript {
       case 'plan_end':
         this.closeText()
         this.items.push({ kind: 'note', key: this.key(), text: t('计划全部做完了') })
+        break
+      case 'handoff_in':
+        this.closeText()
+        this.items.push({
+          kind: 'handoff', key: this.key(), sid: String(e.from ?? ''), link: t('看原来的任务'),
+          text: t('从 {from} 换成 {to} 接着做：前情已经交给它', { from: String(e.from_model ?? ''), to: String(e.model ?? '') || t('新的模型') })
+        })
+        break
+      case 'handoff_out':
+        this.closeText()
+        this.items.push({
+          kind: 'handoff', key: this.key(), sid: String(e.to ?? ''), link: t('去新任务'),
+          text: e.branch_moved
+            ? t('换成 {to} 在新任务里接着做（分支也交给它了）', { to: String(e.model ?? '') || t('新的模型') })
+            : t('换成 {to} 在新任务里接着做', { to: String(e.model ?? '') || t('新的模型') })
+        })
         break
       case 'compaction':
         this.closeText()

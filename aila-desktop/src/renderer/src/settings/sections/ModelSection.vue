@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { t } from '../../i18n'
 import { onActivated, ref } from 'vue'
-import type { AiSettings, AiSettingsUpdate, ChatBrain } from '../../../../shared/settings'
+import { CHAT_BRAINS, type AiSettings, type AiSettingsUpdate, type ChatBrain } from '../../../../shared/settings'
 import type { EngineOption, LocalAgentInfo } from '../../../../shared/agent'
 import { bridge } from '../../platform/bridge'
 import AgendaCard from './AgendaCard.vue'
@@ -28,7 +28,9 @@ const brainMsg = ref<{ ok: boolean; text: string } | null>(null)
 const localAgents = ref<LocalAgentInfo[]>([])
 async function loadAgents(): Promise<void> {
   const res = await api.agentLocal()
-  localAgents.value = res.ok && res.data ? res.data : []
+  localAgents.value = res.ok && res.data
+    ? res.data.filter((a) => (CHAT_BRAINS as readonly string[]).includes(a.id))
+    : []
 }
 // 选了本机 Agent 当大脑：它有哪些模型（它要先起来，几秒）
 const brainModel = ref('')

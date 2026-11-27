@@ -139,7 +139,8 @@ def test_bridge_needs_the_session_token(tmp_path: Path) -> None:
         assert init["result"]["serverInfo"]["name"] == "aila"
         assert client.post("/agent/bridge", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=auth).status_code == 202
         names = [t["name"] for t in client.post("/agent/bridge", json=rpc, headers=auth).json()["result"]["tools"]]
-        assert names == ["delegate", "work_status", "wait_work", "merge_work", "discard_work"]
+        assert names == ["delegate", "work_status", "wait_work", "merge_work", "discard_work",
+                         "delegate_pair", "validate_pair", "pair_status", "discard_pair"]
         bad = client.post("/agent/bridge", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                                                  "params": {"name": "work_status", "arguments": {"id": "nope"}}}, headers=auth).json()
         assert bad["result"]["isError"]

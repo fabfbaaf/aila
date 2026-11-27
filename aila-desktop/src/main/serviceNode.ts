@@ -52,6 +52,24 @@ export function packagedCommand(location: Pick<ServiceLocation, 'resourcesPath' 
   }
 }
 
+/**
+ * 本机编程 Agent（Codex、Claude Code）的适配器是 Node 程序：用艾拉自己（Electron 带着 Node）跑它们，
+ * 电脑上没装 Node.js 也能用。AI 服务起适配器时带上 ELECTRON_RUN_AS_NODE=1（aila-ai/app/runtime/localagents.py）。
+ * 资源目录有 ACP 适配器或 npm 时也把路径传给 AI 服务，让本机版本和已有资源都能使用。
+ * 已经设了的（自己指定的）不盖掉。
+ */
+export function agentRuntimeEnv(options: { execPath: string; resourcesPath?: string; env: NodeJS.ProcessEnv; file: (path: string) => boolean; directory: (path: string) => boolean }): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!options.env['AILA_NODE']) out['AILA_NODE'] = options.execPath
+  if (options.resourcesPath) {
+    const acp = join(options.resourcesPath, 'acp')
+    const npm = join(options.resourcesPath, 'npm', 'bin', 'npm-cli.js')
+    if (!options.env['AILA_ACP_BUNDLED'] && options.directory(acp)) out['AILA_ACP_BUNDLED'] = acp
+    if (!options.env['AILA_NPM_CLI'] && options.file(npm)) out['AILA_NPM_CLI'] = npm
+  }
+  return out
+}
+
 /** 本机测试版的记录：resources/local-service.json 里的 {"aiDir": "..."}；没有、读不了、格式不对都当没有 */
 export function readLocalService(resourcesPath: string, read = (path: string) => readFileSync(path, 'utf8')): string | undefined {
   try {
@@ -129,8 +147,12 @@ export function serviceLocator(options: { packaged: boolean; appPath: string; us
   return () => locateService({ ...options, localDir, resourcesPath, env: process.env, platform: process.platform, file: (path) => hasType(path, false), directory: (path) => hasType(path, true) })
 }
 
-export function createServiceKeeper(options: { locate: () => ServiceCommand | null; url: string; changed: (state: ServiceState) => void }): ServiceKeeper {
+export function createServiceKeeper(options: { locate: () => ServiceCommand | null; url: string; changed: (state: ServiceState) => void; packaged?: boolean }): ServiceKeeper {
   const endpoint = new URL(options.url)
+  const agentEnv = agentRuntimeEnv({
+    execPath: process.execPath, resourcesPath: options.packaged ? process.resourcesPath : undefined, env: process.env,
+    file: (path) => hasType(path, false), directory: (path) => hasType(path, true)
+  })
   return new ServiceKeeper({
     port: endpoint.port || (endpoint.protocol === 'https:' ? '443' : '80'),
     command: options.locate,
@@ -143,7 +165,7 @@ export function createServiceKeeper(options: { locate: () => ServiceCommand | nu
       mkdirSync(command.cwd, { recursive: true })
       const child = spawn(command.executable, command.args, {
         cwd: command.cwd,
-        env: { ...process.env, ...command.env, AILA_HOST: endpoint.hostname, AILA_PORT: endpoint.port || '8765', PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env, ...agentEnv, ...command.env, AILA_HOST: endpoint.hostname, AILA_PORT: endpoint.port || '8765', PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
         windowsHide: true,
         detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe']

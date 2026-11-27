@@ -19,10 +19,13 @@ import type {
   AgentProgress,
   AgentSession,
   AgentSessionSummary,
+  PairPick,
   AgentUndoEvent,
   ComputerContext,
   EngineOption,
-  LocalAgentInfo
+  LocalAgentInfo,
+  ModelGroup,
+  ModelUse
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 import type { ClaudeQuotaConfig, ProviderQuota, QuotaRecord } from '../shared/providerQuotas'
@@ -80,14 +83,37 @@ export class AgentRelay {
     return this.remember(await this.call<AgentSession>('GET', `/agent/sessions/${encodeURIComponent(sid)}`))
   }
 
+  /** model：保存用户选的模型，连接 Agent 后再生效。 */
   async create(cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project',
-    engine: AgentEngine | null = null): Promise<AiResult<AgentSessionSummary>> {
-    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate, budget, kind, engine }))
+    engine: AgentEngine | null = null, model = '', collaborators: PairPick[] = []): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', {
+      cwd, mode, isolate, budget, kind, engine, model, ...(collaborators.length ? { collaborators } : {})
+    }))
   }
 
-  /** 本机的 Codex、Claude Code：找到没有、登录没有（每个要跑一下它的命令，慢一点） */
+  /** 换别家的模型接着做：开一个新任务，前情交给新的模型 */
+  async handoff(sid: string, engine: AgentEngine | null, model: string, label: string): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', `/agent/sessions/${encodeURIComponent(sid)}/handoff`,
+      { engine, model, label }, 120000))
+  }
+
+  /** 所有能选的模型，按账号分组（本机 Agent 的模型在后台问，loading 时过一会儿再拿） */
+  models(use: ModelUse, refresh = false): Promise<AiResult<ModelGroup[]>> {
+    return this.call('GET', `/agent/models?use=${use}${refresh ? '&refresh=true' : ''}`, undefined, 60000)
+  }
+
+  /** 提交用户对分工的决定，或启动联合验收。 */
+  pair(sid: string, action: import('../shared/agent').PairAction): Promise<AiResult<{ message: string }>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/pair`, action, 60000)
+  }
+
+  /** 检查本机 Agent 的程序和登录状态。 */
   localAgents(): Promise<AiResult<LocalAgentInfo[]>> {
     return this.call('GET', '/agent/local', undefined, 60000)
+  }
+
+  loginCommand(engine: AgentEngine): Promise<AiResult<{ command: string[]; profile?: { key: string; path: string } }>> {
+    return this.call('GET', `/agent/local/${engine}/login`, undefined, 30000)
   }
 
   providerQuotas(refresh: boolean): Promise<AiResult<ProviderQuota[]>> {

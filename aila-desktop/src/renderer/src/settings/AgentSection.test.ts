@@ -1,7 +1,8 @@
 /** 在 Vue 的内存渲染器里操作真实设置组件，检查异步加载和删除反馈；不控制浏览器。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createRenderer, h, KeepAlive, nextTick, type App } from 'vue'
+import { createRenderer, h, KeepAlive, nextTick, type App, type Component } from 'vue'
 import AgentSection from './sections/AgentSection.vue'
+import LocalAgentsCard from './sections/LocalAgentsCard.vue'
 
 const api = vi.hoisted(() => ({ loadAgentRules: vi.fn(), removeAgentRule: vi.fn() }))
 vi.mock('./agentRules', () => api)
@@ -11,8 +12,14 @@ const computer = vi.hoisted(() => ({
   loadComputerContext: vi.fn()
 }))
 vi.mock('./computer', () => computer)
-// 定时任务那张卡片要桌面端的接口：这里当成不在桌面端（不显示），只测编程设置本身
-vi.mock('../platform/bridge', () => ({ bridge: null, isDesktop: false }))
+const desktop = vi.hoisted(() => ({
+  available: false,
+  agentLocal: vi.fn(),
+  agentLocalOpenInstall: vi.fn(),
+  agentLocalLogin: vi.fn()
+}))
+// 编程设置的其他测试沿用网页模式。本机 Agent 单独挂载时模拟桌面接口。
+vi.mock('../platform/bridge', () => ({ get bridge() { return desktop.available ? desktop : null }, isDesktop: false }))
 // 外部工具（MCP）那张卡片单独测；这里只要它不去连服务
 vi.mock('./mcp', () => {
   const empty = async () => ({ ok: true, data: [] })
@@ -60,16 +67,73 @@ async function settle(): Promise<void> {
   await Promise.resolve()
   await nextTick()
 }
-async function mount(): Promise<ViewNode> {
+async function mount(component: Component = AgentSection): Promise<ViewNode> {
   const root = node('root')
-  app = renderer.createApp({ render: () => h(KeepAlive, null, { default: () => h(AgentSection) }) })
+  app = renderer.createApp({ render: () => h(KeepAlive, null, { default: () => h(component) }) })
   app.mount(root)
   await settle()
   return root
 }
-afterEach(() => { app?.unmount(); app = null; vi.resetAllMocks() })
+afterEach(() => {
+  app?.unmount()
+  app = null
+  desktop.available = false
+  vi.resetAllMocks()
+})
 beforeEach(() => {
   computer.loadComputerSettings.mockResolvedValue({ ok: true, data: { computer: { inventory: true } } })
+})
+
+describe('本机 Agent', () => {
+  it('第二账号登录按钮使用自己的账号配置', async () => {
+    desktop.available = true
+    const codex = {
+      id: 'codex', title: 'Codex', path: 'C:/bin/codex.exe', version: '1',
+      logged_in: true, adapter: true, ready: true, can_login: true, hints: []
+    }
+    desktop.agentLocal.mockResolvedValue({ ok: true, data: [
+      codex, { ...codex, id: 'codex-alt', title: 'Codex · 2', logged_in: false, ready: false }
+    ] })
+    desktop.agentLocalLogin.mockResolvedValue({ ok: true })
+    const root = await mount(LocalAgentsCard)
+    expect(text(root)).toContain('Codex · 2')
+    const secondLogin = find(root, (item) => item.tag === 'button' && item.props['aria-label'] === '登录 Codex · 2')!
+    expect(text(secondLogin)).toBe('登录第二个账号')
+    await secondLogin.props.onClick()
+    expect(desktop.agentLocalLogin).toHaveBeenCalledOnce()
+    expect(desktop.agentLocalLogin).toHaveBeenCalledWith('codex-alt')
+  })
+
+  it('打开设置后检查安装，缺少程序时给出官方地址，重新检查后显示已装版本和登录状态', async () => {
+    desktop.available = true
+    const missing = {
+      id: 'claude', title: 'Claude Code', path: null, version: '', logged_in: null, adapter: false,
+      ready: false, problem: '没找到 Claude Code', hints: ['npm install package']
+    }
+    desktop.agentLocal
+      .mockResolvedValueOnce({ ok: true, data: [missing] })
+      .mockResolvedValueOnce({ ok: true, data: [{
+        ...missing, path: 'C:/bin/claude.exe', version: '2.1.0', logged_in: false, problem: '', hints: []
+      }] })
+    desktop.agentLocalOpenInstall.mockResolvedValue({ ok: true })
+    const root = await mount(LocalAgentsCard)
+
+    expect(desktop.agentLocal).toHaveBeenCalledTimes(1)
+    expect(text(root)).toContain('未检测到')
+    expect(text(root)).not.toContain('npm install')
+    const link = find(root, (item) => item.tag === 'a' && text(item) === '官方安装')!
+    expect(link.props.href).toBe('https://code.claude.com/docs/en/quickstart')
+    await link.props.onClick({ preventDefault: vi.fn() })
+    expect(desktop.agentLocalOpenInstall).toHaveBeenCalledWith('claude')
+
+    const refresh = find(root, (item) => item.tag === 'button' && text(item) === '重新检查')!
+    await refresh.props.onClick()
+    await settle()
+    expect(desktop.agentLocal).toHaveBeenCalledTimes(2)
+    expect(text(root)).toContain('已安装 · 2.1.0')
+    expect(text(root)).toContain('没登录')
+    expect(find(root, (item) => item.tag === 'a')).toBeUndefined()
+  })
 })
 
 describe('编程设置组件', () => {

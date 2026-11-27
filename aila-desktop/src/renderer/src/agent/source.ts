@@ -1,6 +1,6 @@
 // 工作窗口的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import { SseParser } from '../../../shared/chat'
-import type { AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, EngineOption, LocalAgentInfo } from '../../../shared/agent'
+import type { AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, EngineOption, LocalAgentInfo, ModelGroup, ModelUse, PairPick } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 import { t } from '../i18n'
@@ -23,7 +23,15 @@ export interface AgentSource {
   forgetMemory(cwd: string, id: string): Promise<void>
   get(sid: string): Promise<AgentSession>
   screenshot?(sid: string, name: string): Promise<string>
-  create(cwd: string | undefined, mode: AgentMode, isolate?: boolean, budget?: number | null, kind?: AgentKind, engine?: AgentEngine | null): Promise<AgentSessionSummary>
+  /** model：本机 Agent 用哪个模型（输入框右下角选的；空就用它默认的） */
+  create(cwd: string | undefined, mode: AgentMode, isolate?: boolean, budget?: number | null, kind?: AgentKind, engine?: AgentEngine | null, model?: string, collaborators?: PairPick[]): Promise<AgentSessionSummary>
+  /** 所有能选的模型，按账号分组（loading 的过一会儿再拿） */
+  modelGroups?(use: ModelUse, refresh?: boolean): Promise<ModelGroup[]>
+  login?(engine: AgentEngine): Promise<void>
+  openInstall?(engine: AgentEngine): Promise<void>
+  /** 换别家的模型接着做：开一个新任务，前情交给新的模型 */
+  handoff?(sid: string, engine: AgentEngine | null, model: string, label: string): Promise<AgentSessionSummary>
+  pair?(sid: string, action: import('../../../shared/agent').PairAction): Promise<{ message: string }>
   /** 本机的 Codex、Claude Code 现在能不能用（新任务里选谁做） */
   localAgents(): Promise<LocalAgentInfo[]>
   /** 本机 Agent 任务的模型、思考深度、快速模式（还没连上时要几秒） */
@@ -54,6 +62,7 @@ export interface AgentSource {
   openSettings(): void
   onEvent(cb: (sid: string, event: AgentEvent) => void): void
   onStreamEnd(cb: (sid: string, error?: string) => void): void
+  onServiceReady?(cb: () => void): () => void
   onFocus(cb: (sid: string) => void): void
 }
 
@@ -73,8 +82,13 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     forgetMemory: async (cwd, id) => void unwrap(await api.agentForgetMemory(cwd, id)),
     get: async (sid) => unwrap(await api.agentGet(sid)),
     screenshot: async (sid, name) => unwrap(await api.agentScreenshot(sid, name)),
-    create: async (cwd, mode, isolate, budget, kind = 'project', engine = null) => unwrap(await api.agentCreate(cwd, mode, isolate, budget, kind, engine)),
+    create: async (cwd, mode, isolate, budget, kind = 'project', engine = null, model = '', collaborators = []) => unwrap(await api.agentCreate(cwd, mode, isolate, budget, kind, engine, model, collaborators)),
+    modelGroups: async (use, refresh = false) => unwrap(await api.agentModels(use, refresh)),
+    handoff: async (sid, engine, model, label) => unwrap(await api.agentHandoff(sid, engine, model, label)),
+    pair: async (sid, action) => unwrap(await api.agentPair(sid, action)),
     localAgents: async () => unwrap(await api.agentLocal()),
+    login: async (engine) => void unwrap(await api.agentLocalLogin(engine)),
+    openInstall: async (engine) => void unwrap(await api.agentLocalOpenInstall(engine)),
     engineOptions: async (sid) => unwrap(await api.agentOptions(sid)),
     setEngineOption: async (sid, id, value) => unwrap(await api.agentSetOption(sid, id, value)),
     setBudget: async (sid, amount) => unwrap(await api.agentSetBudget(sid, amount)),
@@ -104,6 +118,9 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     openSettings: () => api.openSettings('model'),
     onEvent: (cb) => void api.onAgentEvent(cb),
     onStreamEnd: (cb) => void api.onAgentStreamEnd(cb),
+    onServiceReady: (cb) => api.onServiceState((state) => {
+      if (state.phase === 'ready' || state.phase === 'external') cb()
+    }),
     onFocus: (cb) => void api.onAgentFocus(cb)
   }
 }
@@ -157,7 +174,12 @@ function web(): AgentSource {
     remember: (cwd, text) => call('POST', '/agent/memory', { cwd, text }),
     forgetMemory: async (cwd, id) => void (await call('DELETE', '/agent/memory', { cwd, id })),
     get: (sid) => call('GET', `/agent/sessions/${sid}`),
-    create: (cwd, mode, isolate, budget = null, kind = 'project', engine = null) => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate, budget, kind, engine }),
+    create: (cwd, mode, isolate, budget = null, kind = 'project', engine = null, model = '', collaborators = []) => call('POST', '/agent/sessions', {
+      cwd, mode, isolate: !!isolate, budget, kind, engine, model, ...(collaborators.length ? { collaborators } : {})
+    }),
+    modelGroups: (use, refresh = false) => call('GET', `/agent/models?use=${use}${refresh ? '&refresh=true' : ''}`),
+    handoff: (sid, engine, model, label) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/handoff`, { engine, model, label }),
+    pair: (sid, action) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/pair`, action),
     localAgents: () => call('GET', '/agent/local'),
     engineOptions: (sid) => call('GET', `/agent/sessions/${encodeURIComponent(sid)}/options`),
     setEngineOption: (sid, id, value) => call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/options`, { id, value }),

@@ -1,12 +1,11 @@
 <script setup lang="ts">
 /**
- * 设置 → 编程 →「本机 Agent」：这台电脑上的 Codex、Claude Code、Antigravity、CodeBuddy 能不能交活。
- * 艾拉自己去找（PATH 里的程序、它们自己的登录状态），登录要你在终端里用它们的官方程序做，艾拉不经手账号。
- * 和它们说话要一个 ACP 适配器（Node 程序）：点「装适配器」才下载，不带它们自带的 Codex / Claude，用你装好的。
+ * 设置 → 编程 →「本机 Agent」：检测已安装的命令行工具，并给未检测到的工具显示官方安装地址。
  */
 import { t } from '../../i18n'
-import { onMounted, ref } from 'vue'
-import type { LocalAgentInfo } from '../../../../shared/agent'
+import { computed, onMounted, ref } from 'vue'
+import type { AgentEngine, LocalAgentInfo } from '../../../../shared/agent'
+import { agentInstallUrl } from '../../../../shared/agentInstall'
 import { bridge } from '../../platform/bridge'
 
 const agents = ref<LocalAgentInfo[]>([])
@@ -14,6 +13,8 @@ const checking = ref(false)
 const installing = ref(false)
 const error = ref('')
 const notice = ref('')
+const accountAgents = computed(() => agents.value.filter((agent) => !agent.id.endsWith('-alt') || agent.path))
+const hasAccountSlots = computed(() => accountAgents.value.some((agent) => agent.id.endsWith('-alt')))
 
 async function check(): Promise<void> {
   if (!bridge || checking.value) return
@@ -25,6 +26,29 @@ async function check(): Promise<void> {
     else error.value = r.error ?? t('没问到，AI 服务可能没开。')
   } finally {
     checking.value = false
+  }
+}
+
+async function openInstall(id: AgentEngine): Promise<void> {
+  if (!bridge) return
+  error.value = ''
+  try {
+    const r = await bridge.agentLocalOpenInstall(id)
+    if (!r.ok) error.value = r.error ?? t('没打开官方安装页。')
+  } catch {
+    error.value = t('没打开官方安装页。')
+  }
+}
+
+async function login(id: AgentEngine): Promise<void> {
+  if (!bridge) return
+  error.value = ''
+  try {
+    const r = await bridge.agentLocalLogin(id)
+    if (r.ok) notice.value = t('在打开的窗口里登录，回来点「重新检查」。')
+    else error.value = r.error ?? t('登录窗口没打开')
+  } catch {
+    error.value = t('登录窗口没打开')
   }
 }
 
@@ -53,23 +77,35 @@ onMounted(check)
   <div class="card" :aria-busy="checking || installing">
     <h3>{{ t('本机 Agent') }}</h3>
     <p class="hint">
-      {{ t('开新任务时可以交给这台电脑上的 Codex、Claude Code、Antigravity 或 CodeBuddy 做：用你自己的账号和额度，进度、改动、要你同意的操作都在任务页里。它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。') }}
+      {{ t('开新任务时可选择本机的 Agent。登录和模型配置在各自的命令行工具里完成，任务进度和权限请求在艾拉里查看。') }}
     </p>
+    <p v-if="hasAccountSlots" class="hint">{{ t('Codex 和 Claude Code 可以分别登录两个账号。选模型时选带「2」的那一组，就用第二个账号。') }}</p>
     <ul class="list">
-      <li v-for="a in agents" :key="a.id" :class="{ off: !a.ready }">
+      <li v-for="a in accountAgents" :key="a.id" :class="{ off: !a.ready }">
         <div class="main">
           <b>{{ a.title }}</b>
-          <span class="hint">
-            <template v-if="a.path">{{ a.version || a.path }}</template>
-            <template v-else>{{ t('没找到') }}</template>
+          <span v-if="a.path" class="hint">
+            {{ t('已安装') }} · {{ a.version || a.path }}
             <template v-if="a.logged_in === true"> · {{ t('已登录') }}</template>
             <template v-else-if="a.logged_in === false"> · {{ t('没登录') }}</template>
-            <template v-if="a.path && a.native"> · {{ t('自己就支持 ACP，不用适配器') }}</template>
-            <template v-else-if="a.path"> · {{ a.adapter ? t('适配器装好了') : t('还没装适配器') }}</template>
+            <template v-else-if="a.native"> · {{ t('登录状态待确认') }}</template>
+            <template v-if="a.native"> · {{ t('自己就支持 ACP，不用适配器') }}</template>
+            <template v-else> · {{ a.adapter ? t('适配器装好了') : a.installs_adapter ? t('适配器第一次用时自动装') : t('还没装适配器') }}</template>
           </span>
-          <span v-if="a.problem" class="problem">{{ a.problem }}<template v-for="h in a.hints" :key="h">：{{ h }}</template></span>
+          <span v-else class="hint">{{ t('未检测到') }}</span>
+          <span v-if="a.path && (a.problem || a.hints.length)" :class="a.problem ? 'problem' : 'hint'">
+            {{ [a.problem, ...a.hints].filter(Boolean).join(' · ') }}
+          </span>
         </div>
-        <span class="tag" :class="a.ready ? 'good' : 'warn'">{{ a.ready ? t('能用') : t('还不能用') }}</span>
+        <button v-if="a.can_login && a.logged_in !== true" class="btn" type="button"
+          :aria-label="t('登录 {name}', { name: a.title })" @click="login(a.id)">{{ a.id.endsWith('-alt') ? t('登录第二个账号') : t('登录') }}</button>
+        <span v-if="a.path" class="tag" :class="a.ready ? 'good' : 'warn'">{{ a.ready ? t('能用') : t('还不能用') }}</span>
+        <a v-else-if="agentInstallUrl(a.id)"
+          class="btn install-link"
+          :href="agentInstallUrl(a.id)"
+          :aria-label="t('打开 {name} 的官方安装说明', { name: a.title })"
+          @click.prevent="openInstall(a.id)"
+        >{{ t('官方安装') }}</a>
       </li>
     </ul>
     <p v-if="checking && !agents.length" class="hint">{{ t('正在找本机的编程 Agent…') }}</p>
@@ -120,6 +156,11 @@ onMounted(check)
 .problem {
   color: var(--warn, #d97706);
   font-size: 12.5px;
+}
+
+.install-link {
+  flex-shrink: 0;
+  text-decoration: none;
 }
 
 .row {

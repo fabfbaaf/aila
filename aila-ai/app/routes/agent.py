@@ -44,9 +44,12 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..computer import computer_shell
-from ..deps import get_runtime
-from ..runtime.dispatch import SERVER_NAME, TOOLS, DispatchError
-from ..runtime.localagents import LocalAgentError, detect, install_adapters
+from ..code.fix import FixError
+from ..deps import get_catalog, get_runtime
+from ..runtime.branch import BranchError
+from ..runtime.collaboration import MAX_COLLABORATORS, CollaborationError
+from ..runtime.dispatch import SERVER_NAME, DispatchError
+from ..runtime.localagents import ACCOUNT_SLOTS, AgentEngine, LocalAgentError, account_home, detect, install_adapters, login_command
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
 from ..runtime.mcp import McpError, parse_import
@@ -69,13 +72,21 @@ def _budget_input(value: object) -> float | None:
         raise HTTPException(422, str(err)) from err
 
 
+class PairPick(BaseModel):
+    agent: AgentEngine
+    model: str = Field(default="", max_length=200, pattern=r"^[^\x00-\x1f\x7f]*$")
+
+
 class NewSession(BaseModel):
     cwd: str | None = Field(default=None, min_length=1, max_length=1000)
     kind: Literal["project", "computer"] = "project"
     mode: ModeName = "ask"
     isolate: bool = False  # 在新分支上做
-    # 交给本机的 Codex / Claude Code 做（不填就是艾拉自己做）
-    engine: Literal["codex", "claude", "antigravity", "codebuddy"] | None = None
+    # 交给哪个本机 Agent，空值用艾拉自己。
+    engine: AgentEngine | None = None
+    # 本机 Agent 用哪个模型（输入框右下角选的；空就用它自己默认的）
+    model: str = Field(default="", max_length=200, pattern=r"^[^\x00-\x1f\x7f]*$")
+    collaborators: list[PairPick] = Field(default_factory=list, max_length=MAX_COLLABORATORS)
     budget: float | None = Field(default=None, ge=0, allow_inf_nan=False, strict=True)
     _valid_budget = field_validator("budget", mode="before")(_budget_input)
 
@@ -139,9 +150,12 @@ def _session_or_404(rt: Runtime, sid: str):  # noqa: ANN202
 @router.post("/sessions", status_code=201)
 async def create_session(req: NewSession, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
-        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind, engine=req.engine)
+        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind, engine=req.engine,
+                            collaborators=[pick.model_dump() for pick in req.collaborators])
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
+    if req.engine and req.model:
+        session.append({"type": "engine_initial_model", "value": req.model})
     modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k in ("read_only", "ask")}
     shell = computer_shell() if session.kind == "computer" else rt.shell
     return {**session.summary(), "shell": shell.label, "modes": modes}
@@ -164,7 +178,8 @@ async def new_task(req: NewTask, rt: Runtime = Depends(get_runtime)) -> dict:
 
 @router.get("/sessions")
 async def list_sessions(rt: Runtime = Depends(get_runtime), q: str | None = None, cwd: str | None = None) -> list[dict]:
-    return [{**localize_summary(s), "running": rt.running(s["id"])} for s in rt.store.list(query=q, cwd=cwd)]
+    return [{**localize_summary(s), "running": rt.running(s["id"]),
+             **({"pair_pending": True} if rt.dispatch.pair_active(s["id"]) else {})} for s in rt.store.list(query=q, cwd=cwd)]
 
 
 @router.get("/sessions/{sid}")
@@ -172,6 +187,7 @@ async def get_session(sid: str, rt: Runtime = Depends(get_runtime)) -> dict:
     session = _session_or_404(rt, sid)
     shell = computer_shell() if session.kind == "computer" else rt.shell
     return {**localize_summary(session.summary()), "running": rt.running(sid), "shell": shell.label,
+            **({"pair_pending": True} if rt.dispatch.pair_active(sid) else {}),
             "events": [localize_event(e) for e in session.events]}  # 打开旧会话时进度、确认也按现在的语言显示
 
 
@@ -421,10 +437,61 @@ def _mcp_name(name: str) -> str:
     return name
 
 
+class Handoff(BaseModel):
+    engine: AgentEngine | None = None  # None：交给艾拉自己
+    model: str = Field(default="", max_length=200, pattern=r"^[^\x00-\x1f\x7f]*$")
+    label: str = Field(default="", max_length=120)  # 给你看的模型名（任务页上那一行用）
+
+class PairAction(BaseModel):
+    action: Literal["approve", "reject", "validate", "close"]
+    proposal_id: str = Field(default="", max_length=64)
+    picks: list[PairPick] | None = Field(default=None, min_length=1, max_length=MAX_COLLABORATORS)
+
+
+@router.post("/sessions/{sid}/pair")
+async def pair_action(sid: str, req: PairAction, rt: Runtime = Depends(get_runtime)) -> dict:
+    parent = rt.store.get(sid)
+    if parent is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        if req.action in ("validate", "close"):
+            tool = "validate_pair" if req.action == "validate" else "discard_pair"
+            message = await rt.dispatch.call(sid, tool, {})
+        else:
+            picks = [pick.model_dump() for pick in req.picks] if req.picks is not None else None
+            message = await rt.dispatch.decide_pair(parent, req.proposal_id, req.action == "approve", picks)
+    except (DispatchError, CollaborationError, BranchError, FixError, OSError) as err:
+        raise HTTPException(409, str(err)) from err
+    return {"message": message}
+
+
+@router.post("/sessions/{sid}/handoff", status_code=201)
+async def handoff(sid: str, req: Handoff, rt: Runtime = Depends(get_runtime)) -> dict:
+    """换别家的模型接着做：开一个新任务，前情交给新的模型，原来的任务记一笔交给了谁"""
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        session = rt.handoff(sid, req.engine, req.label)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+    if req.engine and req.model:
+        session.append({"type": "engine_initial_model", "value": req.model})
+    shell = computer_shell() if session.kind == "computer" else rt.shell
+    modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k in ("read_only", "ask")}
+    return {**session.summary(), "shell": shell.label, "modes": modes}
+
+
+@router.get("/models")
+async def models(use: Literal["chat", "task"] = "task", refresh: bool = False) -> list[dict]:
+    """所有能选的模型，按账号分组（艾拉自己的、ChatGPT、Claude……）：输入框右下角选模型用。
+    本机 Agent 的模型在后台问，loading 为真时过一会儿再来拿"""
+    return await get_catalog().groups(use, refresh)
+
+
 @router.get("/local")
 async def local_agents(rt: Runtime = Depends(get_runtime)) -> list[dict]:
-    """本机的 Codex、Claude Code：找到没有、登录没有、适配器装了没有（新任务里选谁做、设置页用）"""
-    return [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir)]
+    """查询本机 Agent 的程序、登录状态和适配器。"""
+    return [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir, include_profiles=True)]
 
 
 @router.post("/local/install")
@@ -434,7 +501,23 @@ async def local_install(rt: Runtime = Depends(get_runtime)) -> dict:
         message = await install_adapters(rt.data_dir)
     except LocalAgentError as err:
         raise HTTPException(400, str(err)) from err
-    return {"message": message, "agents": [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir)]}
+    return {"message": message, "agents": [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir, include_profiles=True)]}
+
+
+@router.get("/local/{engine}/login")
+async def login_command_of(engine: AgentEngine, rt: Runtime = Depends(get_runtime)) -> dict:
+    """把已安装 CLI 的官方登录命令和独立配置目录交给桌面主进程。"""
+    try:
+        command = await asyncio.to_thread(login_command, engine)
+        home = account_home(engine, rt.data_dir)
+        if home is None:
+            return {"command": command}
+        home.mkdir(parents=True, exist_ok=True)
+        return {"command": command, "profile": {"key": ACCOUNT_SLOTS[engine][1], "path": str(home)}}
+    except OSError as err:
+        raise HTTPException(400, "没能创建第二个账号的目录。") from err
+    except LocalAgentError as err:
+        raise HTTPException(400, str(err)) from err
 
 
 @router.get("/mcp")
@@ -564,7 +647,7 @@ async def bridge(request: Request, rt: Runtime = Depends(get_runtime)) -> Respon
     if method == "ping":
         return ok({})
     if method == "tools/list":
-        return ok({"tools": TOOLS})
+        return ok({"tools": rt.dispatch.tools_for(parent)})
     if method == "tools/call":
         name, args = str(params.get("name", "")), params.get("arguments") or {}
         try:

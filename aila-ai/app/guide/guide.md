@@ -43,13 +43,21 @@
 子 Agent 没法问你，所以要问的命令它不跑（写进报告由她来跑）；只读模式不能派人改代码。只在 git 仓库里能用。
 另有「查资料的助手」（explore）：要翻很多文件的问题她派只读的助手去查，只拿回报告。
 
-## 交给本机的 Codex、Claude Code、Antigravity、CodeBuddy
+## 交给本机的 Agent
 
-新任务时「谁来做？」选 Codex、Claude Code、Antigravity（Google 的反重力）或 CodeBuddy（腾讯的，WorkBuddy 同一个账号）：用这台电脑上装好的它们、你自己的账号和额度，进度、改动、要你同意的操作都在任务页里，能停下、能接着上次说。
-它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。任务页顶上能换它的模型、思考深度、快速模式（换了下一句起生效，重启后还是你选的）。出方案、审查改动、压缩上下文直接跟它说。
-它们还能互相派活：比如选 Claude Code，说「前端你做，后端交给 Codex」，它用艾拉给的派工工具把后端派给 Codex，Codex 在独立的 git 分支里做（任务列表里标着「派出的」），它要你同意的操作也出现在主任务里；做完由主 Agent 合并回来，合并前跑测试、有冲突不合并，按权限模式问你。
-平时聊天也能交给它们想：设置 → 对话 →「对话的大脑」（page=settings, section=model）选本机的 Agent，人格、记忆、表情、语音和提醒这些工具都照旧，只是每句慢几秒。
-要先：装好它们并登录（终端里 codex login、claude auth login、agy、codebuddy.cmd），Codex 和 Claude Code 还要在 设置 → 编程 → 本机 Agent（page=settings, section=agent）点「装适配器」（要 Node.js）；Antigravity、CodeBuddy 自己就能接，不用装。那里会显示找没找到、登没登录。
+新任务时在「用哪个模型」选本机 Agent 提供的模型。支持 Codex、Claude Code、Antigravity、CodeBuddy、GitHub Copilot CLI、Kimi Code、OpenCode、Cursor CLI、Qwen Code 和 MiniMax Code。艾拉使用你已安装的命令行工具，进度、改动和它发出的审批请求都会出现在任务页。
+艾拉按任务的权限模式处理收到的审批请求。Agent 提供模型、思考深度或快速模式时，可以在任务页顶上切换。出方案、审查改动、压缩上下文直接跟它说。
+支持艾拉派工工具的 Agent 可以互相派活。比如选 Claude Code，说「前端你做，后端交给 Codex」。Codex 在独立的 Git 分支里做，任务列表里标着「派出的」，它发出的审批请求也会出现在主任务里。
+平时聊天可以交给 Codex、Claude Code、Antigravity 或 CodeBuddy。在对话输入框旁选模型，下一条消息开始用它，也可以在设置 → 对话 →「对话的大脑」（page=settings, section=model）里切换。
+打开 设置 → 编程 → 本机 Agent（page=settings, section=agent），艾拉会检查电脑上有没有装这些工具。未检测到时点「官方安装」打开安装说明，装好后点「重新检查」。
+装好后点「登录」打开厂商的命令行窗口，按里面的提示操作。OpenCode 也可连接 Ollama、LM Studio 等本地运行的模型。Codex 和 Claude Code 用 ACP 适配器。可以在设置页预装，有 npm 时也会在首次使用时安装；其他 Agent 的 CLI 自带 ACP。
+
+在任务输入框旁切换同一账号的模型会保留当前任务。换账号或换厂商会新开一个接力任务，带上原任务的要求、改动和最近进度，并接着用它的分支。
+Codex 和 Claude Code 可各登录两个账号。在 设置 → 编程 → 本机 Agent 点「登录第二个账号」，完成厂商登录后点「重新检查」。开任务时，选带「2」的模型组。两个 Codex 账号的余额和重置时间分开显示。
+
+在艾拉或支持派工的本机 Agent 的项目任务里，可以说「前端派给 Claude，后端派给 Codex，先定好接口，再一起验收」。在主任务的「协作」里检查接口、负责文件和验收要求，也可以换任一项的模型。点「确认并派工」后，两边从同一份代码快照开工。
+
+两边做完后点「跑联合验收」。艾拉在临时工作区组合改动，跑验收测试和相关项目测试。通过后可以在主任务查看合并后的 diff 和测试结果，再决定是否收回改动。失败时可以打开子任务继续修，再重新验收。
 
 ## 平台用量与积分
 

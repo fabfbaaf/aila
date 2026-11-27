@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..code.fix import atomic_write
 from . import quota_providers as vendor
+from .localagents import ENGINES, account_home
 
 MAX_SAMPLES = 64
 MIN_OBSERVATION = 300
@@ -90,13 +91,14 @@ class QuotaBoard:
         self.clock = clock
         saved = _read(path / "board.json", 32 * 1024 * 1024)
         self.names = {k: v for k, v in vendor.obj(saved.get("names")).items() if isinstance(v, str)}
-        self.auto = {k: _samples(v) for k, v in vendor.obj(saved.get("auto")).items() if k in vendor.PROVIDERS}
+        self.auto = {k: _samples(v) for k, v in vendor.obj(saved.get("auto")).items() if k in self.providers()}
         self.manual = {k: _samples(v, 96, single=True) for k, v in vendor.obj(saved.get("manual")).items()
                        if k in vendor.PROVIDERS or k in self.names}
         self.cursor_linked = saved.get("cursor_linked") is True
         self.status: dict[str, str] = {}
         self.lock = asyncio.Lock()
         self.last_refresh: float | None = None
+        self.last_providers: tuple[str, ...] = ()
 
     def _save(self) -> None:
         data = {"names": self.names, "auto": self.auto, "manual": self.manual, "cursor_linked": self.cursor_linked}
@@ -126,10 +128,14 @@ class QuotaBoard:
         self._append(self.auto, "claude", Sample(after.st_mtime, windows))
         return True
 
+    def providers(self) -> dict[str, str]:
+        extra = {"codex-alt": ENGINES["codex-alt"].title} if account_home("codex-alt", self.path.parent).is_dir() else {}
+        return {**vendor.PROVIDERS, **extra}
+
     def view(self) -> list[dict]:
         now = self.clock()
         result = []
-        for key, name in {**vendor.PROVIDERS, **self.names}.items():
+        for key, name in {**self.providers(), **self.names}.items():
             windows = []
             automatic = self.auto.get(key, [])
             status = self.status.get(key, "ready" if automatic else "waiting")
@@ -163,17 +169,17 @@ class QuotaBoard:
         async with self.lock:
             self.path.mkdir(parents=True, exist_ok=True)
             changed = self._claude()
-            if self.last_refresh is None or self.clock() - self.last_refresh >= 60:
-                samples = await asyncio.gather(
-                    *(vendor.collect(key, self.path) for key in vendor.CLI_PROVIDERS),
-                )
+            sources = tuple(key for key in self.providers() if key in (*vendor.CLI_PROVIDERS, "codex-alt"))
+            if self.last_refresh is None or self.last_providers != sources or self.clock() - self.last_refresh >= 60:
+                samples = await asyncio.gather(*(vendor.collect(key, self.path) for key in sources))
                 at = self.clock()
-                for key, (status, windows) in zip(vendor.CLI_PROVIDERS, samples, strict=True):
+                for key, (status, windows) in zip(sources, samples, strict=True):
                     self.status[key] = status
                     if windows:
                         self._append(self.auto, key, Sample(at, windows))
                         changed = True
                 self.last_refresh = at
+                self.last_providers = sources
             if changed:
                 self._save()
             return self.view()

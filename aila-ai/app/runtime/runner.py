@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..code import CodeProjects
-from ..code.fix import FixError, git
+from ..code.fix import FixError, git, repo_root
 from ..computer import build_computer_context, computer_shell
 from ..config import ENV_FILE
 from ..confirm import Confirmations
@@ -26,11 +26,13 @@ from .branch import merge as merge_branch
 from .codetools import CodeAccess
 from ..extensions import ExtensionStore, skills_context
 from .commands import Command, load_commands, match
+from .collaboration import MAX_COLLABORATORS
 from .skilltool import read_skill_tool
 from .delivery import DELIVERY, DeliveryError
 from .dispatch import Dispatch
 from .external import ExternalAgent
-from .localagents import ENGINES, LocalAgentError
+from .handoff import recap
+from .localagents import ENGINES, LocalAgentError, account_home
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, project_key, remember_tool
@@ -142,11 +144,27 @@ class Runtime:
 
     def create(self, cwd: str | None = None, mode: Mode = "ask", isolate: bool = False,
                budget: float | None = None, *, kind: Literal["project", "computer"] = "project",
-               engine: str | None = None, parent: str | None = None) -> Session:
+               engine: str | None = None, parent: str | None = None,
+               branch: dict | None = None, note: str = "", pair_branch: BranchInfo | None = None,
+               collaborators: list[dict[str, str]] | None = None) -> Session:
         """isolate：在新分支上做（git worktree），合并之前你的代码一个字都不动。
-        engine：交给本机的 Codex / Claude Code 做（external.py）；不给就是艾拉自己做"""
+        engine：交给本机的 Codex / Claude Code 做（external.py）；不给就是艾拉自己做。
+        branch：接着用一个已经开好的分支（换模型接着做时从原来的任务接过来）；note：放在开头说明最后的话（接手的前情）"""
+        team_meta: dict = {}
+        if collaborators:
+            if kind != "project" or not cwd or mode == "read_only" or parent is not None:
+                raise RuntimeError_("协作者只能加到允许编辑的项目主任务。")
+            if len(collaborators) > MAX_COLLABORATORS or any(pick.get("agent") not in ENGINES for pick in collaborators):
+                raise RuntimeError_("协作者名单无效。")
+            if engine and not self.dispatch.base_url:
+                raise RuntimeError_("本机 Agent 的派工服务没开，暂时不能用它领队。")
+            try:
+                repo_root(Path(cwd).expanduser())
+            except (FixError, OSError) as err:
+                raise RuntimeError_("协作需要选择一个 Git 项目。") from err
+            team_meta["collaborators"] = collaborators
         if engine is not None:
-            return self._create_external(cwd, mode, isolate, budget, kind, engine, parent)
+            return self._create_external(cwd, mode, isolate, budget, kind, engine, parent, branch, pair_branch, team_meta)
         try:
             budget = validate_budget(budget)
         except ValueError as err:
@@ -169,22 +187,22 @@ class Runtime:
         # 启用的扩展带的本事：开会话时定下来（只放名字和简介），之后装卸扩展不改这个会话的开头，前缀缓存不断
         skills = self.extensions.skills()
         skill_note = skills_context(skills) + (ENGLISH_NOTE if self.language() == "en" else "")
-        skill_meta = {"skills": [s.name for s in skills]} if skills else {}
+        skill_meta = {**team_meta, **({"skills": [s.name for s in skills]} if skills else {})}
         if kind == "computer":
             session = self.store.create(root, mode, model.name,
-                                        build_computer_context(root, computer_shell().label, self.computer_inventory) + skill_note,
+                                        build_computer_context(root, computer_shell().label, self.computer_inventory) + skill_note + note,
                                         {"kind": "computer", **skill_meta})
-        elif not isolate:
+        elif not isolate and branch is None:
             session = self.store.create(root, mode, model.name,
                                         build_context(root, self.shell.label) + self.memory.context(root)
-                                        + self._recall(root) + skill_note, skill_meta)
+                                        + self._recall(root) + skill_note + note, skill_meta)
         else:
             try:
-                info = open_branch(root, self.work_dir)
+                info = BranchInfo.of(branch) if branch is not None else open_branch(root, self.work_dir)
             except BranchError as err:
                 raise RuntimeError_(str(err)) from err
             context = (build_context(info.workdir, self.shell.label) + BRANCH_NOTE.format(branch=info.branch, project=root)
-                       + self.memory.context(root) + self._recall(root) + skill_note)
+                       + self.memory.context(root) + self._recall(root) + skill_note + note)
             session = self.store.create(root, mode, model.name, context, {"branch": asdict(info), **skill_meta})
         if budget is not None:
             session.append({"type": "budget", "amount": budget})
@@ -214,12 +232,16 @@ class Runtime:
         return agent
 
     def _create_external(self, cwd: str | None, mode: Mode, isolate: bool, budget: float | None, kind: str,
-                         engine: str, parent: str | None = None) -> Session:
+                         engine: str, parent: str | None = None, branch: dict | None = None,
+                         pair_branch: BranchInfo | None = None, team_meta: dict | None = None) -> Session:
         """本机 Agent 的会话：日志和艾拉自己的一样（任务页、终端、手机都能看），开头记着是谁在做"""
         if engine not in ENGINES:
             raise RuntimeError_(f"不认识的 Agent：{engine}")
         if kind != "project" or not cwd:
             raise RuntimeError_(f"{ENGINES[engine].title} 只能在项目里做：先选一个项目。")
+        profile = account_home(engine, self.data_dir)
+        if profile is not None and not profile.is_dir():
+            raise RuntimeError_("先在设置里登录第二个账号。")
         if mode not in MODES:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         try:
@@ -230,8 +252,12 @@ class Runtime:
         if not root.is_dir():
             raise RuntimeError_(f"{cwd} 不是一个目录。")
         root = root.resolve()
-        meta: dict = {"engine": engine, **({"parent": parent} if parent else {})}  # parent：哪个任务派出来的
-        if isolate:
+        meta: dict = {**(team_meta or {}), "engine": engine, **({"parent": parent} if parent else {})}  # parent：哪个任务派出来的
+        if pair_branch is not None:
+            meta.update({"branch": asdict(pair_branch), "pair": True})
+        elif branch is not None:
+            meta["branch"] = branch  # 换模型接着做：用原来任务的分支
+        elif isolate:
             try:
                 meta["branch"] = asdict(open_branch(root, self.work_dir))
             except BranchError as err:
@@ -240,6 +266,55 @@ class Runtime:
         if budget is not None:
             session.append({"type": "budget", "amount": budget})
         return session
+
+    def handoff(self, sid: str, engine: str | None, model_label: str = "") -> Session:
+        """换别家的模型接着做：开一个新任务（同一个项目、同样的权限，在分支上做的接着用那个分支），
+        把前情交给新的模型（handoff.py 从日志整理）；原来的任务记一笔交给了谁，分支归新任务管。
+        engine 是 None：交给艾拉自己（设置里填的大模型）"""
+        old = self.store.get(sid)
+        if old is None:
+            raise RuntimeError_("没有这个会话。")
+        if old.events[0].get("pair") or self.dispatch.proposal(old) or self.dispatch.active_pair(old):
+            raise RuntimeError_("成组派工还在处理，先完成或结束协作再换 Agent。")
+        if any(e["type"] == "handoff_out" and e.get("branch_moved") for e in old.events):
+            raise RuntimeError_("工作区已经交给新任务，到新任务里继续。")
+        if self.running(sid):
+            raise RuntimeError_("还在做这一轮：等它做完，或者先打断，再换模型。")
+        if sid in self._operations:
+            raise RuntimeError_("这个会话正在合并、放弃分支或压缩，等它结束再换模型。")
+        if old.branch_closed:
+            raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
+        if old.kind == "computer" and engine:
+            raise RuntimeError_("电脑任务只能艾拉自己做。")
+        if engine is not None and engine not in ENGINES:
+            raise RuntimeError_(f"不认识的 Agent：{engine}")
+        previous = old.events[0].get("engine")
+        previous_name = ENGINES[str(previous)].title if previous in ENGINES else "艾拉"
+        chosen = next((str(e["value"]) for e in reversed(old.events) if e["type"] == "engine_config" and e.get("id") == "model"), "")
+        started = str(old.events[0].get("model", ""))
+        if previous in ENGINES and not chosen:  # 没换过：用它当时报的模型
+            options = next((e["options"] for e in reversed(old.events) if e["type"] == "engine_options"), [])
+            started = next((str(o.get("current", "")) for o in options if o.get("id") == "model"), "") or "默认模型"
+        previous_label = f"{previous_name}（{chosen or started}）" if previous in ENGINES else f"艾拉（{started}）"
+        note = recap(old.events, previous_label)
+        branch = old.branch
+        mode = old.mode if old.mode in MODES else "ask"
+        cwd = str(old.cwd)
+        collaborators = old.events[0].get("collaborators") if self.dispatch.opening_prompt(old) else None
+        if engine is None:
+            budget = max(0.0, old.budget - (old.cost or 0.0)) if old.budget is not None else None
+            new = self.create(cwd, mode, budget=budget, kind=old.kind, branch=branch, note="\n\n" + note,
+                              collaborators=collaborators)  # type: ignore[arg-type]
+        else:
+            new = self.create(cwd, mode, engine=engine, branch=branch, collaborators=collaborators)
+        new.append({"type": "handoff_in", "from": sid, "from_title": old.title, "from_model": previous_label,
+                    "model": model_label, "recap": note})
+        if old.title and not any(e["type"] == "title" for e in new.events):
+            new.append({"type": "title", "title": old.title})
+        moved = branch is not None
+        self._publish(sid, old.append({"type": "handoff_out", "to": new.id, "engine": engine or "",
+                                       "model": model_label, "branch_moved": moved}))
+        return new
 
     def agent(self, sid: str) -> Agent:
         if sid in self._deleting:
@@ -283,7 +358,8 @@ class Runtime:
             workers = Workers(session, workspace.root, self.shell, self.rules, lambda: policy.mode, self.model_factory,
                               self.work_dir, web, self.config.context_window)
             extra = [*extra, explorer.tool(), *web, *workers.tools(), *browser.tools(), *plan_tools(session.events),
-                     remember_tool(self.memory, session.cwd, session.id), *bridge_tools(self.mcp), *skill_tools]
+                     *self.dispatch.planning_tools(sid), remember_tool(self.memory, session.cwd, session.id),
+                     *bridge_tools(self.mcp), *skill_tools]
         agent = Agent(
             session,
             self.model_factory(),
@@ -305,6 +381,14 @@ class Runtime:
     def running(self, sid: str) -> bool:
         task = self._tasks.get(sid)
         return task is not None and not task.done()
+
+    def close_idle_streams(self, sid: str) -> None:
+        if not self.running(sid) and not self.dispatch.pair_active(sid):
+            self._close_streams(sid)
+
+    def _close_streams(self, sid: str) -> None:
+        for q in self._listeners.get(sid, set()):
+            q.put_nowait(None)
 
     def set_mode(self, sid: str, mode: Mode) -> None:
         if mode not in MODES:
@@ -356,7 +440,7 @@ class Runtime:
             raise RuntimeError_("没有这个会话。")
         if self.running(sid):
             raise RuntimeError_("她还在做事，先打断这一轮再删除。")
-        if sid in self._operations:
+        if sid in self._operations or self.dispatch.pair_active(sid):
             raise RuntimeError_("这个会话正在合并、放弃分支或压缩，等它结束再删除。")
         self._deleting.add(sid)
         try:
@@ -407,6 +491,8 @@ class Runtime:
 
     def _ready(self, sid: str, text: str, review: bool = False, plan: bool = False) -> tuple[Agent, str, dict]:
         agent = self.agent(sid)
+        if any(e["type"] == "handoff_out" and e.get("branch_moved") for e in agent.session.events):
+            raise RuntimeError_("工作区已经交给新任务，到新任务里继续。")
         if self.running(sid):
             raise RuntimeError_("她还在做上一件事：等她做完，或者先打断。")
         if sid in self._operations:
@@ -415,6 +501,8 @@ class Runtime:
             raise RuntimeError_("要做什么？")
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
+        if not review and (coordination := self.dispatch.opening_prompt(agent.session)):
+            return agent, text, {"collaboration_prompt": coordination}
         if isinstance(agent, ExternalAgent) and (plan or review):
             raise RuntimeError_(f"这个任务是 {agent.engine.title} 在做：要它出方案或审查改动，直接用话跟它说。")
         if plan:
@@ -506,7 +594,7 @@ class Runtime:
     @contextmanager
     def _maintenance(self, sid: str) -> Iterator[None]:
         """这些操作会在等待期间继续写日志，结束前不能删除会话或开始另一轮。"""
-        if self.running(sid) or sid in self._operations:
+        if self.running(sid) or sid in self._operations or self.dispatch.pair_active(sid):
             raise RuntimeError_("她还在做事，等她做完或先打断。")
         self._operations.add(sid)
         try:
@@ -517,6 +605,8 @@ class Runtime:
     async def merge(self, sid: str, run_tests: bool = True) -> Event:
         """跑测试、合并回你的代码。结果记进会话（工作窗口、终端都看得到）"""
         session = self.agent(sid).session
+        if session.events[0].get("pair"):
+            raise RuntimeError_("这是联合验收的子任务，到主任务里一起验收并收回。")
         with self._maintenance(sid):
             info = session.branch
             if info is None:
@@ -539,13 +629,19 @@ class Runtime:
             return event
 
     def _begin(self, sid: str, agent: Agent, text: str, extra: dict | None = None) -> None:
+        coordinating = bool(extra and extra.get("collaboration_prompt"))
         if isinstance(agent, ExternalAgent):
-            # 本机 Agent：它自己的模型、工具和 MCP；/review、出方案这种艾拉自己的流程不走这里（_ready 拦下了）
-            self._tasks[sid] = asyncio.create_task(self._drive(sid, agent.turn(text.strip(), extra)))
+            # 本机 Agent 用自己的模型、工具和 MCP，首次派工前只读查看项目。
+            events = agent.turn(text.strip(), extra)
+            if coordinating:
+                events = self._read_only(sid, agent, events)
+            self._tasks[sid] = asyncio.create_task(self._drive(sid, events))
             return
         agent.model = self.model_factory()  # 设置里换了模型或密钥：从这一轮起用新的
         events = agent.turn(text.strip(), extra)
-        if extra and (extra.get("review") or extra.get("plan_request")):
+        if coordinating:
+            events = self._read_only(sid, agent, events)
+        elif extra and (extra.get("review") or extra.get("plan_request")):
             hint = PLAN_DENY_HINT if extra.get("plan_request") else REVIEW_DENY_HINT
             events = self._read_only(sid, agent, events, hint)
         events = self._with_mcp(agent, events)
@@ -635,18 +731,20 @@ class Runtime:
         async for event in events:
             yield event
 
-    async def _read_only(self, sid: str, agent: Agent, events: AsyncIterator[Event], hint: str = "") -> AsyncIterator[Event]:
+    async def _read_only(self, sid: str, agent: Agent | ExternalAgent, events: AsyncIterator[Event], hint: str = "") -> AsyncIterator[Event]:
         """/review、出方案这一轮按只读模式把关；结束（做完、出错、打断）后换回原来的模式，
         中途用户换过模式就换成新的那个。hint：被挡下时告诉她这一轮该怎么做"""
         self._reviewing[sid] = agent.policy.mode
         agent.policy.mode = "read_only"
-        agent.deny_hint = hint
+        if isinstance(agent, Agent):
+            agent.deny_hint = hint
         try:
             async for event in events:
                 yield event
         finally:
             agent.policy.mode = self._reviewing.pop(sid, agent.policy.mode)
-            agent.deny_hint = ""
+            if isinstance(agent, Agent):
+                agent.deny_hint = ""
 
     def project_dir(self, project_id: str) -> str:
         """代码库里登记的项目 → 它的文件夹"""
@@ -711,9 +809,8 @@ class Runtime:
             for event in session.events[published + 1 :]:
                 self._publish(sid, event)  # 打断时补上的事件
             self._remember_turn(session)
-            if close:
-                for q in self._listeners.get(sid, set()):
-                    q.put_nowait(None)  # 这一轮结束了
+            if close and not self.dispatch.pair_active(sid):
+                self._close_streams(sid)
 
     # ---------- 记忆库 ----------
 
@@ -791,7 +888,7 @@ class Runtime:
             for event in list(session.events[after + 1 : attached + 1]):
                 yield event
             last = max(after, attached)
-            while self.running(sid) or not queue.empty():
+            while self.running(sid) or self.dispatch.pair_active(sid) or not queue.empty():
                 event = await queue.get()
                 if event is None:
                     break
@@ -807,6 +904,7 @@ class Runtime:
             self._listeners.get(sid, set()).discard(queue)
 
     async def shutdown(self) -> None:
+        await self.dispatch.shutdown()
         for task in list(self._tasks.values()):
             task.cancel()
         for task in list(self._tasks.values()):

@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
-from .localagents import ENGINES, find_program
+from .localagents import ENGINES, account_env, account_provider, find_program
 
 PROVIDERS = {
     "codex": "Codex", "claude": "Claude Code", "cursor": "Cursor",
@@ -175,9 +175,9 @@ async def _stdout(proc: asyncio.subprocess.Process) -> AsyncIterator[dict]:
 
 
 async def _rpc(args: list[str], cwd: Path, initialize: dict, method: str, *,
-               initialized_notice: bool = False, query_params: dict | None = None) -> dict:
+               initialized_notice: bool = False, query_params: dict | None = None, env: dict[str, str] | None = None) -> dict:
     proc = await asyncio.create_subprocess_exec(
-        *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        *args, cwd=cwd, env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL, limit=512 * 1024,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
@@ -259,10 +259,10 @@ async def collect(provider: str, cwd: Path) -> tuple[str, list[Window]]:
             program = await asyncio.wait_for(asyncio.to_thread(find_program, ENGINES[provider]), 15)
         if not program:
             return "missing_cli", []
-        if provider == "codex":
+        if account_provider(provider) == "codex":
             windows = codex(await _rpc(
                 [program, "app-server"], cwd, {"clientInfo": {**info, "title": "Aila"}},
-                "account/rateLimits/read", initialized_notice=True,
+                "account/rateLimits/read", initialized_notice=True, env=account_env(provider, cwd.parent),
             ))
         elif provider == "grok":
             windows = grok(await _rpc(
