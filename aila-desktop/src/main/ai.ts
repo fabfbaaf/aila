@@ -18,6 +18,7 @@ import type {
   ScreenStatus
 } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
+import type { AreaView, ChainView, Diagnosis, EndpointInfo, ExplainDepth, ExplainTarget, Explanation, FileDetail, FunctionDetail } from '../shared/understand'
 import { tm } from './lang'
 
 // ---------- 代码星图 ----------
@@ -51,6 +52,44 @@ export function codeLocateAll(aiUrl: string, text: string): Promise<AiResult<Loc
     )
   )
 }
+
+// ---------- 看懂项目：整体架构 → 模块 → 文件接口链路 → 函数（图由代码算，AI 只讲） ----------
+
+function codePost<T>(aiUrl: string, path: string, body: unknown, timeout = 90000): Promise<AiResult<T>> {
+  return attempt(async () =>
+    json<T>(await fetch(`${aiUrl}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeout)
+    }))
+  )
+}
+
+const projectPath = (id: string, tail: string): string => `/code/projects/${encodeURIComponent(id)}/${tail}`
+
+export const codeArea = (aiUrl: string, id: string, path: string, tests: boolean): Promise<AiResult<AreaView>> =>
+  codeGet<AreaView>(aiUrl, projectPath(id, 'area'), { path, tests: String(tests) })
+
+export const codeChain = (aiUrl: string, id: string, file: string, endpoint: string): Promise<AiResult<ChainView>> =>
+  codeGet<ChainView>(aiUrl, projectPath(id, 'chain'), { file, endpoint })
+
+export const codeEndpoints = (aiUrl: string, id: string): Promise<AiResult<EndpointInfo[]>> =>
+  codeGet<EndpointInfo[]>(aiUrl, projectPath(id, 'endpoints'))
+
+export const codeFile = (aiUrl: string, id: string, file: string): Promise<AiResult<FileDetail>> =>
+  codeGet<FileDetail>(aiUrl, projectPath(id, 'file'), { file })
+
+export const codeFunction = (aiUrl: string, id: string, file: string, line: number): Promise<AiResult<FunctionDetail>> =>
+  codeGet<FunctionDetail>(aiUrl, projectPath(id, 'function'), { file, line })
+
+/** 让 AI 讲一层（第一次要等模型，之后有缓存） */
+export const codeExplain = (aiUrl: string, id: string, target: ExplainTarget): Promise<AiResult<Explanation>> =>
+  codePost<Explanation>(aiUrl, projectPath(id, 'explain'), target)
+
+/** 出问题了：报错落在哪、谁调用过来的，AI 讲为什么 */
+export const codeDiagnose = (aiUrl: string, id: string, text: string, depth: ExplainDepth): Promise<AiResult<Diagnosis>> =>
+  codePost<Diagnosis>(aiUrl, projectPath(id, 'diagnose'), { text, depth })
 
 // ---------- 代码库 ----------
 

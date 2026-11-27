@@ -1,17 +1,23 @@
 <script setup lang="ts">
 /**
- * 项目页：登记过的项目（索引状态，原来在「设置 → 代码库」）和地图（原来的代码星图窗口）。
+ * 项目页：登记过的项目（索引状态，原来在「设置 → 代码库」）、看懂（整体架构 → 模块 → 链路 → 函数，她来讲）
+ * 和地图（原来的代码星图窗口，当全景看）。
  * 地图只在这一页、这一块正显示着的时候才挂上：离开时卸掉，3D 不在后台一直画，摄像头（手势）也随之关掉。
+ * 「看懂」是平面图，第一次点开才挂上，之后留着（切回来还在原来那一层）。
  */
 import { t } from '../i18n'
-import { defineAsyncComponent, onActivated, onDeactivated, ref } from 'vue'
+import { defineAsyncComponent, onActivated, onDeactivated, ref, watch } from 'vue'
 import type { ProjectsTab, ShellRoute } from '../../../shared/shell'
 import { bridge } from '../platform/bridge'
 import CodeSection from '../settings/sections/CodeSection.vue'
 
 const WorkbenchApp = defineAsyncComponent(() => import('../workbench/WorkbenchApp.vue'))
+const UnderstandApp = defineAsyncComponent(() => import('../understand/UnderstandApp.vue'))
 
-defineProps<{ tab: ProjectsTab }>()
+const props = defineProps<{ tab: ProjectsTab }>()
+/** 「看懂」点开过一次就留着 */
+const understandSeen = ref(props.tab === 'understand')
+watch(() => props.tab, (tab) => { if (tab === 'understand') understandSeen.value = true })
 const emit = defineEmits<{ go: [route: ShellRoute] }>()
 
 /** 这一页正显示着（KeepAlive 留着但切走了的时候是 false） */
@@ -28,15 +34,25 @@ onDeactivated(() => (shown.value = false))
         <button role="tab" :aria-selected="tab === 'list'" :class="{ on: tab === 'list' }" @click="emit('go', { page: 'projects', tab: 'list' })">
           {{ t('列表') }}
         </button>
+        <button role="tab" :aria-selected="tab === 'understand'" :class="{ on: tab === 'understand' }" @click="emit('go', { page: 'projects', tab: 'understand' })">
+          {{ t('看懂') }}
+        </button>
         <button role="tab" :aria-selected="tab === 'map'" :class="{ on: tab === 'map' }" @click="emit('go', { page: 'projects', tab: 'map' })">
           {{ t('地图') }}
         </button>
       </div>
-      <span class="hint">{{ tab === 'map' ? t('她最近读过、改过的文件会亮起来') : t('登记过的项目：她按意思搜代码、按报错定位都靠这里的索引') }}</span>
+      <span class="hint">{{
+        tab === 'map' ? t('她最近读过、改过的文件会亮起来')
+        : tab === 'understand' ? t('从整体到每个函数，一层层看懂；哪里不懂就让她讲，出了问题让她找原因')
+        : t('登记过的项目：她按意思搜代码、按报错定位都靠这里的索引')
+      }}</span>
     </header>
     <div v-show="tab === 'list'" class="settings-scope list">
       <div v-if="!bridge" class="empty">{{ t('项目列表只在桌面版里能用（npm run dev）。') }}</div>
       <div v-else class="inner"><CodeSection /></div>
+    </div>
+    <div v-if="understandSeen" v-show="tab === 'understand'" class="understand-wrap">
+      <UnderstandApp />
     </div>
     <div v-if="tab === 'map' && shown" class="map">
       <WorkbenchApp @close="emit('go', { page: 'projects', tab: 'list' })" />
@@ -48,6 +64,7 @@ onDeactivated(() => (shown.value = false))
 .projects {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -118,8 +135,14 @@ onDeactivated(() => (shown.value = false))
   padding: 24px 32px 40px;
 }
 
-.map {
+.map,
+.understand-wrap {
   min-height: 0;
   height: 100%;
+}
+
+.understand-wrap {
+  min-width: 0;
+  overflow: hidden;
 }
 </style>

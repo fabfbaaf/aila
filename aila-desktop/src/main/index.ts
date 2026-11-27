@@ -22,6 +22,13 @@ import {
   codeChunk,
   codeGraph,
   codeLocateAll,
+  codeArea,
+  codeChain,
+  codeDiagnose,
+  codeEndpoints,
+  codeExplain,
+  codeFile,
+  codeFunction,
   codeOutline,
   codeProjectAction,
   setCodeIgnore,
@@ -89,6 +96,7 @@ import { IntroDirector } from './intro'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
+import { registerUnderstandIpc } from './understandIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
 import { forAi, type MemoryForAi } from './cloud/keeper'
@@ -1174,6 +1182,16 @@ function registerIpc(): void {
   )
   ipcMain.handle('agent:get', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.get(sid) : notAllowed))
   registerAgentCreateIpc(ipcMain, agentRelay, fromAgent)
+  // 看懂项目：整体架构、模块、链路、函数，AI 讲解（花钱，只认主窗口）
+  registerUnderstandIpc(ipcMain, {
+    area: (id, path, tests) => codeArea(AI_URL, id, path, tests),
+    chain: (id, file, endpoint) => codeChain(AI_URL, id, file, endpoint),
+    endpoints: (id) => codeEndpoints(AI_URL, id),
+    file: (id, file) => codeFile(AI_URL, id, file),
+    fn: (id, file, line) => codeFunction(AI_URL, id, file, line),
+    explain: (id, target) => codeExplain(AI_URL, id, target),
+    diagnose: (id, text, depth) => codeDiagnose(AI_URL, id, text, depth)
+  }, fromMainWindow)
   registerAgentBudgetIpc(ipcMain, agentRelay, fromAgent, sidOk)
   ipcMain.handle('agent:merge', (e, sid: unknown, runTests: unknown) =>
     fromAgent(e) && sidOk(sid) ? agentRelay.merge(sid, runTests !== false) : notAllowed
