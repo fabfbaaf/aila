@@ -152,6 +152,10 @@ class ExternalAgent:
             reason = STOP.get(str(result.stop_reason), "done")
             if self._system_error:
                 reason, error = "error", _error_text(self.engine.title, self._said)
+            elif "verification required" in self._said.lower() and len(self._said.strip()) < 80:
+                # Antigravity：Google 账号要先验证（服务端 403「Verify your account to continue」），它只回这一句就结束
+                reason, error = "error", (f"{self.engine.title} 说要先验证你的账号：在浏览器里打开 "
+                                          "https://support.google.com/accounts?p=al_alert 按提示验证，再试")
             if self._rejected:
                 reason = self._rejected  # 你没同意它要做的事：和艾拉自己的一样停下等你说
         except asyncio.CancelledError:

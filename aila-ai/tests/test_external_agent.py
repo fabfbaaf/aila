@@ -455,3 +455,9 @@ def test_antigravity_tasks_ask_before_changes(tmp_path: Path) -> None:
     conn = h.conns[0]
     assert ("config", ("mode", "default")) in conn.calls
     assert not conn.calls[[c[0] for c in conn.calls].index("prompt")][1].startswith(ASK_NOTE)
+
+
+def test_account_verification_is_an_error(tmp_path: Path) -> None:
+    h = Harness(tmp_path, "ask", [("say", "\n⚠ Verification Required\n")], engine="antigravity")
+    events = asyncio.run(h.turn("改一行"))
+    assert events[-1]["reason"] == "error" and "验证你的账号" in events[-1]["error"]
