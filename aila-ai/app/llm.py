@@ -170,13 +170,14 @@ class OpenAICompatibleModel:
             model=self.name, messages=[{"role": "user", "content": "你好"}], max_tokens=1
         )
 
-    async def complete(self, messages: list[Message]) -> str:
-        """一次性拿到完整回答（整理记忆这类后台任务用）：温度低一点，要求输出 JSON"""
+    async def complete(self, messages: list[Message], max_tokens: int = 600) -> str:
+        """一次性拿到完整回答（整理记忆这类后台任务用）：温度低一点，要求输出 JSON。
+        max_tokens：回答长的（讲解整个项目的结构）要多给一些，不然 JSON 写到一半被截断"""
         response = await self._client.chat.completions.create(
             model=self.name,
             messages=messages,  # type: ignore[arg-type]
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
         return response.choices[0].message.content or ""

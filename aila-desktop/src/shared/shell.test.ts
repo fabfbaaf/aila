@@ -13,7 +13,7 @@ describe('主窗口的页面地址', () => {
   })
 
   it('来回转换不变', () => {
-    for (const h of ['/tasks', '/chat', '/projects/list', '/projects/map', '/knowledge', '/memory', '/settings/model', '/settings/status', '/settings/agent']) {
+    for (const h of ['/tasks', '/chat', '/projects/list', '/projects/map', '/projects/understand', '/knowledge', '/memory', '/settings/model', '/settings/status', '/settings/agent']) {
       expect(toHash(parseHash(h))).toBe(h)
     }
   })

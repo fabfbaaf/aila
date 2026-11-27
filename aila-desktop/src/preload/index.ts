@@ -41,6 +41,7 @@ import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
 import type { ReviewEntry } from '../shared/review'
 import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, EngineOption, LocalAgentInfo } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
+import type { AreaView, ChainView, Diagnosis, EndpointInfo, ExplainDepth, ExplainTarget, Explanation, FileDetail, FunctionDetail } from '../shared/understand'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
 import type { DiscoveryAction, DiscoverySource, DiscoveryState } from '../shared/discoveries'
@@ -148,6 +149,14 @@ const api = {
     ipcRenderer.invoke('code:chunk', id, file, line),
   /** 报错落在哪个登记的项目里（data 为 null：不在任何项目里） */
   codeLocateAll: (text: string): Promise<AiResult<LocatedError | null>> => ipcRenderer.invoke('code:locate-all', text),
+  /** 看懂项目：一层（整体架构、某个目录）、链路、接口列表、文件、函数、AI 讲解、出问题了 */
+  codeArea: (id: string, path: string, tests = false): Promise<AiResult<AreaView>> => ipcRenderer.invoke('code:area', id, path, tests),
+  codeChain: (id: string, file: string, endpoint = ''): Promise<AiResult<ChainView>> => ipcRenderer.invoke('code:chain', id, file, endpoint),
+  codeEndpoints: (id: string): Promise<AiResult<EndpointInfo[]>> => ipcRenderer.invoke('code:endpoints', id),
+  codeFile: (id: string, file: string): Promise<AiResult<FileDetail>> => ipcRenderer.invoke('code:file', id, file),
+  codeFunction: (id: string, file: string, line: number): Promise<AiResult<FunctionDetail>> => ipcRenderer.invoke('code:function', id, file, line),
+  codeExplain: (id: string, target: ExplainTarget): Promise<AiResult<Explanation>> => ipcRenderer.invoke('code:explain', id, target),
+  codeDiagnose: (id: string, text: string, depth: ExplainDepth): Promise<AiResult<Diagnosis>> => ipcRenderer.invoke('code:diagnose', id, text, depth),
   openWorkbench: (focus?: WorkbenchFocus): void => ipcRenderer.send('workbench:open', focus),
   /** 星图页面加载好后取一次：打开它时要定位的报错 */
   workbenchTakeFocus: (): Promise<WorkbenchFocus | null> => ipcRenderer.invoke('workbench:take-focus'),

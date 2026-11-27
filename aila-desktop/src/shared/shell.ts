@@ -10,7 +10,10 @@ import type { SettingsSection } from './settings'
 
 export type Page = 'tasks' | 'chat' | 'projects' | 'knowledge' | 'memory' | 'studio' | 'settings'
 /** 项目页里的两块：项目列表（索引状态）、地图（原来的代码星图） */
-export type ProjectsTab = 'list' | 'map'
+/** 项目页：列表、星图、看懂（整体架构 → 模块 → 链路 → 函数） */
+export type ProjectsTab = 'list' | 'map' | 'understand'
+const PROJECT_TABS = new Set<string>(['list', 'map', 'understand'])
+const projectsTab = (v: unknown): ProjectsTab => (typeof v === 'string' && PROJECT_TABS.has(v) ? (v as ProjectsTab) : 'list')
 
 export interface ShellRoute {
   page: Page
@@ -67,7 +70,7 @@ export function parseHash(hash: string): ShellRoute {
   if (head === 'agent' || head === 'tasks') return { page: 'tasks' }
   if (head === 'workbench') return { page: 'projects', tab: 'map' }
   if (head === 'settings') return routeForSection(sub as SettingsSection | undefined)
-  if (head === 'projects') return { page: 'projects', tab: sub === 'map' ? 'map' : 'list' }
+  if (head === 'projects') return { page: 'projects', tab: projectsTab(sub) }
   if (head === 'studio') return sub && WORK_ID.test(sub) ? { page: 'studio', work: sub } : { page: 'studio' }
   if (head && PAGE_IDS.has(head)) return { page: head as Page }
   return { page: 'tasks' }
@@ -88,7 +91,7 @@ export function cleanRoute(raw: unknown): ShellRoute {
   return parseHash(toHash({
     page: typeof r.page === 'string' && PAGE_IDS.has(r.page) ? (r.page as Page) : 'tasks',
     section: typeof r.section === 'string' ? (r.section as SettingsSection) : undefined,
-    tab: r.tab === 'map' ? 'map' : 'list',
+    tab: projectsTab(r.tab),
     work: typeof r.work === 'string' ? r.work : undefined
   }))
 }
