@@ -493,6 +493,17 @@ data: {"type": "done"}
 | `DELETE /studio/works/{id}` | 删掉（正在做的先打断），会话一起删 |
 | `GET /studio/diary` / `POST /studio/diary` | 看日记 / 写今天的 |
 
+### 本机 Agent（Codex、Claude Code，通过 ACP）
+
+新任务可以交给这台电脑上的 Codex 或 Claude Code 做（`POST /agent/sessions {"engine": "codex" | "claude"}`），会话日志、任务页、终端、手机看到的和艾拉自己做的一样。
+
+- **找程序**（`runtime/localagents.py`，`GET /agent/local`）：PATH 里的 `codex`、`claude`；npm 装的 codex 顺着脚本找到真正的 `codex.exe`。登录用它们自己的命令问（`codex login status`、`claude auth status`），不碰令牌文件；登录要你在终端里用官方程序做
+- **适配器**：官方的 `@agentclientprotocol/codex-acp`、`@agentclientprotocol/claude-agent-acp`，设置页点「装适配器」才装（`POST /agent/local/install`，`npm install --omit=optional`，装在 数据目录/acp，开发时 `AILA_ACP_DIR`）。不带它们自带的 Codex / Claude（各四五百 MB），用 `CODEX_PATH`、`CLAUDE_CODE_EXECUTABLE` 指到你装好的；去掉 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`，用你的订阅登录而不是按量计费
+- **一轮**（`runtime/external.py`，ACP 官方 Python SDK `agent-client-protocol`）：它说的话、工具（命令、改文件、读文件）、计划翻成艾拉的事件；改文件的 diff 由这边按它报的原文、新文生成
+- **权限还是艾拉说了算**：Codex 开在只读沙箱并告诉它「要改东西就请求批准」，Claude Code 开在「每次改动前都问」；每个批准请求按 `permissions.Policy` 决定（允许 / 拒绝 / 在任务页问你），危险命令任何模式都问。它在只读沙箱里自己跑的查看类命令不经过这里
+- **停下、接着说**：打断发 `session/cancel`，进程留着；ACP 会话编号记在日志（`engine_session`），重启后用「加载会话」接着之前的上下文，重放的内容不再记
+- 出方案、`/review`、压缩上下文、撤销这一轮不走艾拉的流程（直接跟它说）；Codex 用 `config.toml` 里设的模型
+
 ### 编程 Agent 评测
 
 用独立的小项目评测任务成功率、主 Agent 步数、用时、工具调用、输入/缓存/输出 token 和失败原因。每次复制 fixture 到临时目录，初始化 git 并提交起点；会话和规则也在临时目录，用完清理，不碰 `data/` 和原 fixture。不改运行时。

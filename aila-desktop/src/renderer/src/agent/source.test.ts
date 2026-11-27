@@ -12,7 +12,7 @@ describe('任务页预算来源', () => {
     const source = createAgentSource()
     await source.create('C:/shop', 'ask', false, 0)
     expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0, kind: 'project' })
+      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0, kind: 'project', engine: null })
     }))
     expect((await source.setBudget('s /1', null)).amount).toBeNull()
     expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions/s%20%2F1/budget', expect.objectContaining({
@@ -27,7 +27,7 @@ describe('任务页预算来源', () => {
     const { createAgentSource } = await import('./source')
     const source = createAgentSource()
     await source.create('C:/shop', 'ask', false, 0)
-    expect(agentCreate).toHaveBeenCalledWith('C:/shop', 'ask', false, 0, 'project')
+    expect(agentCreate).toHaveBeenCalledWith('C:/shop', 'ask', false, 0, 'project', null)
     await expect(source.setBudget('s1', 0.5)).rejects.toThrow('上限没有保存')
     expect(agentSetBudget).toHaveBeenCalledWith('s1', 0.5)
   })
@@ -40,7 +40,7 @@ describe('任务页预算来源', () => {
     const source = createAgentSource()
     await source.create(undefined, 'ask', false, null, 'computer')
     expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ mode: 'ask', isolate: false, budget: null, kind: 'computer' })
+      method: 'POST', body: JSON.stringify({ mode: 'ask', isolate: false, budget: null, kind: 'computer', engine: null })
     }))
     source.send('c1', '整理测试文件夹', false, true)
     expect(fetchMock).toHaveBeenLastCalledWith('/ai/agent/sessions/c1/messages', expect.objectContaining({

@@ -1234,6 +1234,9 @@ function registerIpc(): void {
   ipcMain.handle('agent:rules', (e) => (fromAgent(e) ? getAgentRules(AI_URL) : notAllowed))
   // MCP 外部工具服务：加服务就是让这台电脑跑一个程序，只认主窗口
   const mcpJson = (json: unknown): json is string => typeof json === 'string' && json.length >= 2 && json.length <= 50000
+  // 本机的 Codex、Claude Code：看情况、装适配器（装适配器要下载，只认主窗口）
+  ipcMain.handle('agent:local', (e) => (fromAgent(e) ? agentRelay.localAgents() : notAllowed))
+  ipcMain.handle('agent:local:install', (e) => (fromAgent(e) ? agentRelay.installAdapters() : notAllowed))
   ipcMain.handle('agent:mcp', (e) => (fromAgent(e) ? agentRelay.mcp() : notAllowed))
   ipcMain.handle('agent:mcp:preview', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpPreview(json) : notAllowed))
   ipcMain.handle('agent:mcp:import', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpImport(json) : notAllowed))

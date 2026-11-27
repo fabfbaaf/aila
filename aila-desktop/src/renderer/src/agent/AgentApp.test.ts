@@ -248,7 +248,7 @@ describe('电脑任务入口', () => {
     vi.mocked(fixture.source.get).mockResolvedValue(computerSession)
     await byClass(root, 'computer-start').props.onClick()
     await settle()
-    expect(fixture.source.create).toHaveBeenCalledWith(undefined, 'ask', false, null, 'computer')
+    expect(fixture.source.create).toHaveBeenCalledWith(undefined, 'ask', false, null, 'computer', null)
     expect(viewText(byClass(root, 'proj'))).toContain('电脑')
     expect(all(byClass(root, 'mode'), (item) => item.tag === 'option').map(viewText)).toEqual(['只读', '先问再改'])
     expect(find(root, (item) => item.tag === 'section' && item.props.class === 'memory')).toBeUndefined()

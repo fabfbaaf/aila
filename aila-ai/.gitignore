@@ -12,3 +12,5 @@ eval/results/
 # PyInstaller 的产物（scripts/build_service.py）
 build/
 dist/
+# 本机 Agent 的 ACP 适配器（开发时用 AILA_ACP_DIR 指到这里；装好的艾拉装在数据目录/acp）
+.acp/

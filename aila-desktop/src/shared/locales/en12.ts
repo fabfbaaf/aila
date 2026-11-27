@@ -1,0 +1,28 @@
+/** 英文词典（十二）：本机 Agent（Codex、Claude Code）：新任务里选谁做、设置 → 编程 → 本机 Agent */
+export const EN12: Record<string, string> = {
+  "不认识的 Agent。": "Unknown agent.",
+  "本机 Agent 只能在项目里做。": "Local agents only work inside a project.",
+  "{name} 用你自己的账号和额度在做；它要改文件、跑命令时按上面的权限模式问你，危险命令总是问。": "{name} works with your own account and quota. When it wants to edit files or run commands it asks according to the permission mode above; dangerous commands always ask.",
+  "谁来做？": "Who does it?",
+  "本机的 {name} 在做：用你自己的账号和它自己的模型": "{name} on this computer is doing this, with your own account and its own model",
+  "要 {name} 做什么？": "What should {name} do?",
+  "艾拉": "Aila",
+  "（{hint}）": " ({hint})",
+  "正在找本机的 Codex、Claude Code…": "Looking for Codex and Claude Code on this computer…",
+  "没问到，AI 服务可能没开。": "Couldn't check. The AI service may not be running.",
+  "没装上。": "Install failed.",
+  "本机 Agent": "Local agents",
+  "开新任务时可以交给这台电脑上的 Codex 或 Claude Code 做：用你自己的账号和额度，进度、改动、要你同意的操作都在任务页里。它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。": "When you start a task you can hand it to Codex or Claude Code on this computer. They use your own account and quota; progress, changes and approvals all show up on the task page. They still follow Aila's permission mode before editing files or running commands, and dangerous commands always ask.",
+  "没找到": "Not found",
+  "已登录": "Signed in",
+  "没登录": "Not signed in",
+  "适配器装好了": "Adapter installed",
+  "还没装适配器": "Adapter not installed",
+  "能用": "Ready",
+  "还不能用": "Not ready",
+  "重新检查": "Check again",
+  "正在检查…": "Checking…",
+  "正在装适配器…（几十秒）": "Installing adapters… (takes a few seconds to a minute)",
+  "装适配器": "Install adapters",
+  "适配器从 npm 下载（两个，共几十 MB，要装了 Node.js），装在艾拉的数据文件夹里。": "The adapters are downloaded from npm (two packages, a few dozen MB; needs Node.js) and stored in Aila's data folder."
+}

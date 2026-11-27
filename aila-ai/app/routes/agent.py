@@ -32,6 +32,7 @@
 和其他接口一样，只接受本机页面和本机程序的请求（见 security.py）。
 """
 
+import asyncio
 import json
 from dataclasses import asdict
 from collections.abc import AsyncIterator
@@ -44,6 +45,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..computer import computer_shell
 from ..deps import get_runtime
+from ..runtime.localagents import LocalAgentError, detect, install_adapters
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
 from ..runtime.mcp import McpError, parse_import
@@ -71,6 +73,8 @@ class NewSession(BaseModel):
     kind: Literal["project", "computer"] = "project"
     mode: ModeName = "ask"
     isolate: bool = False  # 在新分支上做
+    # 交给本机的 Codex / Claude Code 做（不填就是艾拉自己做）
+    engine: Literal["codex", "claude"] | None = None
     budget: float | None = Field(default=None, ge=0, allow_inf_nan=False, strict=True)
     _valid_budget = field_validator("budget", mode="before")(_budget_input)
 
@@ -134,7 +138,7 @@ def _session_or_404(rt: Runtime, sid: str):  # noqa: ANN202
 @router.post("/sessions", status_code=201)
 async def create_session(req: NewSession, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
-        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind)
+        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind, engine=req.engine)
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
     modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k in ("read_only", "ask")}
@@ -388,6 +392,22 @@ def _mcp_name(name: str) -> str:
     if not name or len(name) > 32 or not all(c.isalnum() or c in "_-" for c in name):
         raise HTTPException(404, "没有这个服务。")
     return name
+
+
+@router.get("/local")
+async def local_agents(rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """本机的 Codex、Claude Code：找到没有、登录没有、适配器装了没有（新任务里选谁做、设置页用）"""
+    return [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir)]
+
+
+@router.post("/local/install")
+async def local_install(rt: Runtime = Depends(get_runtime)) -> dict:
+    """装 ACP 适配器（你在设置页点了才装；不带它们自带的 Codex / Claude，用你装好的）"""
+    try:
+        message = await install_adapters(rt.data_dir)
+    except LocalAgentError as err:
+        raise HTTPException(400, str(err)) from err
+    return {"message": message, "agents": [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir)]}
 
 
 @router.get("/mcp")

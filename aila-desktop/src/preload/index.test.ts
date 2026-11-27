@@ -14,7 +14,7 @@ describe('会话管理的预加载桥', () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi
     await api.agentCreate('C:/shop', 'ask', false, 0)
-    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', 'C:/shop', 'ask', false, 0, 'project')
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', 'C:/shop', 'ask', false, 0, 'project', null)
     await api.agentSetBudget('s1', null)
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:budget', 's1', null)
   })
@@ -23,7 +23,7 @@ describe('会话管理的预加载桥', () => {
     const exposed = vi.mocked(contextBridge.exposeInMainWorld).mock.calls.find(([key]) => key === 'aila')
     const api = exposed?.[1] as AilaApi
     await api.agentCreate(undefined, 'read_only', false, null, 'computer')
-    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', undefined, 'read_only', false, null, 'computer')
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:create', undefined, 'read_only', false, null, 'computer', null)
     await api.agentComputerContext()
     expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('agent:computer-context')
   })

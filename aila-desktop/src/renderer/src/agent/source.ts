@@ -1,6 +1,6 @@
 // 工作窗口的数据从哪来：桌面版经主进程转发到 AI 服务；浏览器里调试时经 Vite 代理（/ai）直接请求
 import { SseParser } from '../../../shared/chat'
-import type { AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent } from '../../../shared/agent'
+import type { AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, LocalAgentInfo } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
 import { bridge } from '../platform/bridge'
 import { t } from '../i18n'
@@ -23,7 +23,9 @@ export interface AgentSource {
   forgetMemory(cwd: string, id: string): Promise<void>
   get(sid: string): Promise<AgentSession>
   screenshot?(sid: string, name: string): Promise<string>
-  create(cwd: string | undefined, mode: AgentMode, isolate?: boolean, budget?: number | null, kind?: AgentKind): Promise<AgentSessionSummary>
+  create(cwd: string | undefined, mode: AgentMode, isolate?: boolean, budget?: number | null, kind?: AgentKind, engine?: AgentEngine | null): Promise<AgentSessionSummary>
+  /** 本机的 Codex、Claude Code 现在能不能用（新任务里选谁做） */
+  localAgents(): Promise<LocalAgentInfo[]>
   setBudget(sid: string, amount: number | null): Promise<AgentBudgetEvent>
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
   merge(sid: string, runTests: boolean): Promise<AgentEvent>
@@ -68,7 +70,8 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     forgetMemory: async (cwd, id) => void unwrap(await api.agentForgetMemory(cwd, id)),
     get: async (sid) => unwrap(await api.agentGet(sid)),
     screenshot: async (sid, name) => unwrap(await api.agentScreenshot(sid, name)),
-    create: async (cwd, mode, isolate, budget, kind = 'project') => unwrap(await api.agentCreate(cwd, mode, isolate, budget, kind)),
+    create: async (cwd, mode, isolate, budget, kind = 'project', engine = null) => unwrap(await api.agentCreate(cwd, mode, isolate, budget, kind, engine)),
+    localAgents: async () => unwrap(await api.agentLocal()),
     setBudget: async (sid, amount) => unwrap(await api.agentSetBudget(sid, amount)),
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),
     discard: async (sid) => unwrap(await api.agentDiscard(sid)),
@@ -149,7 +152,8 @@ function web(): AgentSource {
     remember: (cwd, text) => call('POST', '/agent/memory', { cwd, text }),
     forgetMemory: async (cwd, id) => void (await call('DELETE', '/agent/memory', { cwd, id })),
     get: (sid) => call('GET', `/agent/sessions/${sid}`),
-    create: (cwd, mode, isolate, budget = null, kind = 'project') => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate, budget, kind }),
+    create: (cwd, mode, isolate, budget = null, kind = 'project', engine = null) => call('POST', '/agent/sessions', { cwd, mode, isolate: !!isolate, budget, kind, engine }),
+    localAgents: () => call('GET', '/agent/local'),
     setBudget: (sid, amount) => call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/budget`, { amount }),
     merge: (sid, runTests) => call('POST', `/agent/sessions/${sid}/merge`, { run_tests: runTests }),
     discard: (sid) => call('POST', `/agent/sessions/${sid}/discard`),

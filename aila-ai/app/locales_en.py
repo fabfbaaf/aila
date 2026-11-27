@@ -5,6 +5,7 @@
 
 from .locales_en2 import EN2
 from .locales_en3 import EN3
+from .locales_en4 import EN4
 
 EN1: dict[str, str] = {
     # ---------- 浏览器 ----------
@@ -149,4 +150,4 @@ EN1: dict[str, str] = {
     "先在设置里填好：{0}。": "Fill these in settings first: {0}.",
 }
 
-EN: dict[str, str] = {**EN1, **EN2, **EN3}
+EN: dict[str, str] = {**EN1, **EN2, **EN3, **EN4}
