@@ -493,6 +493,35 @@ data: {"type": "done"}
 | `DELETE /studio/works/{id}` | 删掉（正在做的先打断），会话一起删 |
 | `GET /studio/diary` / `POST /studio/diary` | 看日记 / 写今天的 |
 
+### 本机 Agent（Codex、Claude Code、Antigravity、CodeBuddy，通过 ACP）
+
+新任务可以交给这台电脑上的 Codex、Claude Code、Antigravity 或 CodeBuddy 做（`POST /agent/sessions {"engine": "codex" | "claude" | "antigravity" | "codebuddy"}`），会话日志、任务页、终端、手机看到的和艾拉自己做的一样。
+
+- **自己会说 ACP 的**：Antigravity（`agy acp --process-per-session`，这样才收 HTTP 的 MCP）、CodeBuddy（`codebuddy --acp`）不用适配器；登录用它们自己的程序（`agy`、`codebuddy.cmd`），这边问不出登没登录，开会话时没登录它们会说。都开在「每次改动前都问」
+- **不报工具种类的**（CodeBuddy 只报 Edit、Bash 这些名字）：按名字认出改文件、跑命令、读文件；改文件的 diff 按它给的参数（`file_path` + `old_string`/`new_string`、`content`、`edits`）和文件现在的内容算，不会把改文件当成叫 Edit 的命令（那样「以后都不用问」会放过以后所有改动）
+
+- **找程序**（`runtime/localagents.py`，`GET /agent/local`）：PATH 里的 `codex`、`claude`；npm 装的 codex 顺着脚本找到真正的 `codex.exe`。登录用它们自己的命令问（`codex login status`、`claude auth status`），不碰令牌文件；登录要你在终端里用官方程序做
+- **适配器**：官方的 `@agentclientprotocol/codex-acp`、`@agentclientprotocol/claude-agent-acp`，设置页点「装适配器」才装（`POST /agent/local/install`，`npm install --omit=optional`，装在 数据目录/acp，开发时 `AILA_ACP_DIR`）。不带它们自带的 Codex / Claude（各四五百 MB），用 `CODEX_PATH`、`CLAUDE_CODE_EXECUTABLE` 指到你装好的；去掉 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`，用你的订阅登录而不是按量计费
+- **一轮**（`runtime/external.py`，ACP 官方 Python SDK `agent-client-protocol`）：它说的话、工具（命令、改文件、读文件）、计划翻成艾拉的事件；改文件的 diff 由这边按它报的原文、新文生成
+- **权限还是艾拉说了算**：Codex 开在只读沙箱并告诉它「要改东西就请求批准」，Claude Code 开在「每次改动前都问」；每个批准请求按 `permissions.Policy` 决定（允许 / 拒绝 / 在任务页问你），危险命令任何模式都问。它在只读沙箱里自己跑的查看类命令不经过这里
+- **停下、接着说**：打断发 `session/cancel`，进程留着；ACP 会话编号记在日志（`engine_session`），重启后用「加载会话」接着之前的上下文，重放的内容不再记
+- **换模型**：它给的设置里只放出模型、思考深度、快速模式（`GET/PUT /agent/sessions/{sid}/options`；权限模式不给换）。你选的记在日志（`engine_config`），连上、加载会话、每一轮开始前对齐；正在做时换，下一轮开始前换上。新会话没选过时 Codex 用 `config.toml` 里设的模型
+- 出方案、`/review`、压缩上下文、撤销这一轮不走艾拉的流程（直接跟它说）
+
+### 跨 Agent 派工（`runtime/dispatch.py`）
+
+本机 Agent 当主 Agent 时，艾拉给它挂一个本机 MCP 服务（`POST /agent/bridge`，最小的 Streamable HTTP，只认开会话时给的令牌），工具：
+`delegate`（派给 codex / claude：开一个新的本机 Agent 会话，在独立 git 工作区里做，开头记着 `parent`）、`work_status`、`wait_work`（一次最多等 50 秒，Agent 的工具调用有超时）、`merge_work`（按主任务的权限模式问你，给你看的 diff 由这边生成；问你时不卡住主 Agent，同意后在后台跑测试、合并，主任务里有合并卡片）、`discard_work`。
+助手要你同意的操作原样转到主任务（在主任务里点就行），做完、出错在主任务里说一声；主 Agent 调这几个工具本身不用问。
+
+### 对话的大脑换成本机 Agent（`app/brain.py`）
+
+设置里 `AILA_CHAT_BRAIN=codex|claude|antigravity|codebuddy` 时，对话（`/chat`，手机上也一样）交给本机的这个 Agent 想，`run_agent` 一点不变：
+`AgentBrain` 实现 `ChatModel.stream()`。人格：开 ACP 会话时交系统提示词（Claude Code 整个换掉，Codex 只能接在后面）；<背景>（记忆）原样放在最新一句前面；会话留着，下一句只发新的，对不上就开新会话并带上最近的对话。艾拉的对话工具用 MCP 挂给它（`POST /chat/bridge`，只认这个大脑的令牌）：它调用时 `stream()` 把调用交回 `run_agent`（照常确认、执行），结果在下一次 `stream()` 交回给它。它自己的改文件、跑命令一律不批，开在空文件夹里。整理记忆、写摘要还用填的大模型。
+系统提示词后面加一段：艾拉的工具在 `aila_chat` 里，别用它自己的定时任务、命令。它要用自己的工具被拒、一句话没说就结束时，再提醒它一次，做不了就直说。MCP 地址每个会话不一样（`?s=序号`）：CodeBuddy 同一个进程里同名的服务只连一次，地址不变就一直用第一次要到的工具列表。
+
+CodeBuddy 当大脑时另外几处不一样：ACP 给的系统提示词它不认，人格写进 数据目录/chat-brain-persona.md，用 `--system-prompt-file` 交给它（每个新会话重读）；`--tools ToolSearch,DeferExecuteTool` 关掉它自己的工具，只留找外部工具、调外部工具这两个；它的外部工具要先搜才看得见，按意思搜常常搜不到，所以把艾拉工具的完整名字（`mcp__aila_chat__set_reminder`……）列在提示词里。它调外部工具时标题是 `DeferExecuteTool`，真工具名和参数在 `toolName`、`params` 里，对话和编程任务都按里面的真工具认、问（外部工具按 MCP 工具问，别的连参数一起当命令问）。
+
 ### 编程 Agent 评测
 
 用独立的小项目评测任务成功率、主 Agent 步数、用时、工具调用、输入/缓存/输出 token 和失败原因。每次复制 fixture 到临时目录，初始化 git 并提交起点；会话和规则也在临时目录，用完清理，不碰 `data/` 和原 fixture。不改运行时。

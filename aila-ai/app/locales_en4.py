@@ -1,0 +1,26 @@
+"""英文词典（四）：本机 Agent（Codex、Claude Code，runtime/localagents.py、runtime/external.py）"""
+
+EN4: dict[str, str] = {
+    "没有叫 {0} 的工具。": "There is no tool called {0}.",
+    "只能派给 {0}。": "Can only hand work to {0}.",
+    "要写清楚让它做什么。": "Say clearly what it should do.",
+    "没有这个编号的活（只能管这个任务派出去的）。": "No work with that id (only work handed out by this task can be managed).",
+    "它还在做，等它做完再合并（wait_work）。": "It's still working; wait for it to finish before merging (wait_work).",
+    "这块活的分支已经没了。": "This work's branch no longer exists.",
+    "它还在做，先等它做完（或者让用户在任务页里打断）再放弃。": "It's still working; wait for it to finish (or ask the user to stop it on the task page) before discarding.",
+    "派不出去：{0}": "Couldn't hand it out: {0}",
+    "没合并：{0}": "Not merged: {0}",
+    "没有这个选项。": "No such option.",
+    "这个任务是艾拉自己在做：编程用的模型在 设置 → 对话 里换。": "Aila is doing this task herself: change the coding model in Settings → Chat.",
+    "不认识的 Agent：{0}": "Unknown agent: {0}",
+    "没找到 {0}。{1}": "{0} not found. {1}",
+    "没找到 Node.js，适配器跑不起来。装一个 Node.js 再试。": "Node.js not found, so the adapter can't run. Install Node.js and try again.",
+    "{0} 的适配器还没装：在 设置 → 编程 → 本机 Agent 里点「装适配器」。": "The {0} adapter isn't installed: go to Settings → Coding → Local agents and click \"Install adapters\".",
+    "没找到 npm（装 Node.js 时会带上）。装好 Node.js 再试。": "npm not found (it comes with Node.js). Install Node.js and try again.",
+    "装适配器超时了，看看网络再试。": "Installing the adapters timed out. Check your network and try again.",
+    "{0} 只能在项目里做：先选一个项目。": "{0} only works inside a project: pick a project first.",
+    "这个任务是 {0} 在做：要它出方案或审查改动，直接用话跟它说。": "{0} is doing this task: to get a plan or a review, just ask it in words.",
+    "{0} 改的文件艾拉没存底片，撤销不了：用 git 看改动、还原。": "Aila has no snapshots of files {0} changed, so they can't be undone here: use git to review and revert.",
+    "{0} 自己管上下文：要压缩就跟它说 /compact。": "{0} manages its own context: send it /compact to compress.",
+    "{0} 的上下文在它自己那边，这里看不到。": "{0} keeps its context on its side; it can't be shown here.",
+}

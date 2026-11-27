@@ -65,6 +65,41 @@ export interface AgentSessionSummary {
   edits?: number
   /** 还没回答的确认（action 是代码按参数生成的说明） */
   pending?: { id: string; tool: string; action: string; can_remember: boolean } | null
+  /** 本机的 Codex / Claude Code 在做（不是艾拉自己）：codex、claude；艾拉自己做时没有 */
+  engine?: AgentEngine | null
+  /** 跨 Agent 派工：派出这个任务的主任务（主 Agent 用艾拉的派工工具派出来的）；自己开的没有 */
+  parent?: string | null
+}
+
+/** 本机的编程 Agent（通过 ACP 适配器接进来，见 aila-ai/app/runtime/localagents.py） */
+export type AgentEngine = 'codex' | 'claude' | 'antigravity' | 'codebuddy'
+
+/** 本机 Agent 能换的一个设置（模型、思考深度、快速模式）：权限模式由艾拉管，不在里面 */
+export interface EngineOption {
+  id: string
+  name: string
+  category: 'model' | 'thought_level' | 'speed' | string
+  /** 现在用的（你选过的盖在上面，还没连上时也显示你选的） */
+  current: string
+  choices: { value: string; name: string; description?: string }[]
+}
+
+/** 一个本机 Agent 现在的情况：找到没有、登录没有、适配器装了没有 */
+export interface LocalAgentInfo {
+  id: AgentEngine
+  title: string
+  path: string | null
+  version: string
+  /** null：问不出来 */
+  logged_in: boolean | null
+  adapter: boolean
+  /** 自己就会说 ACP，不用适配器（Antigravity、CodeBuddy） */
+  native?: boolean
+  ready: boolean
+  /** 不能用的原因（给你看的） */
+  problem: string
+  /** 怎么弄好（登录命令、装什么） */
+  hints: string[]
 }
 
 /** 一个事件。带 seq 的写在会话日志里；text_delta、reasoning_delta、tool_start 只是实时推送 */

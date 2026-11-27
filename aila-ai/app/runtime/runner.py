@@ -28,6 +28,9 @@ from ..extensions import ExtensionStore, skills_context
 from .commands import Command, load_commands, match
 from .skilltool import read_skill_tool
 from .delivery import DELIVERY, DeliveryError
+from .dispatch import Dispatch
+from .external import ExternalAgent
+from .localagents import ENGINES, LocalAgentError
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, project_key, remember_tool
@@ -89,6 +92,7 @@ class Runtime:
         memory_store: "Callable[[], MemoryStore] | None" = None,
         language: Callable[[], str] = lambda: "zh",
         web_search: Callable[[], SearchProvider | None] | None = None,
+        bridge_url: str | None = None,
     ) -> None:
         # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
         self.language = language
@@ -131,12 +135,18 @@ class Runtime:
         self._operations: set[str] = set()
         # 正在 /review 的会话 → 这一轮结束后要换回的权限模式
         self._reviewing: dict[str, Mode] = {}
+        # 跨 Agent 派工：本机 Agent 当主 Agent 时给它挂的派工工具（dispatch.py）；bridge_url 是艾拉自己的地址
+        self.dispatch = Dispatch(self, bridge_url)
 
     # ---------- 会话 ----------
 
     def create(self, cwd: str | None = None, mode: Mode = "ask", isolate: bool = False,
-               budget: float | None = None, *, kind: Literal["project", "computer"] = "project") -> Session:
-        """isolate：在新分支上做（git worktree），合并之前你的代码一个字都不动"""
+               budget: float | None = None, *, kind: Literal["project", "computer"] = "project",
+               engine: str | None = None, parent: str | None = None) -> Session:
+        """isolate：在新分支上做（git worktree），合并之前你的代码一个字都不动。
+        engine：交给本机的 Codex / Claude Code 做（external.py）；不给就是艾拉自己做"""
+        if engine is not None:
+            return self._create_external(cwd, mode, isolate, budget, kind, engine, parent)
         try:
             budget = validate_budget(budget)
         except ValueError as err:
@@ -180,6 +190,57 @@ class Runtime:
             session.append({"type": "budget", "amount": budget})
         return session
 
+    async def engine_options(self, sid: str) -> list[dict]:
+        """本机 Agent 能换的设置（模型、思考深度、快速模式）：还没连上的话先连上问它"""
+        agent = self._external(sid)
+        try:
+            return await agent.prepare()
+        except LocalAgentError as err:
+            raise RuntimeError_(str(err)) from err
+
+    async def set_engine_option(self, sid: str, option_id: str, value: str) -> list[dict]:
+        agent = self._external(sid)
+        try:
+            options = await agent.set_option(option_id, value)
+        except LocalAgentError as err:
+            raise RuntimeError_(str(err)) from err
+        self._publish(sid, agent.session.events[-1])
+        return options
+
+    def _external(self, sid: str) -> ExternalAgent:
+        agent = self.agent(sid)
+        if not isinstance(agent, ExternalAgent):
+            raise RuntimeError_("这个任务是艾拉自己在做：编程用的模型在 设置 → 对话 里换。")
+        return agent
+
+    def _create_external(self, cwd: str | None, mode: Mode, isolate: bool, budget: float | None, kind: str,
+                         engine: str, parent: str | None = None) -> Session:
+        """本机 Agent 的会话：日志和艾拉自己的一样（任务页、终端、手机都能看），开头记着是谁在做"""
+        if engine not in ENGINES:
+            raise RuntimeError_(f"不认识的 Agent：{engine}")
+        if kind != "project" or not cwd:
+            raise RuntimeError_(f"{ENGINES[engine].title} 只能在项目里做：先选一个项目。")
+        if mode not in MODES:
+            raise RuntimeError_(f"不认识的权限模式：{mode}")
+        try:
+            budget = validate_budget(budget)
+        except ValueError as err:
+            raise RuntimeError_(str(err)) from err
+        root = Path(cwd).expanduser()
+        if not root.is_dir():
+            raise RuntimeError_(f"{cwd} 不是一个目录。")
+        root = root.resolve()
+        meta: dict = {"engine": engine, **({"parent": parent} if parent else {})}  # parent：哪个任务派出来的
+        if isolate:
+            try:
+                meta["branch"] = asdict(open_branch(root, self.work_dir))
+            except BranchError as err:
+                raise RuntimeError_(str(err)) from err
+        session = self.store.create(root, mode, ENGINES[engine].title, "", meta)
+        if budget is not None:
+            session.append({"type": "budget", "amount": budget})
+        return session
+
     def agent(self, sid: str) -> Agent:
         if sid in self._deleting:
             raise RuntimeError_("这个会话正在删除，等删完再开新会话。")
@@ -188,6 +249,15 @@ class Runtime:
         session = self.store.get(sid)
         if session is None:
             raise RuntimeError_("没有这个会话。")
+        if engine := session.events[0].get("engine"):
+            # 本机的 Codex / Claude Code 在做：权限还是按艾拉的规则（它们的批准请求交给 Policy）
+            mode = session.mode if session.mode in MODES else "ask"
+            external = ExternalAgent(session, str(engine), Policy(session.cwd, self.rules, mode, self.mcp),
+                                     self.confirms, self.data_dir, servers=lambda: self.dispatch.servers(sid))
+            if _unfinished(session):
+                external.repair()
+            self._agents[sid] = external  # type: ignore[assignment]
+            return external  # type: ignore[return-value]
         # 在新分支上做时，她在临时目录里干活；代码库索引、记住的命令还是按你原来的项目
         computer = session.kind == "computer"
         root = session.workdir if session.workdir.is_dir() else session.cwd
@@ -291,7 +361,9 @@ class Runtime:
         self._deleting.add(sid)
         try:
             agent = self._agents.get(sid)
-            if agent is not None:
+            if isinstance(agent, ExternalAgent):
+                await agent.close()  # 关掉它的适配器进程
+            elif agent is not None:
                 await agent.tools.jobs.stop_all()
             # 还开着的子 Agent 分支（派出去没收回、也没放弃的）
             for worker in open_workers(session.events).values():
@@ -343,6 +415,8 @@ class Runtime:
             raise RuntimeError_("要做什么？")
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
+        if isinstance(agent, ExternalAgent) and (plan or review):
+            raise RuntimeError_(f"这个任务是 {agent.engine.title} 在做：要它出方案或审查改动，直接用话跟它说。")
         if plan:
             prompt = COMPUTER_PLAN_PROMPT if agent.session.kind == "computer" else PLAN_PROMPT
             return agent, prompt.format(goal=text.strip()), {"plan_request": True, "title": plan_title(text)}
@@ -388,6 +462,8 @@ class Runtime:
         if self.running(sid):
             raise RuntimeError_("她还在做事，先打断这一轮再撤销。")
         agent = self.agent(sid)
+        if isinstance(agent, ExternalAgent):
+            raise RuntimeError_(f"{agent.engine.title} 改的文件艾拉没存底片，撤销不了：用 git 看改动、还原。")
         session = agent.session
         with self._maintenance(sid):
             if session.branch_closed:
@@ -463,6 +539,10 @@ class Runtime:
             return event
 
     def _begin(self, sid: str, agent: Agent, text: str, extra: dict | None = None) -> None:
+        if isinstance(agent, ExternalAgent):
+            # 本机 Agent：它自己的模型、工具和 MCP；/review、出方案这种艾拉自己的流程不走这里（_ready 拦下了）
+            self._tasks[sid] = asyncio.create_task(self._drive(sid, agent.turn(text.strip(), extra)))
+            return
         agent.model = self.model_factory()  # 设置里换了模型或密钥：从这一轮起用新的
         events = agent.turn(text.strip(), extra)
         if extra and (extra.get("review") or extra.get("plan_request")):
@@ -594,13 +674,18 @@ class Runtime:
 
     async def compact(self, sid: str) -> None:
         agent = self.agent(sid)
+        if isinstance(agent, ExternalAgent):
+            raise RuntimeError_(f"{agent.engine.title} 自己管上下文：要压缩就跟它说 /compact。")
         with self._maintenance(sid):
             async for event in agent.compact():
                 self._publish(sid, event)
 
     def context(self, sid: str) -> dict:
         """上下文账本：下一步发给模型的上下文由哪几块组成、各占多少（见 ledger.py）"""
-        return context_ledger(self.agent(sid))
+        agent = self.agent(sid)
+        if isinstance(agent, ExternalAgent):
+            raise RuntimeError_(f"{agent.engine.title} 的上下文在它自己那边，这里看不到。")
+        return context_ledger(agent)
 
     def interrupt(self, sid: str) -> bool:
         task = self._tasks.get(sid)
@@ -729,7 +814,8 @@ class Runtime:
                 await task
             except BaseException:
                 pass
-        await asyncio.gather(*(agent.tools.jobs.shutdown() for agent in self._agents.values()))
+        await asyncio.gather(*(agent.close() if isinstance(agent, ExternalAgent) else agent.tools.jobs.shutdown()
+                               for agent in self._agents.values()))
         await self.mcp.stop_all()
 
 

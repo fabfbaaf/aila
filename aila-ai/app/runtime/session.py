@@ -194,6 +194,10 @@ class Session:
             "title": self.title,
             "mode": self.mode,
             "model": self.events[0].get("model", ""),
+            # 本机的 Codex / Claude Code 在做时是它的名字（codex、claude）；艾拉自己做时没有
+            "engine": self.events[0].get("engine"),
+            # 跨 Agent 派工：派出这个任务的主任务（dispatch.py）；自己开的没有
+            "parent": self.events[0].get("parent"),
             "created": self.events[0].get("created"),
             "updated": self.events[-1].get("t"),
             "events": len(self.events),

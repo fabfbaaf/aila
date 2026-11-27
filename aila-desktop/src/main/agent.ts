@@ -10,6 +10,7 @@ import type {
   AgentActivity,
   AgentBudgetEvent,
   AgentCommandList,
+  AgentEngine,
   AgentEvent,
   AgentKind,
   AgentLedger,
@@ -19,7 +20,9 @@ import type {
   AgentSession,
   AgentSessionSummary,
   AgentUndoEvent,
-  ComputerContext
+  ComputerContext,
+  EngineOption,
+  LocalAgentInfo
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
@@ -76,8 +79,28 @@ export class AgentRelay {
     return this.remember(await this.call<AgentSession>('GET', `/agent/sessions/${encodeURIComponent(sid)}`))
   }
 
-  async create(cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project'): Promise<AiResult<AgentSessionSummary>> {
-    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate, budget, kind }))
+  async create(cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project',
+    engine: AgentEngine | null = null): Promise<AiResult<AgentSessionSummary>> {
+    return this.remember(await this.call<AgentSessionSummary>('POST', '/agent/sessions', { cwd, mode, isolate, budget, kind, engine }))
+  }
+
+  /** 本机的 Codex、Claude Code：找到没有、登录没有（每个要跑一下它的命令，慢一点） */
+  localAgents(): Promise<AiResult<LocalAgentInfo[]>> {
+    return this.call('GET', '/agent/local', undefined, 60000)
+  }
+
+  /** 本机 Agent 的模型、思考深度、快速模式（还没连上时它要先起来，几秒） */
+  engineOptions(sid: string): Promise<AiResult<EngineOption[]>> {
+    return this.call('GET', `/agent/sessions/${encodeURIComponent(sid)}/options`, undefined, 120000)
+  }
+
+  setEngineOption(sid: string, id: string, value: string): Promise<AiResult<EngineOption[]>> {
+    return this.call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/options`, { id, value }, 60000)
+  }
+
+  /** 装 ACP 适配器（npm，要几十秒） */
+  installAdapters(): Promise<AiResult<{ message: string; agents: LocalAgentInfo[] }>> {
+    return this.call('POST', '/agent/local/install', {}, 330000)
   }
 
   computerContext(): Promise<AiResult<ComputerContext>> {

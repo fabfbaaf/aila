@@ -183,6 +183,10 @@ export interface AiSettings {
   agenda?: { calendarSet: boolean; mailUser: string; mailPassSet: boolean; mailHost: string }
   /** 性格：说话风格、怎么称呼你、口头禅（旧服务没有） */
   persona?: { style: PersonaStyle; call: string; catchphrase: string }
+  /** 对话的大脑：空 = 上面填的大模型；codex / claude = 本机的 Codex / Claude Code（旧服务没有） */
+  chatBrain?: ChatBrain
+  /** 对话的大脑用哪个模型（它给的编号）；空 = 它的默认 */
+  chatBrainModel?: string
   voice: {
     enabled: boolean
     ttsEngine: string
@@ -201,8 +205,13 @@ export interface AiSettings {
 }
 
 /** 只传要改的项；密钥传空字符串表示清掉 */
+/** 对话的大脑：空 = 填的大模型；codex / claude = 本机的 Codex / Claude Code（aila-ai/app/brain.py） */
+export type ChatBrain = '' | 'codex' | 'claude' | 'antigravity' | 'codebuddy'
+
 export interface AiSettingsUpdate {
   computerInventory?: boolean
+  chatBrain?: ChatBrain
+  chatBrainModel?: string
   /** 界面语言：en 时她用英文回答 */
   language?: Lang
   personaStyle?: PersonaStyle

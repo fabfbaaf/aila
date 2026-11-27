@@ -38,7 +38,7 @@ import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
 import type { ReviewEntry } from '../shared/review'
-import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext } from '../shared/agent'
+import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, EngineOption, LocalAgentInfo } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
@@ -184,8 +184,16 @@ const api = {
   // 工作窗口（编程 Agent）：主进程只认工作窗口发来的
   agentList: (q = ''): Promise<AiResult<AgentSessionSummary[]>> => ipcRenderer.invoke('agent:list', q),
   agentGet: (sid: string): Promise<AiResult<AgentSession>> => ipcRenderer.invoke('agent:get', sid),
-  agentCreate: (cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project'): Promise<AiResult<AgentSessionSummary>> =>
-    ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget, kind),
+  agentCreate: (cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project',
+    engine: AgentEngine | null = null): Promise<AiResult<AgentSessionSummary>> =>
+    ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget, kind, engine),
+  /** 本机的 Codex、Claude Code：找到没有、登录没有、适配器装了没有 */
+  agentLocal: (): Promise<AiResult<LocalAgentInfo[]>> => ipcRenderer.invoke('agent:local'),
+  /** 本机 Agent 任务的模型、思考深度、快速模式 */
+  agentOptions: (sid: string): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('agent:options', sid),
+  agentSetOption: (sid: string, id: string, value: string): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('agent:options:set', sid, id, value),
+  /** 装 ACP 适配器（要下载，几十秒） */
+  agentLocalInstall: (): Promise<AiResult<{ message: string; agents: LocalAgentInfo[] }>> => ipcRenderer.invoke('agent:local:install'),
   agentComputerContext: (): Promise<AiResult<ComputerContext>> => ipcRenderer.invoke('agent:computer-context'),
   agentSetBudget: (sid: string, amount: number | null): Promise<AiResult<AgentBudgetEvent>> => ipcRenderer.invoke('agent:budget', sid, amount),
   /** 在新分支上做时：跑测试、合并回你的代码；返回合并结果（一条 merge 事件） */
@@ -336,6 +344,8 @@ const api = {
   aiSettings: (): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings'),
   aiSettingsPut: (update: AiSettingsUpdate): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings:put', update),
   aiSettingsTest: (): Promise<AiResult<{ ok: boolean; message: string }>> => ipcRenderer.invoke('ai:settings:test'),
+  /** 对话的大脑（本机 Agent）有哪些模型 */
+  aiBrainModels: (): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('ai:brain-models'),
   /** 技能包列表（带上用户的开关）；AI 服务没开时是 null */
   skillsList: (): Promise<SkillInfo[] | null> => ipcRenderer.invoke('skills:list'),
   skillsSet: (id: string, on: boolean): void => ipcRenderer.send('skills:set', id, on),

@@ -9,7 +9,7 @@
  */
 import { t as tr, t as tr2, localized, joinList } from '../i18n'
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary } from '../../../shared/agent'
+import { agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary, type AgentEngine, type EngineOption, type LocalAgentInfo } from '../../../shared/agent'
 const MODE_LABELS = localized(MODE_LABELS_RAW)
 const MODE_HINTS = localized(MODE_HINTS_RAW)
 import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
@@ -52,6 +52,31 @@ watch(newKind, (kind) => {
     if (newMode.value === 'auto' || newMode.value === 'full') newMode.value = 'ask'
     newIsolate.value = false
   }
+})
+/** 谁来做：艾拉自己（空），或者本机的 Codex / Claude Code（通过 ACP 适配器，用你自己的账号） */
+const newEngine = ref<AgentEngine | ''>('')
+const localAgents = ref<LocalAgentInfo[]>([])
+const localChecking = ref(false)
+watch(picking, async (on) => {
+  if (!on) return
+  localChecking.value = true
+  try {
+    localAgents.value = await source.localAgents()
+  } catch {
+    localAgents.value = [] // AI 服务旧了、没开：只能选艾拉
+  } finally {
+    localChecking.value = false
+  }
+  if (newEngine.value && !localAgents.value.some((a) => a.id === newEngine.value && a.ready)) newEngine.value = ''
+})
+watch(newKind, (kind) => { if (kind === 'computer') newEngine.value = '' })
+// 本机 Agent 没有艾拉的「出方案」流程：要它先出方案，直接跟它说
+watch(newEngine, (engine) => { if (engine) newPlan.value = false })
+const engineNote = computed(() => {
+  const picked = localAgents.value.find((a) => a.id === newEngine.value)
+  if (picked) return tr('{name} 用你自己的账号和额度在做；它要改文件、跑命令时按上面的权限模式问你，危险命令总是问。', { name: picked.title })
+  const off = localAgents.value.filter((a) => !a.ready)
+  return off.map((a) => `${a.title}：${a.problem}${a.hints[0] ? tr('（{hint}）', { hint: a.hints[0] }) : ''}`).join('；')
 })
 /** 新任务在新分支上做（git worktree，测试通过才合并回来） */
 const newIsolate = ref(false)
@@ -175,7 +200,7 @@ function loadLedger(): void {
   clearTimeout(ledgerTimer)
   ledgerTimer = window.setTimeout(async () => {
     const sid = current.value?.id
-    if (!sid) return
+    if (!sid || current.value?.engine) return // 本机 Agent 的上下文在它自己那边，没有账本
     try {
       const l = await source.context(sid)
       if (current.value?.id === sid) ledger.value = l
@@ -184,7 +209,44 @@ function loadLedger(): void {
     }
   }, 300)
 }
+/** 这个任务是本机的 Codex / Claude Code 在做（不是艾拉自己）：它的名字；艾拉自己做时是空的 */
+const engineName = computed(() => (current.value?.engine ? current.value.model || current.value.engine : ''))
+/** 本机 Agent 任务能换的设置（模型、思考深度、快速模式）：打开任务时问一次（还没连上的话它要先起来，几秒） */
+const engineOptions = ref<EngineOption[]>([])
+const optionsLoading = ref(false)
+const optionBusy = ref(false)
+async function loadEngineOptions(sid: string): Promise<void> {
+  optionsLoading.value = true
+  try {
+    const opts = await source.engineOptions(sid)
+    if (current.value?.id === sid) engineOptions.value = opts
+  } catch (err) {
+    if (current.value?.id === sid) error.value = (err as Error).message
+  } finally {
+    if (current.value?.id === sid) optionsLoading.value = false
+  }
+}
+async function setEngineOption(id: string, value: string): Promise<void> {
+  const sid = current.value?.id
+  if (!sid || optionBusy.value) return
+  optionBusy.value = true
+  try {
+    const opts = await source.setEngineOption(sid, id, value)
+    if (current.value?.id === sid) engineOptions.value = opts
+  } catch (err) {
+    error.value = (err as Error).message
+  } finally {
+    optionBusy.value = false
+  }
+}
+/** 下拉里每一项怎么写：模型直接写名字；思考深度、快速模式前面带上是什么 */
+function optionText(o: EngineOption, choice: EngineOption['choices'][number]): string {
+  if (o.category === 'thought_level') return tr('思考：{level}', { level: choice.name })
+  if (o.category === 'speed') return tr('快速模式：{on}', { on: choice.name })
+  return choice.name
+}
 const modelLabel = computed(() => {
+  if (engineName.value) return engineName.value
   const m = models.value
   if (!m) return ''
   if (!m.keySet) return tr('假模型（还没填密钥）')
@@ -243,6 +305,8 @@ async function open(sid: string): Promise<void> {
     if (current.value?.id === sid) for (const e of t.value.events) tr.apply(e)
     t.value = tr
     current.value = { ...s, events: s.events.length }
+    engineOptions.value = []
+    if (s.engine) void loadEngineOptions(sid)
     void refreshList() // 详情请求期间可能又记了用量，重新取服务端累计费用
     picking.value = false
     ledger.value = null
@@ -274,7 +338,8 @@ async function startNew(path?: string): Promise<void> {
   try {
     const computer = newKind.value === 'computer'
     const mode = computer && (newMode.value === 'auto' || newMode.value === 'full') ? 'ask' : newMode.value
-    const s = await source.create(computer ? undefined : path, mode, computer ? false : newIsolate.value, budget, newKind.value)
+    const s = await source.create(computer ? undefined : path, mode, computer ? false : newIsolate.value, budget, newKind.value,
+      computer ? null : newEngine.value || null)
     await refreshList()
     await open(s.id)
     planNext.value = newPlan.value
@@ -622,6 +687,8 @@ source.onEvent((sid, e) => {
   if (e.type === 'user' || e.type === 'usage' || e.type === 'turn_end' || e.type === 'undo' || e.type === 'budget') void refreshList()
   if (['usage', 'turn_end', 'compaction', 'tool', 'undo'].includes(e.type)) loadLedger()
   if (e.type === 'tool' && e.memory) void loadNotes() // 她刚记了一条
+  // 本机 Agent 那边的模型变了（它自己换的，或者你在别处换的）：重新问一下（已经连着，很快）
+  if ((e.type === 'engine_options' || e.type === 'engine_config') && current.value?.engine) void loadEngineOptions(sid)
   if (near) void nextTick(scrollToBottom)
 })
 source.onStreamEnd((sid, err) => {
@@ -885,6 +952,7 @@ onBeforeUnmount(() => {
               <div class="meta">
                 <span>{{ sessionLabel(s) }}</span>
                 <span v-if="s.branch" class="meta-branch" :title="tr('在分支 {branch} 上做', { branch: s.branch })"><Icon name="branch" :size="12" /></span>
+                <span v-if="s.parent" class="meta-sub" :title="tr('主任务派出来的：它要你同意的操作也会出现在主任务里')">{{ tr('派出的') }}</span>
                 <span class="dot">·</span>
                 <span>{{ when(s.updated) }}</span>
                 <span v-if="s.plan && s.plan.decision === 'approved' && !s.plan.finished" class="meta-plan">
@@ -928,7 +996,27 @@ onBeforeUnmount(() => {
         <select class="mode" :aria-label="tr('当前任务的权限模式')" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
           <option v-for="m in currentModes" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
-        <span class="model" :title="tr('编程用的模型：在「设置 → 对话」里改')" @click="source.openSettings()">{{ modelLabel }}</span>
+        <template v-if="engineName">
+          <!-- 本机 Agent 的任务：它的模型、思考深度、快速模式（权限模式在左边，由艾拉管） -->
+          <span v-if="engineOptions.length" class="engine-options" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
+            <select
+              v-for="o in engineOptions"
+              :key="o.id"
+              class="mode engine-option"
+              :aria-label="o.name"
+              :title="o.choices.find((c) => c.value === o.current)?.description || o.name"
+              :value="o.current"
+              :disabled="optionBusy"
+              @change="setEngineOption(o.id, ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="c in o.choices" :key="c.value" :value="c.value">{{ optionText(o, c) }}</option>
+            </select>
+          </span>
+          <span v-else class="model engine-label" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
+            {{ optionsLoading ? tr('正在连 {name}…', { name: engineName }) : modelLabel }}
+          </span>
+        </template>
+        <span v-else class="model" :title="tr('编程用的模型：在「设置 → 对话」里改')" @click="source.openSettings()">{{ modelLabel }}</span>
         <div class="tabs">
           <button :class="{ on: view === 'chat' }" @click="view = 'chat'">{{ tr('过程') }}</button>
           <button :class="{ on: view === 'trace' }" :title="tr('按时间看每一步花了多久')" @click="view = 'trace'">{{ tr('轨迹') }}</button>
@@ -1046,12 +1134,15 @@ onBeforeUnmount(() => {
                   ? tr('她在做事……想好的下一句可以先写着')
                   : planNext
                     ? tr('说一下大目标：她先出一份分阶段的计划给你看')
-                    : tr('要她做什么？')
+                    : engineName
+                      ? tr('要 {name} 做什么？', { name: engineName })
+                      : tr('要她做什么？')
             "
             @keydown="onComposerKey"
           ></textarea>
           <div class="bar">
             <button
+              v-if="!engineName"
               class="chip"
               :class="{ on: planNext }"
               :disabled="running || undoBusy || opening || t.closed"
@@ -1061,7 +1152,7 @@ onBeforeUnmount(() => {
               <Icon name="plan" :size="15" />{{ tr('出方案') }}
             </button>
             <button
-              v-if="current?.kind !== 'computer'"
+              v-if="current?.kind !== 'computer' && !engineName"
               class="chip"
               :disabled="running || undoBusy || opening || t.closed"
               :title="tr('她只读地审一遍还没提交的改动，按严重程度列出问题。也可以输入「/review 要特别注意的地方」')"
@@ -1136,7 +1227,7 @@ onBeforeUnmount(() => {
           <button type="submit" :disabled="!noteText.trim() || noteBusy">{{ tr('记下') }}</button>
         </form>
       </section>
-      <section>
+      <section v-if="!engineName">
         <h3>{{ tr('上下文账本') }}</h3>
         <LedgerPanel :ledger="ledger" :steps="t.steps" :totals="usage" />
         <button class="ghost" :disabled="running || undoBusy" :title="tr('用一份交接说明代替前面的对话（快满时会自动做）')" @click="compactNow">{{ tr('压缩上下文') }}</button>
@@ -1196,6 +1287,15 @@ onBeforeUnmount(() => {
           <label :class="{ on: newKind === 'project' }"><input v-model="newKind" type="radio" value="project" name="task-kind" />{{ tr('在项目里编程') }}</label>
           <label :class="{ on: newKind === 'computer' }"><input v-model="newKind" type="radio" value="computer" name="task-kind" />{{ tr('不选项目，操作电脑') }}</label>
         </fieldset>
+        <fieldset v-if="newKind === 'project'" class="task-kinds" :disabled="creating" @keydown.stop>
+          <legend>{{ tr('谁来做？') }}</legend>
+          <label :class="{ on: newEngine === '' }"><input v-model="newEngine" type="radio" value="" name="task-engine" />{{ tr('艾拉') }}</label>
+          <label v-for="a in localAgents" :key="a.id" :class="{ on: newEngine === a.id, off: !a.ready }" :title="a.ready ? a.version : a.problem">
+            <input v-model="newEngine" type="radio" :value="a.id" name="task-engine" :disabled="!a.ready" />{{ a.title }}
+          </label>
+          <span v-if="localChecking" class="dim engine-checking">{{ tr('正在找本机的编程 Agent…') }}</span>
+        </fieldset>
+        <p v-if="newKind === 'project' && engineNote" class="dim engine-note">{{ engineNote }}</p>
         <label v-if="newKind === 'project'" class="isolate" :class="{ on: newIsolate }">
           <input id="new-task-isolate" v-model="newIsolate" type="checkbox" :disabled="creating" @keydown.stop />
           <span>
@@ -1210,7 +1310,7 @@ onBeforeUnmount(() => {
           </label>
         </div>
         <label class="isolate" :class="{ on: newPlan }">
-          <input id="new-task-plan" v-model="newPlan" type="checkbox" :disabled="creating" @keydown.stop />
+          <input id="new-task-plan" v-model="newPlan" type="checkbox" :disabled="creating || !!newEngine" @keydown.stop />
           <span>
             <b>{{ tr('先出方案再动手') }}</b>
             {{ tr('大活用这个：她先只读地了解情况，交一份分阶段的计划给你批准，再一阶段一阶段做下去，不受一轮步数的限制') }}
@@ -1712,10 +1812,11 @@ code {
 
 .top {
   display: flex;
+  flex-wrap: wrap; /* 本机 Agent 的任务多几个下拉（模型、思考深度）：窄的时候折到第二行，不把项目名挤没 */
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
   min-height: 52px;
-  padding: 0 18px;
+  padding: 8px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
@@ -1724,8 +1825,8 @@ code {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 180px;
+  min-width: 140px; /* 挤不下时后面的折到下一行，不把项目名挤没 */
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1740,6 +1841,32 @@ code {
   color: var(--ui-faint);
   font-family: var(--ui-mono);
   font-size: 11.5px;
+}
+
+.engine-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.engine-option {
+  max-width: 170px;
+}
+
+.meta-sub {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.engine-label {
+  cursor: default;
+}
+
+.tabs button {
+  white-space: nowrap;
 }
 
 .mode {
@@ -2680,6 +2807,9 @@ code {
 .task-kinds label { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--ui-r); cursor: pointer; }
 .task-kinds label.on { border-color: var(--accent); background: var(--accent-bg); }
 .task-kinds input { accent-color: var(--accent); }
+.task-kinds label.off { opacity: 0.5; cursor: not-allowed; }
+.engine-checking { align-self: center; font-size: 12.5px; }
+.engine-note { margin: -6px 0 14px; font-size: 12.5px; }
 .task-kinds label:focus-within, .modes label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .computer-start { margin-right: 12px; }
 .modes.computer { grid-template-columns: repeat(2, 1fr); }

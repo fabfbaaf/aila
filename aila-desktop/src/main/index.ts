@@ -38,6 +38,7 @@ import {
   listSkills,
   putAiSettings,
   testLlm,
+  brainModels,
   getPhone,
   setPhone,
   newPhonePairing,
@@ -1234,6 +1235,14 @@ function registerIpc(): void {
   ipcMain.handle('agent:rules', (e) => (fromAgent(e) ? getAgentRules(AI_URL) : notAllowed))
   // MCP 外部工具服务：加服务就是让这台电脑跑一个程序，只认主窗口
   const mcpJson = (json: unknown): json is string => typeof json === 'string' && json.length >= 2 && json.length <= 50000
+  // 本机的 Codex、Claude Code：看情况、装适配器（装适配器要下载，只认主窗口）
+  ipcMain.handle('agent:local', (e) => (fromAgent(e) ? agentRelay.localAgents() : notAllowed))
+  ipcMain.handle('agent:local:install', (e) => (fromAgent(e) ? agentRelay.installAdapters() : notAllowed))
+  // 本机 Agent 任务的模型、思考深度：只认主窗口，名字和值的长度先挡一下，合不合法 AI 服务按它给的选项再查
+  const optionText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
+  ipcMain.handle('agent:options', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.engineOptions(sid) : notAllowed))
+  ipcMain.handle('agent:options:set', (e, sid: unknown, id: unknown, value: unknown) =>
+    fromAgent(e) && sidOk(sid) && optionText(id, 80) && optionText(value, 200) ? agentRelay.setEngineOption(sid, id, value) : notAllowed)
   ipcMain.handle('agent:mcp', (e) => (fromAgent(e) ? agentRelay.mcp() : notAllowed))
   ipcMain.handle('agent:mcp:preview', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpPreview(json) : notAllowed))
   ipcMain.handle('agent:mcp:import', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpImport(json) : notAllowed))
@@ -1399,6 +1408,7 @@ function registerIpc(): void {
     return res
   })
   ipcMain.handle('ai:settings:test', (e) => (fromMainWindow(e) ? testLlm(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('ai:brain-models', (e) => (fromMainWindow(e) ? brainModels(AI_URL) : MAIN_ONLY))
   ipcMain.handle('skills:list', () => listSkills(AI_URL, account?.skillOverrides() ?? {}))
   ipcMain.on('skills:set', (e, id: string, on: boolean) => {
     if (!fromMainWindow(e)) return

@@ -31,7 +31,7 @@ def test_every_ui_string_has_english() -> None:
     mismatched = [k for k, v in EN.items() if sorted(HOLE.findall(k)) != sorted(HOLE.findall(v))]
     assert mismatched == []
     assert [k for k, v in EN.items() if re.search(r"[一-鿿]", v)] == []
-    keys = [k for f in ("locales_en.py", "locales_en2.py", "locales_en3.py")
+    keys = [k for f in ("locales_en.py", "locales_en2.py", "locales_en3.py", "locales_en4.py")
             for k in re.findall(r'^    "(.+?)": ', (ROOT / "app" / f).read_text(encoding="utf-8"), re.M)]
     assert len(keys) == len(set(keys)), "有重复的键：后面的会悄悄盖掉前面的"
 

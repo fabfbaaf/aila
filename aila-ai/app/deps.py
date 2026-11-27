@@ -90,6 +90,23 @@ def get_model() -> ChatModel:
     return OpenAICompatibleModel(settings)
 
 
+_brains: dict[str, Any] = {}
+
+
+def get_chat_brain() -> Any:
+    """对话用的大脑：设置里选了本机的 Codex / Claude Code 就是它（app/brain.py），否则 None（用上面的大模型）。
+    每种一个，留着会话接着聊；整理记忆、写摘要这些后台的活还用上面的大模型"""
+    engine = settings.chat_brain
+    if not engine:
+        return None
+    if engine not in _brains:
+        from .brain import AgentBrain
+
+        _brains[engine] = AgentBrain(engine, settings.data_dir, f"http://{settings.host}:{settings.port}",
+                                     model=lambda: settings.chat_brain_model)
+    return _brains[engine]
+
+
 # ---------- 编程 Agent ----------
 
 
@@ -116,7 +133,7 @@ def get_runtime() -> Runtime:
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
                       computer_inventory=settings.computer_inventory, extensions=get_extensions(),
                       memory_store=lambda: get_memory_store(), language=lambda: settings.language,
-                      web_search=search_provider)
+                      web_search=search_provider, bridge_url=f"http://{settings.host}:{settings.port}")
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     runtime.watchers.append(get_notifier().watch)  # 等你同意、做完了：告诉手机（app/notify.py）
     return runtime

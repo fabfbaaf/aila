@@ -26,16 +26,25 @@ describe('电脑任务 IPC', () => {
     expect(relay.create).not.toHaveBeenCalled()
     expect(relay.computerContext).not.toHaveBeenCalled()
     expect(await create(main, undefined, 'ask', false, 0, 'computer')).toEqual({ ok: true })
-    expect(relay.create).toHaveBeenLastCalledWith(undefined, 'ask', false, 0, 'computer')
+    expect(relay.create).toHaveBeenLastCalledWith(undefined, 'ask', false, 0, 'computer', null)
     await create(main, undefined, 'read_only', false, undefined, 'computer')
-    expect(relay.create).toHaveBeenLastCalledWith(undefined, 'read_only', false, null, 'computer')
+    expect(relay.create).toHaveBeenLastCalledWith(undefined, 'read_only', false, null, 'computer', null)
     await preview(main)
     expect(relay.computerContext).toHaveBeenCalledOnce()
+  })
+
+  it('本机 Agent 只认 codex、claude，只能在项目里', async () => {
+    const { relay, main, create } = setup()
+    await create(main, 'C:/project', 'ask', false, null, 'project', 'codex')
+    expect(relay.create).toHaveBeenLastCalledWith('C:/project', 'ask', false, null, 'project', 'codex')
+    expect(await create(main, 'C:/project', 'ask', false, null, 'project', 'gemini')).toMatchObject({ ok: false })
+    expect(await create(main, undefined, 'ask', false, null, 'computer', 'claude')).toMatchObject({ ok: false })
+    expect(relay.create).toHaveBeenCalledOnce()
   })
 
   it('旧调用没有 kind 时保持项目的模式和分支参数', async () => {
     const { relay, main, create } = setup()
     await create(main, 'C:/project', 'auto', true, null)
-    expect(relay.create).toHaveBeenLastCalledWith('C:/project', 'auto', true, null, 'project')
+    expect(relay.create).toHaveBeenLastCalledWith('C:/project', 'auto', true, null, 'project', null)
   })
 })

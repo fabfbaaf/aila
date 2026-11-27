@@ -32,18 +32,21 @@
 和其他接口一样，只接受本机页面和本机程序的请求（见 security.py）。
 """
 
+import asyncio
 import json
 from dataclasses import asdict
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..computer import computer_shell
 from ..deps import get_runtime
+from ..runtime.dispatch import SERVER_NAME, TOOLS, DispatchError
+from ..runtime.localagents import LocalAgentError, detect, install_adapters
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
 from ..runtime.mcp import McpError, parse_import
@@ -71,6 +74,8 @@ class NewSession(BaseModel):
     kind: Literal["project", "computer"] = "project"
     mode: ModeName = "ask"
     isolate: bool = False  # 在新分支上做
+    # 交给本机的 Codex / Claude Code 做（不填就是艾拉自己做）
+    engine: Literal["codex", "claude", "antigravity", "codebuddy"] | None = None
     budget: float | None = Field(default=None, ge=0, allow_inf_nan=False, strict=True)
     _valid_budget = field_validator("budget", mode="before")(_budget_input)
 
@@ -134,7 +139,7 @@ def _session_or_404(rt: Runtime, sid: str):  # noqa: ANN202
 @router.post("/sessions", status_code=201)
 async def create_session(req: NewSession, rt: Runtime = Depends(get_runtime)) -> dict:
     try:
-        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind)
+        session = rt.create(req.cwd, req.mode, req.isolate, budget=req.budget, kind=req.kind, engine=req.engine)
     except RuntimeError_ as err:
         raise HTTPException(400, str(err)) from err
     modes = {k: v for k, v in MODE_LABELS.items() if session.kind != "computer" or k in ("read_only", "ask")}
@@ -322,6 +327,32 @@ async def set_budget(sid: str, req: SetBudget, rt: Runtime = Depends(get_runtime
         raise HTTPException(409, str(err)) from err
 
 
+class SetOption(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=200)
+
+
+@router.get("/sessions/{sid}/options")
+async def engine_options(sid: str, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """本机 Codex / Claude Code 的模型、思考深度、快速模式（还没连上时先连上问它，要几秒）"""
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return await rt.engine_options(sid)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
+@router.put("/sessions/{sid}/options")
+async def set_engine_option(sid: str, req: SetOption, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return await rt.set_engine_option(sid, req.id, req.value)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
 # ---------- 项目记忆 ----------
 
 
@@ -388,6 +419,22 @@ def _mcp_name(name: str) -> str:
     if not name or len(name) > 32 or not all(c.isalnum() or c in "_-" for c in name):
         raise HTTPException(404, "没有这个服务。")
     return name
+
+
+@router.get("/local")
+async def local_agents(rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """本机的 Codex、Claude Code：找到没有、登录没有、适配器装了没有（新任务里选谁做、设置页用）"""
+    return [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir)]
+
+
+@router.post("/local/install")
+async def local_install(rt: Runtime = Depends(get_runtime)) -> dict:
+    """装 ACP 适配器（你在设置页点了才装；不带它们自带的 Codex / Claude，用你装好的）"""
+    try:
+        message = await install_adapters(rt.data_dir)
+    except LocalAgentError as err:
+        raise HTTPException(400, str(err)) from err
+    return {"message": message, "agents": [a.to_dict() for a in await asyncio.to_thread(detect, rt.data_dir)]}
 
 
 @router.get("/mcp")
@@ -486,3 +533,49 @@ async def plan_reject(sid: str, rt: Runtime = Depends(get_runtime)) -> Event:
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
 
+
+# ---------- 跨 Agent 派工：给本机 Agent 挂的 MCP 服务（runtime/dispatch.py） ----------
+# 最小的 MCP（Streamable HTTP，只回 JSON）：initialize、tools/list、tools/call。
+# 只认开会话时交给那个 Agent 的令牌（Authorization: Bearer …），令牌决定是哪个任务在派活
+
+
+@router.post("/bridge")
+async def bridge(request: Request, rt: Runtime = Depends(get_runtime)) -> Response:
+    auth = request.headers.get("authorization", "")
+    parent = rt.dispatch.session_for(auth[7:]) if auth.lower().startswith("bearer ") else None
+    if parent is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        msg = await request.json()
+    except ValueError:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, status_code=400)
+    if not isinstance(msg, dict):
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "batch not supported"}}, status_code=400)
+    method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+    if mid is None:  # 通知（notifications/initialized 这些）：收到就好
+        return Response(status_code=202)
+
+    def ok(result: dict) -> JSONResponse:
+        return JSONResponse({"jsonrpc": "2.0", "id": mid, "result": result})
+
+    if method == "initialize":
+        return ok({"protocolVersion": params.get("protocolVersion") or "2025-06-18", "capabilities": {"tools": {"listChanged": False}},
+                   "serverInfo": {"name": SERVER_NAME, "title": "艾拉", "version": "0.3"}})
+    if method == "ping":
+        return ok({})
+    if method == "tools/list":
+        return ok({"tools": TOOLS})
+    if method == "tools/call":
+        name, args = str(params.get("name", "")), params.get("arguments") or {}
+        try:
+            text, error = await rt.dispatch.call(parent, name, args if isinstance(args, dict) else {}), False
+        except (DispatchError, RuntimeError_) as err:
+            text, error = str(err), True
+        return ok({"content": [{"type": "text", "text": text}], "isError": error})
+    return JSONResponse({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"unknown method {method}"}})
+
+
+@router.get("/bridge")
+async def bridge_stream() -> Response:
+    """不提供服务端推送的流（Streamable HTTP 允许不提供）"""
+    return Response(status_code=405)
