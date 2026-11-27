@@ -466,6 +466,9 @@ class ExternalAgent:
         reject = _option(options, "reject_once") or _option(options, "reject_always")
         call_id = str(getattr(tool_call, "tool_call_id", ""))
         info = self._tools.get(call_id)
+        inner = _deferred(tool_call, (info or {}).get("full_title") or "")
+        if inner is not None:
+            tool_call = inner  # 按包在里面的真工具问，不能把所有延后加载的工具都当成一条叫 DeferExecuteTool 的命令
         kind_acp = _kind_of(tool_call, (info or {}).get("kind") or "")
         # 判断危险用完整的原文（多行命令的第二行也算）；给你看的标题才用缩短的
         full_title = str(getattr(tool_call, "title", "") or (info or {}).get("full_title") or "")
@@ -479,6 +482,12 @@ class ExternalAgent:
         command = _command(tool_call, full_title) if kind == "command" else ""
         if kind == "command" and not command and info is not None:
             command = str(info["args"].get("command") or "")
+        if inner is not None and kind == "command" and not _command(tool_call, ""):
+            if _is_mcp(full_title):
+                kind, command = "mcp", full_title.strip()  # 外部工具：按工具名问、记
+            else:
+                # 别的延后加载的工具（定时任务之类）：连参数一起当命令问，「以后都不用问」只放过一模一样的这次
+                command = f"{full_title.strip()} {json.dumps(getattr(tool_call, 'raw_input', None) or {}, ensure_ascii=False)}"
         if _own_tool(full_title) and not _command(tool_call, "") and kind_acp not in ("edit", "delete", "move") and allow is not None:
             # 调艾拉自己给它的派工工具（dispatch.py）：本身不改东西，合并时艾拉会另外问你
             return _choose(allow)
@@ -526,6 +535,33 @@ def _choose(option: Any) -> Any:
 
 def _todo_status(status: str) -> str:
     return {"in_progress": "in_progress", "completed": "completed"}.get(str(status), "pending")
+
+
+DEFER_TOOL = "DeferExecuteTool"
+
+
+def _deferred(tool_call: Any, known_title: str = "") -> Any:
+    """CodeBuddy 把外部工具（MCP）和不常用的工具「延后加载」：先用 ToolSearch 找，调用时标题是 DeferExecuteTool，
+    真正的工具名和参数在 raw_input 的 toolName、params 里。是这种的话换成真工具（标题 = 工具名，参数 = params），不是返回 None"""
+    raw = getattr(tool_call, "raw_input", None)
+    title = str(getattr(tool_call, "title", "") or known_title or "")
+    if title.strip() != DEFER_TOOL or not isinstance(raw, dict):
+        return None
+    name = raw.get("toolName")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
+    try:
+        return tool_call.model_copy(update={"title": name.strip(), "raw_input": params, "kind": None})
+    except AttributeError:
+        from types import SimpleNamespace
+        return SimpleNamespace(tool_call_id=getattr(tool_call, "tool_call_id", ""), title=name.strip(), raw_input=params,
+                               kind=None, locations=None, content=None, status=getattr(tool_call, "status", None))
+
+
+def _is_mcp(title: str) -> bool:
+    name = title.strip()
+    return name.startswith("mcp__") or name.startswith("mcp.")
 
 
 def _own_tool(title: str) -> bool:
@@ -676,6 +712,9 @@ def _detail(kind: str, command: str, title: str, info: dict[str, Any] | None, to
         return "要改的文件：\n" + "\n".join(locations or [title])
     if kind == "command":
         return command
+    if kind == "mcp":
+        raw = getattr(tool_call, "raw_input", None)
+        return title + ("\n" + json.dumps(raw, ensure_ascii=False, indent=1)[:MAX_DIFF] if raw else "")
     return title
 
 

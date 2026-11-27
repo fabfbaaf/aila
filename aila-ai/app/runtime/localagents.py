@@ -51,6 +51,12 @@ class Engine:
     persona_mode: str = "append"
     # 除了 PATH，还在这些地方找（相对 %LOCALAPPDATA%，可以带通配符）：桌面版自带的、官方安装器装的
     app_paths: tuple[str, ...] = ()
+    # 当对话的大脑时多带的启动参数：比如关掉它自己的定时任务、命令这些工具，只留调艾拉工具要用的
+    brain_args: tuple[str, ...] = ()
+    # 外部工具（MCP）要先用它的工具搜索找出来才能调（CodeBuddy）：对话的大脑会把艾拉工具的完整名字告诉它
+    deferred_mcp: bool = False
+    # 不认 ACP 开会话时给的系统提示词、要从文件读的（CodeBuddy 的 --system-prompt-file，每个新会话重读一次）
+    prompt_file_flag: str = ""
 
 
 ENGINES: dict[str, Engine] = {
@@ -82,6 +88,11 @@ ENGINES: dict[str, Engine] = {
         (), "在终端里运行 codebuddy.cmd，按提示登录一次（国内账号选微信登录）",
         "先装 CodeBuddy 命令行：npm.cmd install -g @tencent-ai/codebuddy-code",
         native=True, acp_args=("--acp",), app_paths=("codebuddy/bin/codebuddy.exe",),
+        # 对话里只留找外部工具、调外部工具这两个（艾拉的工具它要先搜再调），它自己的定时任务、命令都关掉：
+        # 不然它会用自己的 CronCreate 记提醒（对话里不批，就什么都没做）
+        brain_args=("--tools", "ToolSearch,DeferExecuteTool"), deferred_mcp=True,
+        # ACP 给的系统提示词它不认（试过 append、override 都还说自己是混元）：艾拉的人格写进文件交给它
+        prompt_file_flag="--system-prompt-file", persona_mode="override",
     ),
 }
 

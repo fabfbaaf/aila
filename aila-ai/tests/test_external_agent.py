@@ -420,6 +420,23 @@ def test_own_dispatch_tools_pass_without_asking_but_commands_still_ask(tmp_path:
     assert h.conns[0].answers == ["yes", "no"]
 
 
+def test_deferred_tools_are_asked_as_the_real_tool(tmp_path: Path) -> None:
+    """CodeBuddy 的外部工具、不常用的工具包在 DeferExecuteTool 里：按里面的真工具问，不能都当成一条叫 DeferExecuteTool 的命令
+    （那样「以后都不用问」会放过以后所有包着的工具）"""
+    h = Harness(tmp_path, "ask", [], engine="codebuddy")
+    def wrapped(cid: str, name: str, params: dict) -> list:
+        start = schema.ToolCallStart(tool_call_id=cid, title="DeferExecuteTool", status="pending", raw_input={})
+        ask = schema.ToolCallUpdate(tool_call_id=cid, raw_input={"toolName": name, "params": params})  # 来问时不带标题
+        return [("tool", start), ("ask", ask)]
+    h.script.extend(wrapped("d1", "mcp__aila__work_status", {}) + wrapped("d2", "mcp__github__create_issue", {"title": "x"})
+                    + wrapped("d3", "CronCreate", {"cron": "1 * * * *", "prompt": "喝水"}))
+    events = asyncio.run(h.turn("做", answer=True))
+    confirms = [e for e in events if e["type"] == "confirm"]
+    assert [(c["kind"], c["action"]) for c in confirms] == [("mcp", "mcp__github__create_issue"), ("command", "运行命令 CronCreate")]
+    assert '"title": "x"' in confirms[0]["detail"] and "CronCreate" in confirms[1]["detail"] and "喝水" in confirms[1]["detail"]
+    assert len(h.conns[0].answers) == 3  # 艾拉自己的派工工具没问就放行（只问了两次）
+
+
 def test_usage_limit_is_said_plainly(tmp_path: Path) -> None:
     class Boom(Exception):
         pass

@@ -71,6 +71,12 @@ class FakeConn:
         for step, arg in self.script:
             if step == "say":
                 await self.bridge.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(type="text", text=arg)))
+            elif step == "ask_first" and len(self.prompts) == 1:  # 第一次：要用它自己的工具（对话里不批）
+                opts = [schema.PermissionOption(option_id="y", name="y", kind="allow_once"),
+                        schema.PermissionOption(option_id="n", name="n", kind="reject_once")]
+                self.answers = getattr(self, "answers", []) + [(await self.bridge.request_permission(session_id, arg, opts)).outcome.option_id]
+            elif step == "say_later" and len(self.prompts) > 1:
+                await self.bridge.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(type="text", text=arg)))
             elif step == "tool":  # 它通过 MCP 调艾拉的工具
                 self.tool_results.append(await self.brain.tool_call(*arg))
         return schema.PromptResponse(stop_reason="end_turn")
@@ -109,8 +115,9 @@ def test_reply_goes_through_the_normal_chat_flow_with_persona(tmp_path: Path) ->
     assert "你好呀" in texts and "[happy]" not in texts  # 标签照常解析成表情
     assert any(e["type"] == "emotion" for e in events)
     session = conns[0].sessions[0]
-    assert session["system"].mode == "append" and session["system"].content[0].text == "你是艾拉。"  # Codex 接在后面
-    assert session["servers"][0].url == "http://127.0.0.1:9/chat/bridge"
+    assert session["system"].mode == "append" and session["system"].content[0].text.startswith("你是艾拉。")  # Codex 接在后面
+    assert "aila_chat" in session["system"].content[0].text  # 告诉它工具在哪（CodeBuddy 的外部工具要先搜）
+    assert session["servers"][0].url == "http://127.0.0.1:9/chat/bridge?s=1"  # 每个会话一个地址
     assert conns[0].prompts[0].endswith("你好") and "<背景>" in conns[0].prompts[0]  # 记忆原样交过去
 
 
@@ -141,6 +148,7 @@ def test_same_conversation_keeps_the_session_and_sends_only_the_new_line(tmp_pat
     asyncio.run(go())
     conn = conns[0]
     assert len(conn.sessions) == 2
+    assert conn.sessions[1]["servers"][0].url.endswith("?s=2")  # 新会话换个地址，CodeBuddy 才会重新要工具列表
     assert conn.prompts[1] == "第二句"
     assert conn.prompts[2] == "换了个话题"
 
@@ -161,6 +169,68 @@ def test_only_its_own_tools_are_allowed(tmp_path: Path) -> None:
     for title, raw in [("rm -rf x", None), ("mcp.aila_chat.other", None), ("mcp.aila_chat.set_reminder", {"command": "del x"})]:
         res = brain.on_permission(schema.ToolCallUpdate(tool_call_id="2", title=title, raw_input=raw), opts)
         assert res.outcome.option_id == "n"
+
+
+def test_deferred_tools_are_unwrapped(tmp_path: Path) -> None:
+    """CodeBuddy 调外部工具时标题是 DeferExecuteTool，真工具名在 toolName：艾拉的工具放行，它自己的定时任务不批"""
+    brain, _ = make(tmp_path, [], engine="codebuddy")
+    brain._specs = [{"name": "set_reminder"}]
+    opts = [schema.PermissionOption(option_id="y", name="y", kind="allow_once"),
+            schema.PermissionOption(option_id="n", name="n", kind="reject_once")]
+    mine = {"toolName": "mcp__aila_chat__set_reminder", "params": {"what": "喝水"}}
+    assert brain.on_permission(schema.ToolCallUpdate(tool_call_id="1", title="DeferExecuteTool", raw_input=mine), opts).outcome.option_id == "y"
+    brain._titles["2"] = "DeferExecuteTool"  # 批准请求不带标题，只在开头报过
+    assert brain.on_permission(schema.ToolCallUpdate(tool_call_id="2", raw_input=mine), opts).outcome.option_id == "y"
+    cron = {"toolName": "CronCreate", "params": {"cron": "1 * * * *", "prompt": "喝水"}}
+    assert brain.on_permission(schema.ToolCallUpdate(tool_call_id="3", title="DeferExecuteTool", raw_input=cron), opts).outcome.option_id == "n"
+
+
+def test_codebuddy_is_told_the_full_tool_names(tmp_path: Path) -> None:
+    """它按意思搜（「remind me later」）搜不到艾拉的工具：系统提示词里列出完整名字；Codex 这些看得见工具的不用列。
+    CodeBuddy 不认 ACP 给的系统提示词：人格和这些写进文件给它"""
+    brain, conns = make(tmp_path, [("say", "好")], engine="codebuddy")
+    asyncio.run(collect(brain, convo("你好")))
+    assert conns[0].sessions[0]["system"] is None
+    persona = (tmp_path / "chat-brain-persona.md").read_text(encoding="utf-8")
+    assert persona.startswith("你是艾拉。") and "mcp__aila_chat__set_reminder" in persona
+    codex, conns = make(tmp_path / "c", [("say", "好")])
+    asyncio.run(collect(codex, convo("你好")))
+    assert "mcp__aila_chat__" not in conns[0].sessions[0]["system"].content[0].text
+
+
+def test_codebuddy_brain_starts_without_its_own_tools(tmp_path: Path) -> None:
+    """CodeBuddy 当大脑时关掉它自己的定时任务、命令这些工具，只留找和调外部工具的（不然提醒会记到它自己那边）"""
+    seen: list = []
+
+    @asynccontextmanager
+    async def spawn(factory: Any, *a: Any, **kw: Any):
+        seen.append(a)
+        raise RuntimeError("到这里就够了")
+        yield
+
+    brain = AgentBrain("codebuddy", tmp_path, "http://127.0.0.1:9", spawn=spawn, launcher=lambda e, d: ("codebuddy", ["--acp"], {}))
+    with pytest.raises(RuntimeError):
+        asyncio.run(brain._open("你是艾拉。", "x"))
+    persona = tmp_path / "chat-brain-persona.md"
+    assert seen == [("codebuddy", "--acp", "--tools", "ToolSearch,DeferExecuteTool", "--system-prompt-file", str(persona))]
+    assert persona.read_text(encoding="utf-8").startswith("你是艾拉。")  # 起它之前就写好了
+
+
+def test_refused_and_silent_gets_one_nudge(tmp_path: Path) -> None:
+    """它想用自己的命令（不批）然后一句话没说就结束：提醒它一次该用哪些工具、做不了就直说，她不会干晾着你"""
+    bash = schema.ToolCallUpdate(tool_call_id="b", title="Bash", raw_input={"command": "sleep 120"})
+    brain, conns = make(tmp_path, [("ask_first", bash), ("say_later", "我这就帮你记上。")], engine="codebuddy")
+    events = asyncio.run(collect(brain, convo("两分钟后提醒我喝水")))
+    assert conns[0].answers == ["n"]
+    assert len(conns[0].prompts) == 2 and "mcp__aila_chat__set_reminder" in conns[0].prompts[1]
+    assert "我这就帮你记上" in "".join(e.get("text", "") for e in events if e["type"] == "text")
+
+
+def test_no_nudge_when_it_answered(tmp_path: Path) -> None:
+    bash = schema.ToolCallUpdate(tool_call_id="b", title="Bash", raw_input={"command": "ls"})
+    brain, conns = make(tmp_path, [("ask_first", bash), ("say", "好")], engine="codebuddy")
+    asyncio.run(collect(brain, convo("你好")))
+    assert len(conns[0].prompts) == 1
 
 
 def test_not_logged_in_is_said_plainly(tmp_path: Path) -> None:

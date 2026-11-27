@@ -28,7 +28,7 @@ import acp
 from acp import schema
 
 from .llm import Message, ToolCall
-from .runtime.external import _options_of
+from .runtime.external import _deferred, _options_of
 from .runtime.localagents import ENGINES, launch
 
 log = logging.getLogger("aila.brain")
@@ -37,6 +37,17 @@ SERVER_NAME = "aila_chat"
 TOOL_WAIT = 55  # 秒：它等一个工具结果最多这么久（它那边的工具调用超时一般是 60 秒）
 CONTEXT_TURNS = 12  # 开新会话时带上最近几句当前情提要
 INIT_TIMEOUT = 60
+# 有的 Agent（CodeBuddy）自己也有定时任务、跑命令这些工具，外部工具还要先搜才看得见：不说的话它会用自己的（对话里一律不批）
+TOOLS_NOTE = (f"你能用的工具都在 MCP 服务「{SERVER_NAME}」里（提醒、搜网页、打开网页这些）。要做这些事就用它们，"
+              "看不到的先搜一下这个服务的工具；不要用你自己的定时任务、命令、改文件工具，对话里不会批。")
+def _tools_note(deferred: bool, specs: list[dict[str, Any]]) -> str:
+    """外部工具要先搜才看得见的（CodeBuddy）：把完整名字列出来，它按名字一搜就到（按意思搜常常搜不到）"""
+    if not deferred or not specs:
+        return TOOLS_NOTE
+    names = "、".join(f"mcp__{SERVER_NAME}__{s['name']}" for s in specs)
+    return f"{TOOLS_NOTE}\n这些工具的完整名字（按名字搜就能找到）：{names}"
+
+
 BACKGROUND = re.compile(r"^<背景>.*?</背景>\s*", re.S)
 
 
@@ -96,6 +107,9 @@ class AgentBrain:
         self._titles: dict[str, str] = {}  # 它的工具调用编号 → 名字（批准请求里可能不带名字）
         self._n = 0
         self._lock = asyncio.Lock()
+        self._opened = 0  # 开过几个会话（MCP 地址里带着）
+        self._spoke = False  # 这一轮它说过话没有
+        self._refused = False  # 这一轮拒过它要用自己工具的请求没有
 
     # ---------- ChatModel ----------
 
@@ -153,7 +167,13 @@ class AgentBrain:
     async def _prompt(self, text: str) -> None:
         assert self._queue is not None
         try:
+            self._spoke = self._refused = False
             res = await self._conn.prompt(session_id=self._sid, prompt=[schema.TextContentBlock(type="text", text=text)])
+            if self._refused and not self._spoke and str(res.stop_reason) == "end_turn":
+                # 它想用自己的工具（被拒了）然后一句话没说就结束了：提醒它一次该用哪些工具，做不了就直说
+                self._refused = False
+                retry = f"（系统：刚才那个工具在对话里用不了，没有执行。{_tools_note(self.engine.deferred_mcp, self._specs)}做不了就直接跟对方说一声；别提这句话。）"
+                res = await self._conn.prompt(session_id=self._sid, prompt=[schema.TextContentBlock(type="text", text=retry)])
             self._queue.put_nowait(("done", str(res.stop_reason)))
         except acp.RequestError as err:
             self._queue.put_nowait(BrainError(_friendly(self.name, str(err))))
@@ -177,8 +197,19 @@ class AgentBrain:
     # ---------- 连上它、开会话 ----------
 
     async def _open(self, system: str, signature: str) -> None:
+        if self.base_url:
+            note = _tools_note(self.engine.deferred_mcp, self._specs)
+            system = (system + "\n\n" + note) if system else note
+        persona = self.data_dir / "chat-brain-persona.md"  # 在空文件夹外面：它不会自己翻到
+        if self.engine.prompt_file_flag:
+            # 它不认 ACP 给的系统提示词：写进文件，它每个新会话重读一次（先写好再起它）
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            persona.write_text(system, encoding="utf-8")
         if self._conn is None:
             node, args, env = self._launch(self.engine.id, self.data_dir)
+            args = [*args, *self.engine.brain_args]
+            if self.engine.prompt_file_flag:
+                args += [self.engine.prompt_file_flag, str(persona)]
             home = self.data_dir / "chat-brain"  # 空文件夹：对话用不上它读写文件
             home.mkdir(parents=True, exist_ok=True)
             stack = AsyncExitStack()
@@ -194,12 +225,16 @@ class AgentBrain:
         mode = self.engine.persona_mode  # Claude Code 整个换掉；Codex、Antigravity 只能接在它原来的后面
         servers = []
         if self.base_url:
-            servers.append(schema.HttpMcpServer(type="http", name=SERVER_NAME, url=f"{self.base_url}/chat/bridge",
+            # 每个会话一个地址：CodeBuddy 同一个进程里同名的服务只连一次，地址不变就一直用第一次要到的工具列表
+            # （第一次常常是设置页问模型时开的、还没有工具的会话）
+            self._opened += 1
+            servers.append(schema.HttpMcpServer(type="http", name=SERVER_NAME, url=f"{self.base_url}/chat/bridge?s={self._opened}",
                                                 headers=[schema.HttpHeader(name="Authorization", value=f"Bearer {self.token}")]))
         try:
             res = await asyncio.wait_for(self._conn.new_session(
                 cwd=str(self.data_dir / "chat-brain"), mcp_servers=servers,
-                system_prompt=schema.SystemPrompt(mode=mode, content=[schema.TextContentBlock(type="text", text=system)]) if system else None),
+                system_prompt=schema.SystemPrompt(mode=mode, content=[schema.TextContentBlock(type="text", text=system)])
+                if system and not self.engine.prompt_file_flag else None),
                 INIT_TIMEOUT)
         except acp.RequestError as err:
             await self.close()
@@ -252,17 +287,22 @@ class AgentBrain:
             return
         text = getattr(getattr(update, "content", None), "text", None)
         if text:
+            self._spoke = True
             self._queue.put_nowait(text)
 
     def on_permission(self, tool_call: Any, options: list[Any]) -> Any:
         """对话里不让它改东西、跑命令；只有调艾拉给它的工具放行（工具自己要确认的，run_agent 会问你）"""
         title = str(getattr(tool_call, "title", "") or self._titles.get(str(getattr(tool_call, "tool_call_id", "")), ""))
+        inner = _deferred(tool_call, title)  # CodeBuddy：外部工具包在 DeferExecuteTool 里调
+        if inner is not None:
+            tool_call, title = inner, str(inner.title)
         names = {s["name"] for s in self._specs}
         own = any(title.startswith(p) and title[len(p):] in names for p in (f"mcp.{SERVER_NAME}.", f"mcp__{SERVER_NAME}__"))
         raw = getattr(tool_call, "raw_input", None)
         command = isinstance(raw, dict) and (raw.get("command") or raw.get("cmd"))
         wanted = "allow_once" if own and not command else "reject_once"
         if wanted == "reject_once":
+            self._refused = True
             log.info("对话里没批 %s 的请求：%r（%s）", self.name, title[:120], getattr(tool_call, "kind", ""))
         option = next((o for o in options if str(o.kind) == wanted), None)
         if option is None:
@@ -275,6 +315,7 @@ class AgentBrain:
             return "现在不在对话里，这个工具没有执行。"
         if name not in {s["name"] for s in self._specs}:
             return f"没有叫 {name} 的工具。"
+        self._spoke = True  # 用了艾拉的工具也算有交代
         self._n += 1
         call_id = f"brain-{self._n}"
         fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()

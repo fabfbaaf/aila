@@ -518,6 +518,9 @@ data: {"type": "done"}
 
 设置里 `AILA_CHAT_BRAIN=codex|claude|antigravity|codebuddy` 时，对话（`/chat`，手机上也一样）交给本机的这个 Agent 想，`run_agent` 一点不变：
 `AgentBrain` 实现 `ChatModel.stream()`。人格：开 ACP 会话时交系统提示词（Claude Code 整个换掉，Codex 只能接在后面）；<背景>（记忆）原样放在最新一句前面；会话留着，下一句只发新的，对不上就开新会话并带上最近的对话。艾拉的对话工具用 MCP 挂给它（`POST /chat/bridge`，只认这个大脑的令牌）：它调用时 `stream()` 把调用交回 `run_agent`（照常确认、执行），结果在下一次 `stream()` 交回给它。它自己的改文件、跑命令一律不批，开在空文件夹里。整理记忆、写摘要还用填的大模型。
+系统提示词后面加一段：艾拉的工具在 `aila_chat` 里，别用它自己的定时任务、命令。它要用自己的工具被拒、一句话没说就结束时，再提醒它一次，做不了就直说。MCP 地址每个会话不一样（`?s=序号`）：CodeBuddy 同一个进程里同名的服务只连一次，地址不变就一直用第一次要到的工具列表。
+
+CodeBuddy 当大脑时另外几处不一样：ACP 给的系统提示词它不认，人格写进 数据目录/chat-brain-persona.md，用 `--system-prompt-file` 交给它（每个新会话重读）；`--tools ToolSearch,DeferExecuteTool` 关掉它自己的工具，只留找外部工具、调外部工具这两个；它的外部工具要先搜才看得见，按意思搜常常搜不到，所以把艾拉工具的完整名字（`mcp__aila_chat__set_reminder`……）列在提示词里。它调外部工具时标题是 `DeferExecuteTool`，真工具名和参数在 `toolName`、`params` 里，对话和编程任务都按里面的真工具认、问（外部工具按 MCP 工具问，别的连参数一起当命令问）。
 
 ### 编程 Agent 评测
 
