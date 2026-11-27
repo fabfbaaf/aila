@@ -94,10 +94,13 @@ async def test_commands_over_http_and_in_the_terminal(project: Path, tmp_path: P
     http = HttpBackend("http://testserver", transport=httpx.ASGITransport(app=app))
     try:
         listed = await http.commands(str(project))
-        assert [c["name"] for c in listed["commands"]] == ["发布", "周报"]
+        assert {c["name"]: c["source"] for c in listed["commands"]} == {
+            "make-video": "builtin", "paper-lookup": "builtin", "发布": "project", "周报": "user",
+        }
         assert listed["project_dir"].endswith("commands") and listed["user_dir"].endswith("commands")
         computer = await http.commands(None, "computer")
-        assert [c["name"] for c in computer["commands"]] == ["周报"] and computer["project_dir"] is None
+        assert [c["name"] for c in computer["commands"]] == ["make-video", "paper-lookup", "周报"]
+        assert computer["project_dir"] is None
     finally:
         app.dependency_overrides.pop(get_runtime, None)
         await http.close()

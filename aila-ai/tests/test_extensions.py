@@ -210,6 +210,36 @@ def test_examples_in_repo_are_valid(tmp_path: Path) -> None:
     assert dice_plan["servers"][0]["readOnly"] and "<扩展文件夹>/server.py" in dice_plan["servers"][0]["command"]
 
 
+@pytest.mark.anyio
+async def test_builtin_research_and_video_reach_new_tasks(tmp_path: Path, project: Path) -> None:  # noqa: F811
+    model = Scripted([
+        [ToolCall("paper", "read_skill", '{"name":"paper-lookup"}')],
+        [ToolCall("video", "read_skill", '{"name":"hyperframes-video"}')],
+        [ToolCall("example", "read_skill", '{"name":"hyperframes-video","file":"examples/title-card.html"}')],
+        ["读完了"],
+    ])
+    rt = Runtime(tmp_path / "data", lambda: model, shell=SHELL)
+    try:
+        assert rt.extensions.skills() == []
+        commands = rt.commands(str(project))
+        assert commands["paper-lookup"].source == "builtin"
+        assert commands["make-video"].source == "builtin"
+        assert "brief.md" in commands["make-video"].expand("brief.md")
+        session = rt.create(str(project), "ask")
+        assert "paper-lookup" in session.context and "hyperframes-video" in session.context
+        desktop_task = rt.create(kind="computer", mode="ask")
+        assert "render_video" in rt.agent(desktop_task.id).tools.tools
+        assert "web_fetch" in rt.agent(desktop_task.id).tools.tools
+        events = [event async for event in rt.run(session.id, "先查资料，再做视频")]
+        results = [event["content"] for event in events if event["type"] == "tool"]
+        assert len(results) == 3
+        assert "web_fetch" in results[0]
+        assert "艾拉内置" in results[1] and "render_video" in results[1]
+        assert 'data-composition-id="main"' in results[2]
+    finally:
+        await rt.shutdown()
+
+
 # ---------- 接进编程 Agent ----------
 
 
@@ -231,17 +261,17 @@ async def test_commands_and_skills_reach_the_agent(tmp_path: Path, project: Path
 
     # 本事：开会话时列进环境说明，给 read_skill 工具；读全文、读附带文件
     session = rt.create(str(project), "ask")
-    assert "<扩展的本事>" in session.context and "写周报" in session.context
+    assert "<可用的本事>" in session.context and "写周报" in session.context
     events = [e async for e in rt.run(session.id, "写这周的周报")]
     results = [e for e in events if e["type"] == "tool"]
     assert "三段" in results[0]["content"] and "本周：修了登录。" in results[1]["content"]
     assert any(t["function"]["name"] == "read_skill" for t in model.requests[0][1])
 
-    # 装扩展以后才开的会话才有；没有本事的会话没有这个工具（工具列表不多带东西）
+    # 扩展长处按会话记，停用后，新任务仍可使用内置本事。
     rt.extensions.set_enabled("demo", False)
     plain = rt.create(str(project), "ask")
-    assert "<扩展的本事>" not in plain.context
-    assert "read_skill" not in rt.agent(plain.id).tools.tools
+    assert "写周报" not in plain.context
+    assert "paper-lookup" in plain.events[0]["skills"]
     await rt.shutdown()
 
 

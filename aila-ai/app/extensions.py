@@ -762,6 +762,10 @@ def skills_context(skills: list[SkillInfo]) -> str:
     """会话开头的环境说明里加的一段：只有名字和一句话简介，全文用 read_skill 按需读"""
     if not skills:
         return ""
-    lines = [f"- {s.name}（来自扩展「{s.extension_name}」）：{s.description}" for s in skills]
-    return ("\n\n<扩展的本事>\n你装的扩展带来了这些本事。手上的事用得上哪一项，先用 read_skill 读它的全文，再照着做：\n"
-            + "\n".join(lines) + "\n</扩展的本事>")
+    lines = [f"- {s.name}（{skill_source(s)}）：{s.description}" for s in skills]
+    return ("\n\n<可用的本事>\n手上的事用得上哪一项，先用 read_skill 读它的全文，再照着做：\n"
+            + "\n".join(lines) + "\n</可用的本事>")
+
+
+def skill_source(skill: SkillInfo) -> str:
+    return f"来自扩展「{skill.extension_name}」" if skill.extension else "艾拉内置"

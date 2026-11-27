@@ -7,7 +7,8 @@
 
 from typing import Any
 
-from ..extensions import ExtensionError, ExtensionStore, read_skill_file
+from ..builtin_skills import task_skills
+from ..extensions import ExtensionError, ExtensionStore, read_skill_file, skill_source
 
 
 def read_skill_tool(store: ExtensionStore, names: list[str]):  # -> CodingTool
@@ -18,18 +19,18 @@ def read_skill_tool(store: ExtensionStore, names: list[str]):  # -> CodingTool
         # 只认会话开头列出来的（之后新装的要开新会话才有）
         if name.lower() not in {n.lower() for n in names}:
             return Outcome(f"没有叫「{name}」的本事。能用的：{'、'.join(names)}", ok=False)
-        skill = next((s for s in store.skills() if s.name.lower() == name.lower()), None)
+        skill = next((s for s in task_skills(store) if s.name.lower() == name.lower()), None)
         if skill is None:
             return Outcome(f"「{name}」所在的扩展已经停用或卸载了。", ok=False)
         try:
             text = read_skill_file(skill, str(args.get("file", "") or ""))
         except ExtensionError as err:
             return Outcome(str(err), ok=False)
-        return Outcome(f"【{skill.name}】（来自扩展「{skill.extension_name}」）\n{text}")
+        return Outcome(f"【{skill.name}】（{skill_source(skill)}）\n{text}")
 
     return CodingTool(
         "read_skill",
-        "读扩展带来的一项本事的全文（会话开头「扩展的本事」里列出的那些）。"
+        "读会话开头「可用的本事」里列出的一项本事的全文。"
         "做的事用得上哪一项，先读它再照着做；file 可以读这项本事文件夹里附带的文件（比如例子、模板），不填就是正文。",
         _obj({"name": _str("本事的名字"), "file": _str("可选：本事文件夹里的文件，相对路径")}, ["name"]),
         run, lambda _: "read", lambda a: f"读本事「{a.get('name', '')}」",

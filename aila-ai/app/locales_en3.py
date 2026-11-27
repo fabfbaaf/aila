@@ -329,4 +329,19 @@ EN3: dict[str, str] = {
     # 主动分享
     "找不到更新日志的日期": "No release date found in the changelog",
     "更新摘要格式不正确": "The update summary has an invalid format",
+    # 内置视频
+    "要运行浏览器渲染并保存视频，首次使用可能下载渲染依赖。": "Renders and saves a video locally. The first run may download rendering tools.",
+    "现在是只读模式，不能渲染并保存视频。": "Read-only mode cannot render and save videos.",
+    "视频依赖校验没通过，稍后可以再试。": "Could not verify the video tools. Try again later.",
+    "视频依赖的压缩包里少了文件。": "The video tool archive is missing files.",
+    "这个系统上需要已有的 Node.js 22+ 和 FFmpeg（含 ffprobe）才能渲染。": "Rendering on this system requires Node.js 22+ and FFmpeg with ffprobe.",
+    "渲染短视频": "Render short video",
+    "正在准备本地视频工具": "Preparing local video tools",
+    "正在检查视频工程": "Checking the video project",
+    "正在渲染 MP4": "Rendering MP4",
+    "视频依赖超过预期大小。": "The video tool download exceeds its expected size.",
+    "这个视频工程需要自己的 index.html。": "The video project needs its own index.html.",
+    "把 MP4 保存到视频工程里，文件名用 .mp4。": "Save the video inside its project with an .mp4 extension.",
+    "要用一个新的 MP4 文件名，所在的文件夹得已经存在。": "Choose a new MP4 filename in an existing folder.",
+    "视频依赖的压缩包里有异常路径。": "The video tool archive contains an invalid path.",
 }
