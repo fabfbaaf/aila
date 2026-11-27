@@ -1,6 +1,6 @@
 {
   "name": "aila-desktop",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "艾拉：程序员的 AI 桌面伙伴",
   "main": "./out/main/index.js",
   "private": true,
