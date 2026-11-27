@@ -9,7 +9,7 @@
  */
 import { t as tr, t as tr2, localized, joinList } from '../i18n'
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary, type AgentEngine, type EngineOption, type LocalAgentInfo } from '../../../shared/agent'
+import { MAX_COLLABORATORS, agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary, type AgentEngine, type EngineOption, type ModelGroup } from '../../../shared/agent'
 const MODE_LABELS = localized(MODE_LABELS_RAW)
 const MODE_HINTS = localized(MODE_HINTS_RAW)
 import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
@@ -23,6 +23,10 @@ import ToolCard from './ToolCard.vue'
 import TraceView from './TraceView.vue'
 import UndoResult from './UndoResult.vue'
 import BudgetControls from './BudgetControls.vue'
+import ModelPicker from './ModelPicker.vue'
+import CollaborationPanel from './CollaborationPanel.vue'
+import type { PairAction, PairPick } from '../../../shared/agent'
+import { AILA, engineOf, modelName, pickLabel, stillLoading, switchKind, taskPick, validPick, type ModelPick } from './models'
 import { parseBudget, validBudget } from '../../../shared/budget'
 import Icon from '../theme/Icon.vue'
 import { deleteNotice, groupSessions, sessionLabel } from './sessions'
@@ -36,6 +40,16 @@ const emit = defineEmits<{ waiting: [count: number] }>()
 const sessions = ref<AgentSessionSummary[]>([])
 const current = ref<AgentSessionSummary | null>(null)
 const t = shallowRef(reactive(new Transcript()))
+const collaboration = computed(() => {
+  const events = t.value.events
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]
+    if (event.type === 'pair_proposal_rejected') return undefined
+    if (event.type === 'pair_proposal' || event.type === 'pair_plan') return event
+  }
+  return undefined
+})
+const pairBusy = ref(false)
 const text = ref('')
 const error = ref('')
 const picking = ref(false)
@@ -53,30 +67,131 @@ watch(newKind, (kind) => {
     newIsolate.value = false
   }
 })
-/** 谁来做：艾拉自己（空），或者本机的 Codex / Claude Code（通过 ACP 适配器，用你自己的账号） */
-const newEngine = ref<AgentEngine | ''>('')
-const localAgents = ref<LocalAgentInfo[]>([])
-const localChecking = ref(false)
-watch(picking, async (on) => {
-  if (!on) return
-  localChecking.value = true
+/**
+ * 用哪个模型：输入框右下角选（ModelPicker.vue，按账号分组，选了哪个模型就是谁来做，逻辑在 models.ts）。
+ * 新任务默认用上次选的；任务做到一半换同一家的模型直接换，换了一家开一个新任务接着做（前情由 AI 服务整理）
+ */
+const modelGroups = ref<ModelGroup[]>([])
+const LAST_PICK = 'aila.agent.model'
+function lastPick(): ModelPick {
   try {
-    localAgents.value = await source.localAgents()
-  } catch {
-    localAgents.value = [] // AI 服务旧了、没开：只能选艾拉
-  } finally {
-    localChecking.value = false
+    const v = JSON.parse(localStorage.getItem(LAST_PICK) ?? 'null') as ModelPick | null
+    if (v && typeof v.engine === 'string' && typeof v.value === 'string') return v
+  } catch { /* 读不到就用艾拉自己的 */ }
+  return AILA
+}
+function rememberPick(pick: ModelPick): void {
+  try { localStorage.setItem(LAST_PICK, JSON.stringify(pick)) } catch { /* 存不了就下次再选 */ }
+}
+const newPick = ref<ModelPick>(lastPick())
+const newCollaborators = ref<PairPick[]>([])
+const collaboratorGroups = computed(() => modelGroups.value.filter((group) => group.engine !== 'aila'))
+const collaboratorLabel = (pick: PairPick): string => {
+  const group = collaboratorGroups.value.find((candidate) => candidate.engine === pick.agent)
+  const name = modelName(collaboratorGroups.value, { engine: pick.agent, value: pick.model }, tr('默认模型'))
+  return group && name !== group.title ? `${group.title} · ${name}` : group ? name : `${pick.agent} · ${name}`
+}
+function addCollaborator(pick: ModelPick): void {
+  if (pick.engine === 'aila' || newCollaborators.value.length >= MAX_COLLABORATORS) return
+  newCollaborators.value.push({ agent: pick.engine, model: pick.value })
+  newTaskError.value = ''
+}
+function removeCollaborator(index: number): void {
+  newCollaborators.value.splice(index, 1)
+  newTaskError.value = ''
+}
+/** 新任务交给谁：从选的模型来；电脑任务只能艾拉自己做 */
+const newEngine = computed<AgentEngine | ''>(() => (newKind.value === 'computer' ? '' : engineOf(newPick.value) ?? ''))
+const modelsBusy = ref(false)
+const modelProblem = ref('')
+const newTaskError = ref('')
+const selectedGroup = computed(() => modelGroups.value.find((g) => g.engine === newPick.value.engine))
+const selectedModelProblem = computed(() => {
+  const group = selectedGroup.value
+  if (!group) return ''
+  if (!group.ready) return group.problem || tr('这个模型现在用不了，换一个再开任务。')
+  if (newPick.value.value && !group.models.some((model) => model.value === newPick.value.value)) {
+    return group.loading ? tr('正在获取模型列表…') : tr('这个模型已不在列表里，重新选一下。')
   }
-  if (newEngine.value && !localAgents.value.some((a) => a.id === newEngine.value && a.ready)) newEngine.value = ''
+  return ''
 })
-watch(newKind, (kind) => { if (kind === 'computer') newEngine.value = '' })
+let modelsRequest = 0
+let userPickedNewModel = false
+let modelsTimer = 0
+let modelsTries = 0
+let loginWatch: AgentEngine | undefined
+async function loadModels(refresh = false): Promise<void> {
+  if (!source.modelGroups) return
+  const request = ++modelsRequest
+  window.clearTimeout(modelsTimer)
+  modelsBusy.value = true
+  try {
+    const groups = await source.modelGroups('task', refresh)
+    if (request !== modelsRequest) return
+    modelGroups.value = groups
+    modelProblem.value = ''
+  } catch (err) {
+    if (request === modelsRequest) modelProblem.value = (err as Error).message || tr('没拿到模型列表，点刷新再试。')
+    return
+  } finally {
+    if (request === modelsRequest) modelsBusy.value = false
+  }
+  if (!userPickedNewModel) newPick.value = validPick(modelGroups.value, newPick.value)
+  if (loginWatch && modelGroups.value.find((g) => g.engine === loginWatch)?.logged_in === true) {
+    loginWatch = undefined
+    error.value = ''
+  }
+  // 还在问有哪些模型的：过一会儿再拿（最多两分来钟）
+  if ((stillLoading(modelGroups.value) || loginWatch) && modelsTries++ < 50) {
+    modelsTimer = window.setTimeout(() => void loadModels(), 2500)
+  } else {
+    modelsTries = 0
+    loginWatch = undefined
+  }
+}
+async function loginTo(engine: AgentEngine): Promise<void> {
+  if (!source.login) return
+  try {
+    await source.login(engine)
+    if (modelGroups.value.find((g) => g.engine === engine)?.logged_in === false) {
+      loginWatch = engine
+      modelsTries = 0
+      void loadModels()
+    }
+  } catch (err) {
+    error.value = (err as Error).message
+  }
+}
+async function installFor(engine: AgentEngine): Promise<void> {
+  try {
+    await source.openInstall?.(engine)
+  } catch (err) {
+    error.value = (err as Error).message
+  }
+}
+watch(picking, (on) => {
+  if (on) {
+    userPickedNewModel = false
+    newPick.value = lastPick()
+    newCollaborators.value = []
+    newTaskError.value = ''
+    if (modelGroups.value.length) newPick.value = validPick(modelGroups.value, newPick.value)
+    void loadModels()
+  }
+})
+function pickForNewTask(pick: ModelPick): void {
+  userPickedNewModel = true
+  newPick.value = pick
+  newTaskError.value = ''
+}
+watch(collaboration, (entry) => { if (entry?.type === 'pair_proposal') void loadModels() })
 // 本机 Agent 没有艾拉的「出方案」流程：要它先出方案，直接跟它说
 watch(newEngine, (engine) => { if (engine) newPlan.value = false })
 const engineNote = computed(() => {
-  const picked = localAgents.value.find((a) => a.id === newEngine.value)
-  if (picked) return tr('{name} 用你自己的账号和额度在做；它要改文件、跑命令时按上面的权限模式问你，危险命令总是问。', { name: picked.title })
-  const off = localAgents.value.filter((a) => !a.ready)
-  return off.map((a) => `${a.title}：${a.problem}${a.hints[0] ? tr('（{hint}）', { hint: a.hints[0] }) : ''}`).join('；')
+  const group = newEngine.value ? modelGroups.value.find((g) => g.engine === newEngine.value) : undefined
+  if (!group) return ''
+  return tr('{name} 用你自己的 {account} 账号和额度在做；它要改文件、跑命令时按上面的权限模式问你，危险命令总是问。',
+    { name: group.agent ?? group.title, account: group.title })
 })
 /** 新任务在新分支上做（git worktree，测试通过才合并回来） */
 const newIsolate = ref(false)
@@ -85,7 +200,6 @@ const newBudget = ref('')
 const newPlan = ref(false)
 const newBudgetError = ref('')
 const merging = ref('')
-const models = ref<{ coder: string; chat: string; keySet: boolean } | null>(null)
 const scroller = ref<HTMLElement>()
 const input = ref<HTMLTextAreaElement>()
 const streaming = reactive(new Set<string>())
@@ -239,19 +353,43 @@ async function setEngineOption(id: string, value: string): Promise<void> {
     optionBusy.value = false
   }
 }
+/** 模型在输入框右下角选：上面只放思考深度、快速模式这些 */
+const extraOptions = computed(() => engineOptions.value.filter((o) => o.category !== 'model'))
+/** 这个任务现在用的模型（右下角的按钮显示它） */
+const currentPick = computed(() => taskPick(current.value?.engine, engineOptions.value))
+const switching = ref(false)
+/** 任务里换模型：同一家直接换；换了一家开一个新任务接着做，前情交给它（AI 服务按日志整理） */
+async function pickInTask(pick: ModelPick): Promise<void> {
+  const session = current.value
+  if (!session || switching.value) return
+  if (session.kind === 'computer' && pick.engine !== 'aila') return
+  const how = switchKind(currentPick.value, pick)
+  rememberPick(pick)
+  if (how === 'none') return
+  if (how === 'option') {
+    const model = engineOptions.value.find((option) => option.category === 'model')
+    if (model) await setEngineOption(model.id, pick.value)
+    return
+  }
+  if (!source.handoff) return
+  switching.value = true
+  error.value = ''
+  try {
+    const next = await source.handoff(session.id, engineOf(pick), pick.value, pickLabel(modelGroups.value, pick))
+    await refreshList()
+    await open(next.id)
+  } catch (err) {
+    error.value = (err as Error).message
+  } finally {
+    switching.value = false
+  }
+}
 /** 下拉里每一项怎么写：模型直接写名字；思考深度、快速模式前面带上是什么 */
 function optionText(o: EngineOption, choice: EngineOption['choices'][number]): string {
   if (o.category === 'thought_level') return tr('思考：{level}', { level: choice.name })
   if (o.category === 'speed') return tr('快速模式：{on}', { on: choice.name })
   return choice.name
 }
-const modelLabel = computed(() => {
-  if (engineName.value) return engineName.value
-  const m = models.value
-  if (!m) return ''
-  if (!m.keySet) return tr('假模型（还没填密钥）')
-  return m.coder ? m.coder : tr('{model}（和对话一样）', { model: m.chat })
-})
 const choices = computed<ProjectChoice[]>(() => {
   const seen = new Set<string>()
   const out: ProjectChoice[] = []
@@ -268,6 +406,8 @@ const choices = computed<ProjectChoice[]>(() => {
 // ---------- 会话 ----------
 
 let listRequest = 0
+let listProblem = ''
+let stopWatchingService: (() => void) | undefined
 /**
  * 重新取会话列表。loud：你自己触发的（打开页面、搜索）出错要说；后台刷新（定时、事件触发、看板轮询）
  * 偶尔一次失败不打扰你，下一次刷新就补上了
@@ -277,6 +417,8 @@ async function refreshList(loud = false): Promise<void> {
   try {
     const result = await source.list(query.value)
     if (request !== listRequest) return
+    if (listProblem && error.value === listProblem) error.value = ''
+    listProblem = ''
     sessions.value = result
     const active = current.value
     const latest = active && result.find((session) => session.id === active.id)
@@ -284,8 +426,35 @@ async function refreshList(loud = false): Promise<void> {
       active.cost = latest.cost ?? null
       t.value.budget = validBudget(latest.budget) ? latest.budget : null
     }
+    if (active && latest) active.pair_pending = latest.pair_pending
+    if (active && latest?.pair_pending && !streaming.has(active.id)) {
+      streaming.add(active.id)
+      source.watch(active.id, t.value.lastSeq)
+    }
   } catch (err) {
-    if (request === listRequest && loud) error.value = (err as Error).message
+    if (request === listRequest && loud) {
+      listProblem = (err as Error).message
+      error.value = listProblem
+    }
+  }
+}
+
+async function updatePair(action: PairAction): Promise<void> {
+  const sid = current.value?.id
+  if (!sid || !source.pair || pairBusy.value) return
+  pairBusy.value = true
+  error.value = ''
+  try {
+    await source.pair(sid, action)
+    const snapshot = await source.get(sid)
+    if (current.value?.id === sid) {
+      for (const event of snapshot.events) t.value.apply(event)
+    }
+    await refreshList()
+  } catch (err) {
+    if (current.value?.id === sid) error.value = (err as Error).message
+  } finally {
+    pairBusy.value = false
   }
 }
 
@@ -307,13 +476,14 @@ async function open(sid: string): Promise<void> {
     current.value = { ...s, events: s.events.length }
     engineOptions.value = []
     if (s.engine) void loadEngineOptions(sid)
+    if (!modelGroups.value.length) void loadModels()
     void refreshList() // 详情请求期间可能又记了用量，重新取服务端累计费用
     picking.value = false
     ledger.value = null
     loadLedger()
     void loadNotes()
     void loadCommands()
-    if (s.running && !streaming.has(sid)) {
+    if ((s.running || s.pair_pending) && !streaming.has(sid)) {
       streaming.add(sid)
       source.watch(sid, tr.lastSeq) // 正在做（可能是终端里开的）：接上实时事件
     }
@@ -330,6 +500,11 @@ async function open(sid: string): Promise<void> {
 async function startNew(path?: string): Promise<void> {
   if (creating.value) return
   error.value = ''
+  newTaskError.value = ''
+  if (newKind.value === 'project' && selectedModelProblem.value) {
+    newTaskError.value = selectedModelProblem.value
+    return
+  }
   newBudgetError.value = ''
   let budget: number | null
   try { budget = parseBudget(newBudget.value) }
@@ -338,13 +513,15 @@ async function startNew(path?: string): Promise<void> {
   try {
     const computer = newKind.value === 'computer'
     const mode = computer && (newMode.value === 'auto' || newMode.value === 'full') ? 'ask' : newMode.value
+    const collaborators = computer ? [] : newCollaborators.value.map(({ agent, model }) => ({ agent, model }))
     const s = await source.create(computer ? undefined : path, mode, computer ? false : newIsolate.value, budget, newKind.value,
-      computer ? null : newEngine.value || null)
+      computer ? null : newEngine.value || null, computer ? '' : newPick.value.value, collaborators)
+    if (!computer) rememberPick(newPick.value)
     await refreshList()
     await open(s.id)
-    planNext.value = newPlan.value
+    planNext.value = newPlan.value && !collaborators.length
   } catch (err) {
-    error.value = (err as Error).message
+    newTaskError.value = (err as Error).message
   } finally {
     creating.value = false
   }
@@ -874,9 +1051,13 @@ onMounted(async () => {
     if (running.value && view.value === 'trace') now.value = Date.now() / 1000
   }, 1000)
   if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__agent = { t, open, source }
+  stopWatchingService = source.onServiceReady?.(() => {
+    void refreshList()
+    void source.projects().then((p) => (projects.value = p))
+    if (picking.value || modelProblem.value) void loadModels()
+  })
   await refreshList(true)
   void source.projects().then((p) => (projects.value = p))
-  void source.models().then((m) => (models.value = m))
   const focus = await source.takeFocus()
   if (focus) await open(focus)
   else if (sessions.value.length) await open(sessions.value[0].id)
@@ -897,6 +1078,7 @@ onDeactivated(() => {
 })
 
 onBeforeUnmount(() => {
+  stopWatchingService?.()
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('click', closeMenus)
   clearInterval(clock)
@@ -996,27 +1178,22 @@ onBeforeUnmount(() => {
         <select class="mode" :aria-label="tr('当前任务的权限模式')" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
           <option v-for="m in currentModes" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
-        <template v-if="engineName">
-          <!-- 本机 Agent 的任务：它的模型、思考深度、快速模式（权限模式在左边，由艾拉管） -->
-          <span v-if="engineOptions.length" class="engine-options" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
-            <select
-              v-for="o in engineOptions"
-              :key="o.id"
-              class="mode engine-option"
-              :aria-label="o.name"
-              :title="o.choices.find((c) => c.value === o.current)?.description || o.name"
-              :value="o.current"
-              :disabled="optionBusy"
-              @change="setEngineOption(o.id, ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="c in o.choices" :key="c.value" :value="c.value">{{ optionText(o, c) }}</option>
-            </select>
-          </span>
-          <span v-else class="model engine-label" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
-            {{ optionsLoading ? tr('正在连 {name}…', { name: engineName }) : modelLabel }}
-          </span>
-        </template>
-        <span v-else class="model" :title="tr('编程用的模型：在「设置 → 对话」里改')" @click="source.openSettings()">{{ modelLabel }}</span>
+        <!-- 本机 Agent 的任务：思考深度、快速模式（模型在输入框右下角选；权限模式在左边，由艾拉管） -->
+        <span v-if="engineName && extraOptions.length" class="engine-options" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
+          <select
+            v-for="o in extraOptions"
+            :key="o.id"
+            class="mode engine-option"
+            :aria-label="o.name"
+            :title="o.choices.find((c) => c.value === o.current)?.description || o.name"
+            :value="o.current"
+            :disabled="optionBusy"
+            @change="setEngineOption(o.id, ($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="c in o.choices" :key="c.value" :value="c.value">{{ optionText(o, c) }}</option>
+          </select>
+        </span>
+        <span v-else-if="engineName && optionsLoading" class="model engine-label">{{ tr('正在连 {name}…', { name: engineName }) }}</span>
         <div class="tabs">
           <button :class="{ on: view === 'chat' }" @click="view = 'chat'">{{ tr('过程') }}</button>
           <button :class="{ on: view === 'trace' }" :title="tr('按时间看每一步花了多久')" @click="view = 'trace'">{{ tr('轨迹') }}</button>
@@ -1032,6 +1209,23 @@ onBeforeUnmount(() => {
       </div>
       <div v-else ref="scroller" class="scroll" @scroll.passive="onScroll">
         <div v-if="current" class="transcript">
+          <button v-if="current.pair && current.parent" class="ghost" type="button" @click="open(current.parent!)">
+            {{ tr('返回主任务') }}
+          </button>
+          <CollaborationPanel
+            v-if="collaboration && source.pair"
+            :key="collaboration.seq"
+            :entry="collaboration" :events="t.events" :sessions="sessions" :groups="modelGroups"
+            :busy="pairBusy" :pending="Boolean(current.pair_pending)"
+            @action="updatePair" @open="open" @models="loadModels" @login="loginTo" @install="installFor"
+          />
+          <section v-else-if="current.collaborators?.length" class="team-roster" :aria-label="tr('协作者')">
+            <b>{{ tr('协作者') }}</b>
+            <ul><li v-for="(pick, index) in current.collaborators" :key="index">{{ collaboratorLabel(pick) }}</li></ul>
+            <p v-if="running" role="status">{{ tr('主模型正在拟分工。') }}</p>
+            <p v-else-if="t.items.length">{{ tr('主模型还没交分工，可以补充目标或让它继续。') }}</p>
+            <p v-else>{{ tr('发出任务目标后，主模型先拟分工，等你确认后派工。') }}</p>
+          </section>
           <div v-if="!t.items.length" class="hello">
             <template v-if="current.kind === 'computer'">
               <p>{{ tr('要她在电脑上做什么？') }}</p>
@@ -1088,6 +1282,9 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <UndoResult v-else-if="item.kind === 'undo'" :result="item.result" />
+            <div v-else-if="item.kind === 'handoff'" class="note handoff">
+              {{ item.text }} <button type="button" class="link" @click="open(item.sid)">{{ item.link }}</button>
+            </div>
             <div v-else class="note">{{ item.text }}</div>
           </template>
           <div v-if="running && !pending" class="working"><i></i><i></i><i></i>{{ tr('她在做……') }}<span>{{ tr('Esc 打断') }}</span></div>
@@ -1161,6 +1358,18 @@ onBeforeUnmount(() => {
               <Icon name="review" :size="15" />{{ tr('审查改动') }}
             </button>
             <span class="keys">{{ tr('Enter 发送 · Shift+Enter 换行') }}</span>
+            <ModelPicker
+              :groups="modelGroups"
+              :value="currentPick"
+              :disabled="running || switching || optionBusy || t.closed"
+              :only-aila="current?.kind === 'computer'"
+              :note="(current?.kind === 'computer' ? tr('电脑任务只能艾拉自己做') : tr('换另一家的模型会开一个新任务接着做，前情会交给它'))"
+              @open="loadModels()"
+              @refresh="loadModels(true)"
+              @login="loginTo"
+              @install="installFor"
+              @pick="pickInTask"
+            />
             <button v-if="running" class="stop" @click="interrupt"><Icon name="stop" :size="13" :stroke="2.2" />{{ tr('停下') }} <kbd>Esc</kbd></button>
             <button v-else class="send" :disabled="!text.trim() || undoBusy || opening" @click="send">{{ tr('发送') }}<Icon name="send" :size="15" :stroke="2" /></button>
           </div>
@@ -1191,9 +1400,10 @@ onBeforeUnmount(() => {
       </section>
       <section v-if="t.branch">
         <h3>{{ tr('分支') }}</h3>
-        <p class="dim">{{ tr('她在') }} <code>{{ t.branch }}</code> {{ tr('上改，你的代码一个字都没动。觉得可以了就合并：先跑项目的测试，全过、而且你这期间没改过同样的文件，才写回你的代码（不替你提交）。') }}</p>
+        <p v-if="current?.pair" class="dim">{{ tr('这项工作在主任务里和另一项一起验收、收回。') }}</p>
+        <p v-else class="dim">{{ tr('她在') }} <code>{{ t.branch }}</code> {{ tr('上改，你的代码一个字都没动。觉得可以了就合并：先跑项目的测试，全过、而且你这期间没改过同样的文件，才写回你的代码（不替你提交）。') }}</p>
         <div class="branch-actions">
-          <button class="merge-btn" :disabled="running || !!merging || undoBusy" @click="mergeNow(true)">{{ merging || tr('跑测试并合并') }}</button>
+          <button v-if="!current?.pair" class="merge-btn" :disabled="running || !!merging || undoBusy" @click="mergeNow(true)">{{ merging || tr('跑测试并合并') }}</button>
           <button class="ghost" :disabled="running || !!merging || undoBusy" @click="discardNow">{{ tr('放弃分支') }}</button>
         </div>
       </section>
@@ -1287,13 +1497,37 @@ onBeforeUnmount(() => {
           <label :class="{ on: newKind === 'project' }"><input v-model="newKind" type="radio" value="project" name="task-kind" />{{ tr('在项目里编程') }}</label>
           <label :class="{ on: newKind === 'computer' }"><input v-model="newKind" type="radio" value="computer" name="task-kind" />{{ tr('不选项目，操作电脑') }}</label>
         </fieldset>
-        <fieldset v-if="newKind === 'project'" class="task-kinds" :disabled="creating" @keydown.stop>
-          <legend>{{ tr('谁来做？') }}</legend>
-          <label :class="{ on: newEngine === '' }"><input v-model="newEngine" type="radio" value="" name="task-engine" />{{ tr('艾拉') }}</label>
-          <label v-for="a in localAgents" :key="a.id" :class="{ on: newEngine === a.id, off: !a.ready }" :title="a.ready ? a.version : a.problem">
-            <input v-model="newEngine" type="radio" :value="a.id" name="task-engine" :disabled="!a.ready" />{{ a.title }}
-          </label>
-          <span v-if="localChecking" class="dim engine-checking">{{ tr('正在找本机的编程 Agent…') }}</span>
+        <div v-if="newKind === 'project'" class="new-model" @keydown.stop>
+          <span>{{ tr('主模型') }}</span>
+          <ModelPicker
+            :groups="modelGroups"
+            :value="newPick"
+            :disabled="creating"
+            :loading="modelsBusy"
+            :note="tr('选了哪个模型就是谁来做：艾拉自己，或者这台电脑上的 Codex、Claude Code……')"
+            inline
+            @open="() => { if (!modelsBusy && !modelGroups.length) void loadModels() }"
+            @refresh="loadModels(true)"
+            @login="loginTo"
+            @install="installFor"
+            @pick="pickForNewTask"
+          />
+          <p v-if="modelProblem || selectedModelProblem" class="model-problem" role="status">{{ modelProblem || selectedModelProblem }}</p>
+        </div>
+        <fieldset v-if="newKind === 'project'" class="new-team" :disabled="creating" @keydown.stop>
+          <legend>{{ tr('协作者') }}</legend>
+          <p class="dim">{{ tr('可加最多四个本机模型。主模型按名单分工，你确认后并行开工。') }}</p>
+          <ul v-if="newCollaborators.length">
+            <li v-for="(pick, index) in newCollaborators" :key="index">
+              <span>{{ collaboratorLabel(pick) }}</span>
+              <button type="button" class="ghost" @click="removeCollaborator(index)">{{ tr('移除') }}</button>
+            </li>
+          </ul>
+          <ModelPicker v-if="newCollaborators.length < MAX_COLLABORATORS" inline
+            :groups="collaboratorGroups" :value="AILA" :placeholder="tr('添加协作者')" :loading="modelsBusy"
+            @open="() => { if (!modelsBusy && !modelGroups.length) void loadModels() }"
+            @refresh="loadModels(true)" @login="loginTo" @install="installFor" @pick="addCollaborator"
+          />
         </fieldset>
         <p v-if="newKind === 'project' && engineNote" class="dim engine-note">{{ engineNote }}</p>
         <label v-if="newKind === 'project'" class="isolate" :class="{ on: newIsolate }">
@@ -1309,7 +1543,7 @@ onBeforeUnmount(() => {
             <b>{{ MODE_LABELS[m] }}</b><span>{{ MODE_HINTS[m] }}</span>
           </label>
         </div>
-        <label class="isolate" :class="{ on: newPlan }">
+        <label v-if="newKind === 'computer' || !newCollaborators.length" class="isolate" :class="{ on: newPlan }">
           <input id="new-task-plan" v-model="newPlan" type="checkbox" :disabled="creating || !!newEngine" @keydown.stop />
           <span>
             <b>{{ tr('先出方案再动手') }}</b>
@@ -1341,6 +1575,7 @@ onBeforeUnmount(() => {
           <button class="choice other" :disabled="creating" @click="pickOther">{{ tr('选择其他文件夹…') }}</button>
         </div>
         <p v-if="error" class="budget-error" role="alert">{{ error }}</p>
+        <p v-if="newTaskError" class="budget-error" role="alert">{{ newTaskError }}</p>
         <button v-if="newKind === 'computer'" class="new computer-start" :disabled="creating" @click="startNew()">{{ creating ? tr('正在开任务…') : tr('开电脑任务') }}</button>
         <button class="ghost" :disabled="creating" @click="picking = false">{{ tr('取消') }}</button>
       </div>
@@ -2229,6 +2464,52 @@ code {
   font-size: 12.5px;
   text-align: center;
 }
+
+.note.handoff .link {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.new-model {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 4px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.model-problem { margin: 0; color: var(--warn); }
+
+.new-team, .team-roster {
+  min-width: 0;
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-r);
+  padding: 8px 10px;
+  color: var(--text-2);
+}
+
+.new-team ul, .team-roster ul {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+
+.new-team li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.new-team li span, .team-roster li { overflow-wrap: anywhere; }
+.new-team p, .team-roster p { margin: 4px 0 8px; }
 
 .working {
   display: flex;

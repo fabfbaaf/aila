@@ -107,6 +107,36 @@ def get_chat_brain() -> Any:
     return _brains[engine]
 
 
+_catalog: Any = None
+
+
+def own_models(use: str) -> dict:
+    """选模型时「艾拉自己」那一组：设置里填的大模型（对话用 LLM_MODEL，编程用 AILA_CODER_MODEL，没填就一样）"""
+    name = settings.llm_model if use == "chat" else (settings.coder_model or settings.llm_model)
+    return {
+        "engine": "aila", "title": "艾拉（你填的大模型）", "agent": "艾拉", "ready": not settings.mock, "logged_in": None,
+        "problem": "还没填大模型密钥：设置 → 对话" if settings.mock else "", "hints": [], "loading": False,
+        "models": [{"value": "", "name": name, "description": "设置 → 对话 里填的", "default": True}],
+    }
+
+
+def get_catalog() -> Any:
+    """编程任务的统一模型目录。"""
+    global _catalog
+    if _catalog is None:
+        from .runtime.catalog import ModelCatalog
+
+        _catalog = ModelCatalog(settings.data_dir, own_models)
+    return _catalog
+
+
+async def stop_catalog() -> None:
+    global _catalog
+    if _catalog is not None:
+        await _catalog.close()
+        _catalog = None
+
+
 # ---------- 编程 Agent ----------
 
 

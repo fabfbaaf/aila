@@ -39,7 +39,7 @@ import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { ClaudeQuotaConfig, ProviderQuota, QuotaRecord } from '../shared/providerQuotas'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
 import type { ReviewEntry } from '../shared/review'
-import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, EngineOption, LocalAgentInfo } from '../shared/agent'
+import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, EngineOption, LocalAgentInfo, ModelGroup, ModelUse, PairPick } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AreaView, ChainView, Diagnosis, EndpointInfo, ExplainDepth, ExplainTarget, Explanation, FileDetail, FunctionDetail } from '../shared/understand'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
@@ -195,14 +195,23 @@ const api = {
   agentList: (q = ''): Promise<AiResult<AgentSessionSummary[]>> => ipcRenderer.invoke('agent:list', q),
   agentGet: (sid: string): Promise<AiResult<AgentSession>> => ipcRenderer.invoke('agent:get', sid),
   agentCreate: (cwd: string | undefined, mode: AgentMode, isolate = false, budget: number | null = null, kind: AgentKind = 'project',
-    engine: AgentEngine | null = null): Promise<AiResult<AgentSessionSummary>> =>
-    ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget, kind, engine),
+    engine: AgentEngine | null = null, model = '', collaborators: PairPick[] = []): Promise<AiResult<AgentSessionSummary>> =>
+    ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget, kind, engine, model, collaborators),
+  /** 换别家的模型接着做：开一个新任务，前情交给新的模型 */
+  agentHandoff: (sid: string, engine: AgentEngine | null, model: string, label: string): Promise<AiResult<AgentSessionSummary>> =>
+    ipcRenderer.invoke('agent:handoff', sid, engine, model, label),
+  agentPair: (sid: string, action: import('../shared/agent').PairAction): Promise<AiResult<{ message: string }>> =>
+    ipcRenderer.invoke('agent:pair', sid, action),
+  /** 所有能选的模型，按账号分组（对话、编程任务输入框右下角用） */
+  agentModels: (use: ModelUse, refresh = false): Promise<AiResult<ModelGroup[]>> => ipcRenderer.invoke('agent:models', use, refresh),
   /** 本机的 Codex、Claude Code：找到没有、登录没有、适配器装了没有 */
   agentLocal: (): Promise<AiResult<LocalAgentInfo[]>> => ipcRenderer.invoke('agent:local'),
   providerQuotas: (refresh = false): Promise<AiResult<ProviderQuota[]>> => ipcRenderer.invoke('agent:quotas', refresh),
   recordProviderQuota: (body: QuotaRecord): Promise<AiResult<ProviderQuota[]>> => ipcRenderer.invoke('agent:quotas:record', body),
   claudeQuotaConfig: (): Promise<AiResult<ClaudeQuotaConfig>> => ipcRenderer.invoke('agent:quotas:claude'),
   linkCursorQuota: (linked: boolean): Promise<AiResult<ProviderQuota[]>> => ipcRenderer.invoke('agent:quotas:cursor', linked),
+  agentLocalOpenInstall: (id: AgentEngine): Promise<AiResult<never>> => ipcRenderer.invoke('agent:local:open-install', id),
+  agentLocalLogin: (id: AgentEngine): Promise<AiResult<{ started: boolean }>> => ipcRenderer.invoke('agent:local:login', id),
   /** 本机 Agent 任务的模型、思考深度、快速模式 */
   agentOptions: (sid: string): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('agent:options', sid),
   agentSetOption: (sid: string, id: string, value: string): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('agent:options:set', sid, id, value),

@@ -183,17 +183,23 @@ function status(provider: ProviderQuota): string {
 let ticker: ReturnType<typeof setInterval> | undefined
 let poller: ReturnType<typeof setInterval> | undefined
 let activeView = false
+let unlistenService: (() => void) | undefined
 async function start(): Promise<void> {
   if (activeView) return
   activeView = true
   now.value = Date.now() / 1000
   ticker = setInterval(() => { now.value = Date.now() / 1000 }, 15000)
   poller = setInterval(() => { if (!document.hidden) void load(true) }, 300000)
+  unlistenService = bridge?.onServiceState?.((state) => {
+    if (activeView && error.value && (state.phase === 'ready' || state.phase === 'external')) void load(true)
+  })
   await load(false)
   if (activeView) await load(true)
 }
 function stop(): void {
   activeView = false
+  unlistenService?.()
+  unlistenService = undefined
   clearInterval(ticker)
   clearInterval(poller)
 }

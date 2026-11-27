@@ -1,7 +1,7 @@
 /** 真实任务页的预算交互回归：HTTP 与实时流乱序，以及金额输入不能触发工具确认快捷键。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRenderer, nextTick, type App } from 'vue'
-import type { AgentBudgetEvent, AgentEvent, AgentSession, AgentSessionSummary } from '../../../shared/agent'
+import type { AgentBudgetEvent, AgentEvent, AgentSession, AgentSessionSummary, ModelGroup, PairPick } from '../../../shared/agent'
 import type { AgentSource } from './source'
 import type { Transcript } from './fold'
 import AgentApp from './AgentApp.vue'
@@ -85,7 +85,7 @@ beforeEach(async () => {
   vi.stubGlobal('ShadowRoot', class {})
   vi.stubGlobal('HTMLTextAreaElement', class {})
   const host = {
-    setTimeout, setInterval,
+    setTimeout, setInterval, clearTimeout,
     addEventListener: (name: string, listener: (e: any) => void) => { if (name === 'keydown') globalKey = listener },
     removeEventListener: vi.fn()
   }
@@ -95,6 +95,7 @@ beforeEach(async () => {
     get: vi.fn(async () => ({ ...summary(), events: [{ type: 'start', seq: 0, budget: 0.01 }, { type: 'user', seq: 1, t: 1, text: '做任务' }] })),
     setBudget: vi.fn(), screenshot: vi.fn(async () => 'data:image/png;base64,preview'),
     create: vi.fn(), memory: vi.fn(async () => []), send: vi.fn(), plan: vi.fn(async () => {}),
+    pair: vi.fn(async () => ({ message: '' })),
     watch: vi.fn(), projects: vi.fn(async () => []), models: vi.fn(async () => null),
     takeFocus: vi.fn(async () => null), confirm: vi.fn(async () => true), interrupt: vi.fn(async () => {}),
     onEvent: (cb: (sid: string, e: AgentEvent) => void) => { event = cb }, onStreamEnd: vi.fn(), onFocus: vi.fn()
@@ -106,6 +107,102 @@ beforeEach(async () => {
   debug = (host as unknown as { __agent: typeof debug }).__agent
 })
 afterEach(() => { app?.unmount(); app = undefined; vi.useRealTimers(); vi.unstubAllGlobals() })
+
+describe('新任务的模型', () => {
+  it('可以搜到并选中本机模型，列表刷新时不会换掉用户的选择，开任务失败在弹窗内说明', async () => {
+    const group: ModelGroup = {
+      engine: 'codex', title: 'ChatGPT', ready: true, logged_in: true, problem: '', hints: [],
+      can_login: false, installs_adapter: false, loading: false,
+      models: [{ value: 'base', name: '默认模型', default: true }, { value: 'gpt-6-luna', name: 'GPT-6 Luna' }]
+    }
+    fixture.source.modelGroups = vi.fn(async () => [group])
+    vi.mocked(fixture.source.create).mockRejectedValue(new Error('项目路径不可用'))
+    byClass(root, 'new').props.onClick()
+    await settle()
+    const picker = byClass(root, 'picker')
+    byClass(picker, 'trigger').props.onClick()
+    await settle()
+    const search = byClass(picker, 'model-search')
+    expect(search.props['aria-label']).toBe('搜索模型或厂商')
+    search.props['onUpdate:modelValue']('luna')
+    await settle()
+    const choice = find(picker, (element) => element.tag === 'button' && viewText(element) === 'GPT-6 Luna')!
+    choice.props.onClick()
+    await settle()
+    expect(viewText(byClass(picker, 'trigger'))).toContain('GPT-6 Luna')
+    byClass(picker, 'trigger').props.onClick()
+    await settle()
+    const reload = find(picker, (element) => element.tag === 'button' && viewText(element) === '刷新')!
+    vi.mocked(fixture.source.modelGroups).mockResolvedValueOnce([{ ...group, loading: true, models: [group.models[0]] }])
+    reload.props.onClick()
+    await settle()
+    expect(viewText(byClass(picker, 'trigger'))).toContain('gpt-6-luna')
+    expect(viewText(picker)).toContain('正在获取模型列表…')
+    reload.props.onClick()
+    await settle()
+    const project = find(picker, (element) => element.tag === 'button' && element.props.title === summary().cwd)!
+    await project.props.onClick()
+    await settle()
+    expect(fixture.source.create).toHaveBeenCalledWith(summary().cwd, 'ask', false, null, 'project', 'codex', 'gpt-6-luna', [])
+    expect(find(picker, (element) => element.props.role === 'alert')?.text).toBe('项目路径不可用')
+  })
+  it('新任务的主模型和协作者分别保存，协作者名单随任务打开', async () => {
+    const group = (engine: 'codex' | 'codebuddy', title: string, value: string): ModelGroup => ({
+      engine, title, ready: true, logged_in: true, problem: '', hints: [], can_login: false, installs_adapter: false,
+      loading: false, models: [{ name: title, value }]
+    })
+    fixture.source.modelGroups = vi.fn(async () => [
+      group('codex', 'Codex', 'gpt-6-luna'), group('codebuddy', 'CodeBuddy', 'hy4flash-free')
+    ])
+    const picks: PairPick[] = [{ agent: 'codex', model: 'gpt-6-luna' }, { agent: 'codebuddy', model: 'hy4flash-free' }]
+    const idle = { ...summary(), id: 'team1', collaborators: picks, running: false, events: 1 }
+    vi.mocked(fixture.source.list).mockResolvedValue([idle])
+    vi.mocked(fixture.source.create).mockResolvedValue(idle)
+    vi.mocked(fixture.source.get).mockResolvedValue({
+      ...idle, events: [{ type: 'start', seq: 0, mode: 'ask' }]
+    })
+    byClass(root, 'new').props.onClick()
+    await settle()
+    const picker = byClass(root, 'picker')
+    const team = byClass(picker, 'new-team')
+    for (const label of ['Codex', 'CodeBuddy']) {
+      byClass(team, 'trigger').props.onClick()
+      await settle()
+      find(team, (element) => element.tag === 'button' && viewText(element) === label)!.props.onClick()
+      await settle()
+    }
+    expect(viewText(team)).toContain('Codex')
+    expect(viewText(team)).toContain('CodeBuddy')
+    await find(picker, (element) => element.tag === 'button' && element.props.title === summary().cwd)!.props.onClick()
+    await settle()
+    expect(fixture.source.create).toHaveBeenLastCalledWith(summary().cwd, 'ask', false, null, 'project', null, '', picks)
+    expect(viewText(byClass(root, 'team-roster'))).toContain('主模型先拟分工')
+  })
+})
+
+describe('主任务协作', () => {
+  it('显示接口与负责文件，点击确认后才提交派工', async () => {
+    const proposal = {
+      type: 'pair_proposal', seq: 2, proposal_id: 'p1', contract: '返回 items',
+      acceptance: '前端显示返回的数据', test_file: 'tests/test_flow.py',
+      assignments: [
+        { agent: 'claude', model: '', title: '前端', task: '显示任务', paths: ['frontend.py'] },
+        { agent: 'codex', model: 'gpt-6.2', title: '后端', task: '查询任务', paths: ['backend.py'] }
+      ]
+    }
+    event('s1', proposal)
+    await settle()
+    expect(viewText(root)).toContain('返回 items')
+    expect(viewText(root)).toContain('frontend.py')
+    expect(fixture.source.pair).not.toHaveBeenCalled()
+    const approve = find(root, (item) => item.tag === 'button' && viewText(item) === '确认并派工')!
+    await approve.props.onClick()
+    expect(fixture.source.pair).toHaveBeenCalledWith('s1', {
+      action: 'approve', proposal_id: 'p1',
+      picks: [{ agent: 'claude', model: '' }, { agent: 'codex', model: 'gpt-6.2' }]
+    })
+  })
+})
 
 describe('任务页网页截图', () => {
   it('成功的截图事件可以在原工具卡片里展开预览', async () => {
@@ -248,7 +345,7 @@ describe('电脑任务入口', () => {
     vi.mocked(fixture.source.get).mockResolvedValue(computerSession)
     await byClass(root, 'computer-start').props.onClick()
     await settle()
-    expect(fixture.source.create).toHaveBeenCalledWith(undefined, 'ask', false, null, 'computer', null)
+    expect(fixture.source.create).toHaveBeenCalledWith(undefined, 'ask', false, null, 'computer', null, '', [])
     expect(viewText(byClass(root, 'proj'))).toContain('电脑')
     expect(all(byClass(root, 'mode'), (item) => item.tag === 'option').map(viewText)).toEqual(['只读', '先问再改'])
     expect(find(root, (item) => item.tag === 'section' && item.props.class === 'memory')).toBeUndefined()

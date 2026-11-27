@@ -17,6 +17,9 @@ import { bridge } from '../platform/bridge'
 import { cleanText, groupHistory, timeOf } from './historyView'
 import { chatDraftRequest, chatQueryRequest } from './intents'
 import BrandMark from '../theme/BrandMark.vue'
+import ModelPicker from '../agent/ModelPicker.vue'
+import { AILA, chatPick, chatUpdate, samePick, stillLoading, type ModelPick } from '../agent/models'
+import type { AgentEngine, ModelGroup } from '../../../shared/agent'
 
 const messages = ref<StoredMessage[]>([])
 const query = ref('')
@@ -118,8 +121,59 @@ watch(() => live.value?.text, () => {
   if (nearBottom()) void toBottom()
 })
 
+// 右下角选模型：和任务页同一个按钮；选了存成「对话的大脑」（艾拉自己的、或者这台电脑上的 Codex、Claude Code……）
+const modelGroups = ref<ModelGroup[]>([])
+const chatModel = ref<ModelPick>(AILA)
+const modelNote = ref('')
+let modelsTimer = 0
+let modelsTries = 0
+let loginWatch = ''
+async function loadModels(refresh = false): Promise<void> {
+  if (!bridge) return
+  window.clearTimeout(modelsTimer)
+  const [groups, settings] = await Promise.all([bridge.agentModels('chat', refresh), bridge.aiSettings()])
+  if (groups.ok && groups.data) modelGroups.value = groups.data
+  if (settings.ok && settings.data) chatModel.value = chatPick(settings.data)
+  if (loginWatch && modelGroups.value.find((g) => g.engine === loginWatch)?.logged_in === true) {
+    loginWatch = ''
+    modelNote.value = t('登好了')
+  }
+  if ((stillLoading(modelGroups.value) || loginWatch) && modelsTries++ < 50) modelsTimer = window.setTimeout(() => void loadModels(), 2500)
+  else {
+    modelsTries = 0
+    loginWatch = ''
+  }
+}
+async function pickModel(pick: ModelPick): Promise<void> {
+  if (!bridge || samePick(pick, chatModel.value)) return
+  const update = chatUpdate(pick)
+  if (!update) return
+  const r = await bridge.aiSettingsPut(update)
+  if (r.ok && r.data) {
+    chatModel.value = chatPick(r.data)
+    modelNote.value = t('换好了，从下一句起用它')
+  } else modelNote.value = r.error ?? t('没换成')
+}
+async function loginTo(engine: AgentEngine): Promise<void> {
+  if (!bridge) return
+  const r = await bridge.agentLocalLogin(engine)
+  if (!r.ok) {
+    modelNote.value = r.error ?? t('登录窗口没打开')
+    return
+  }
+  if (modelGroups.value.find((g) => g.engine === engine)?.logged_in === false) loginWatch = engine
+  modelsTries = 0
+  modelNote.value = t('在打开的窗口里登录，登好了这里会自己更新')
+  void loadModels()
+}
+async function installFor(engine: AgentEngine): Promise<void> {
+  const result = await bridge?.agentLocalOpenInstall(engine)
+  if (!result?.ok) modelNote.value = result?.error ?? t('没打开官方安装页。')
+}
+
 onMounted(async () => {
   if (!bridge) return
+  void loadModels()
   offs.push(
     bridge.onHistoryChanged(() => void load()),
     bridge.onChatLive((r) => (live.value = r))
@@ -134,7 +188,10 @@ onActivated(async () => {
   void toBottom()
   input.value?.focus()
 })
-onBeforeUnmount(() => offs.forEach((off) => off()))
+onBeforeUnmount(() => {
+  offs.forEach((off) => off())
+  window.clearTimeout(modelsTimer)
+})
 </script>
 
 <template>
@@ -197,6 +254,17 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
         :placeholder="t('和她说点什么……（Enter 发送，Shift+Enter 换行）')"
         :aria-label="t('和她说的话')"
         @keydown="onKey"
+      />
+      <ModelPicker
+        class="chat-model"
+        :groups="modelGroups"
+        :value="chatModel"
+        :note="modelNote || t('人格、记忆、表情、语音和提醒都照旧；换成本机的 Agent 每句慢几秒')"
+        @open="loadModels()"
+        @refresh="loadModels(true)"
+        @login="loginTo"
+        @install="installFor"
+        @pick="pickModel"
       />
       <button v-if="replying" class="ghost" :title="t('让她别说了')" @click="bridge?.chatStop()">{{ t('停下') }}</button>
       <button class="primary" :disabled="!draft.trim()" @click="send">{{ t('发送') }}</button>
@@ -431,6 +499,10 @@ onBeforeUnmount(() => offs.forEach((off) => off()))
   padding: 10px 18px 14px;
   border-top: 1px solid var(--ui-line);
   background: var(--ui-bg);
+}
+
+.chat-model {
+  align-self: center;
 }
 
 .composer textarea {

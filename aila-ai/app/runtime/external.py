@@ -30,7 +30,7 @@ import acp
 from acp import schema
 
 from ..confirm import Confirmations
-from .localagents import ENGINES, LocalAgentError, launch
+from .localagents import ENGINES, AdapterMissing, LocalAgentError, account_home, account_provider, install_adapters, launch
 from .permissions import Policy
 from .session import Event, Session
 
@@ -97,7 +97,8 @@ class ExternalAgent:
     def __init__(self, session: Session, engine_id: str, policy: Policy, confirms: Confirmations | None,
                  data_dir: Path, spawn: Callable[..., Any] = acp.spawn_agent_process,
                  launcher: Callable[[str, Path], tuple[str, list[str], dict[str, str]]] = launch,
-                 servers: Callable[[], list[dict[str, Any]]] | None = None) -> None:
+                 servers: Callable[[], list[dict[str, Any]]] | None = None,
+                 installer: Callable[..., Any] = install_adapters) -> None:
         if engine_id not in ENGINES:
             raise LocalAgentError(f"不认识的 Agent：{engine_id}")
         self.session = session
@@ -107,6 +108,7 @@ class ExternalAgent:
         self.data_dir = data_dir
         self._spawn = spawn
         self._launch = launcher
+        self._install = installer
         # 给它挂的 MCP 服务（艾拉的派工工具，dispatch.py）：开会话、加载会话时都带上
         self._servers = servers or (lambda: [])
         self._stack: AsyncExitStack | None = None
@@ -142,7 +144,9 @@ class ExternalAgent:
             await self._ensure()
             await self._apply_wanted()  # 上一轮做着的时候你换了模型：这一轮开始前换上
             self._busy = True
-            prompt = (ASK_NOTE if self._fresh and self.engine.ask_note else "") + text
+            coordination = str((extra or {}).get("collaboration_prompt", ""))
+            prefix = (ASK_NOTE if self._fresh and self.engine.ask_note and not coordination else "") + self._handoff_note()
+            prompt = prefix + (coordination + "\n\n" if coordination else "") + text
             self._fresh = False
             task = asyncio.ensure_future(self._conn.prompt(session_id=self._sid,
                                                            prompt=[schema.TextContentBlock(type="text", text=prompt)]))
@@ -176,6 +180,13 @@ class ExternalAgent:
             await self.close()
         for event in self._close(reason, error):
             yield event
+
+    def _handoff_note(self) -> str:
+        """换模型接着做的第一句：前面加上前情（任务页上还是只显示你说的那句）"""
+        handoff = next((e for e in self.session.events if e["type"] == "handoff_in"), None)
+        if handoff is None or sum(1 for e in self.session.events if e["type"] == "user") != 1:
+            return ""
+        return str(handoff.get("recap", "")) + "\n\n"
 
     async def _drain(self, task: "asyncio.Future[Any]") -> AsyncIterator[Event]:
         """它跑这一轮的同时，把回调里攒的事件一个个交出去"""
@@ -293,7 +304,15 @@ class ExternalAgent:
                 await self._connect()
 
     async def _connect(self) -> None:
-        node, args, env = self._launch(self.engine.id, self.data_dir)
+        try:
+            node, args, env = await asyncio.to_thread(self._launch, self.engine.id, self.data_dir)
+        except AdapterMissing:
+            event = self.session.append({"type": "note", "text":
+                                        f"第一次用 {self.engine.title}：先装它的适配器（从 npm 下载，要联网，一两分钟）……"})
+            if self._queue is not None:
+                self._queue.put_nowait(event)
+            await self._install(self.data_dir, engines=[self.engine.id])
+            node, args, env = await asyncio.to_thread(self._launch, self.engine.id, self.data_dir)
         stack = AsyncExitStack()
         try:
             conn, _proc = await stack.enter_async_context(self._spawn(lambda _a: _Bridge(self), node, *args, env=env,
@@ -331,16 +350,27 @@ class ExternalAgent:
         self._stack = stack
 
     async def _configure(self, conn: Any, fresh: bool) -> None:
-        """Codex：只读沙箱（改东西都来请求批准）；Claude Code：每次改动前都问。然后换成你在任务页选的模型这些；
-        新会话你没选过模型时，Codex 用你在 Codex 里设的那个（适配器默认挑的 ChatGPT 账号不一定能用）"""
+        """先设置审批模式，再应用任务页选的模型等选项。"""
         mode = self.engine.ask_mode  # 改东西前都先请求批准的那个模式（localagents.Engine）
-        try:
-            res = await conn.set_config_option(config_id="mode", session_id=self._sid, value=mode)
-            self._record_options(getattr(res, "config_options", None))
-        except acp.RequestError:
-            await conn.set_session_mode(session_id=self._sid, mode_id=mode)
-        if self.engine.id == "codex" and fresh and "model" not in self._wanted():
-            wanted = codex_model()
+        if mode:
+            try:
+                res = await conn.set_config_option(config_id=self.engine.ask_option, session_id=self._sid, value=mode)
+                self._record_options(getattr(res, "config_options", None))
+            except acp.RequestError:
+                if self.engine.ask_option != "mode":
+                    raise
+                await conn.set_session_mode(session_id=self._sid, mode_id=mode)
+        startup = next((e["value"] for e in reversed(self.session.events) if e["type"] == "engine_initial_model"), "")
+        model = next((o for o in self.options if o["category"] == "model"), None)
+        if startup and (not model or model["id"] not in self._wanted()):
+            if not model or not any(c["value"] == startup for c in model["choices"]):
+                raise LocalAgentError(f"{self.engine.title} 当前账号没有模型 {startup}。")
+            if model["current"] != startup:
+                res = await conn.set_config_option(config_id=model["id"], session_id=self._sid, value=startup)
+                self._record_options(getattr(res, "config_options", None))
+            self.session.append({"type": "engine_config", "id": model["id"], "value": startup})
+        if account_provider(self.engine.id) == "codex" and fresh and not startup and "model" not in self._wanted():
+            wanted = codex_model(account_home(self.engine.id, self.data_dir))
             models = [c["value"] for o in self.options if o["id"] == "model" for c in o["choices"]]
             current = next((o["current"] for o in self.options if o["id"] == "model"), None)
             if wanted and wanted in models and wanted != current:

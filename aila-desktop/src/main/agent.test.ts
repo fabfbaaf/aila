@@ -69,7 +69,7 @@ describe('工作窗口的转发（主进程）', () => {
     const { r } = relay()
     await r.create('C:/shop', 'ask', false, 0)
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0, kind: 'project', engine: null })
+      method: 'POST', body: JSON.stringify({ cwd: 'C:/shop', mode: 'ask', isolate: false, budget: 0, kind: 'project', engine: null, model: '' })
     }))
     await r.setBudget('s /1', null)
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions/s%20%2F1/budget', expect.objectContaining({
@@ -83,7 +83,7 @@ describe('工作窗口的转发（主进程）', () => {
     const { r } = relay()
     expect((await r.create(undefined, 'ask', false, null, 'computer')).data?.kind).toBe('computer')
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ mode: 'ask', isolate: false, budget: null, kind: 'computer', engine: null })
+      method: 'POST', body: JSON.stringify({ mode: 'ask', isolate: false, budget: null, kind: 'computer', engine: null, model: '' })
     }))
     await r.computerContext()
     expect(fetchMock).toHaveBeenLastCalledWith('http://ai/agent/computer/context', expect.objectContaining({ method: 'GET' }))

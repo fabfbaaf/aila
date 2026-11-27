@@ -46,6 +46,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await deps.get_scheduler().stop()
     await deps.get_phone_server().stop()
     await deps.stop_mcp()
+    await deps.stop_catalog()
     if deps.get_runtime.cache_info().currsize:  # 正在做的编程任务：打断（日志会补完整，下次可以接着做）
         await deps.get_runtime().shutdown()
     if deps.get_browser.cache_info().currsize:  # 打开过浏览器的话关掉
