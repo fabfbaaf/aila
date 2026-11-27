@@ -284,6 +284,8 @@ def test_detect_finds_programs_and_login(tmp_path: Path) -> None:
     exe.write_text("")
     acp_dir = tmp_path / "acp" / "node_modules" / "@agentclientprotocol"
     for e in localagents.ENGINES.values():
+        if e.native:
+            continue
         script = tmp_path / "acp" / "node_modules" / e.script
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text("")
@@ -432,3 +434,24 @@ def test_usage_limit_is_said_plainly(tmp_path: Path) -> None:
         return [e async for e in h.agent.turn("hi")]
     events = asyncio.run(go())
     assert events[-1]["reason"] == "error" and "额度用完了" in events[-1]["error"]
+
+
+def test_antigravity_is_native_acp(tmp_path: Path) -> None:
+    """Antigravity 自己就会说 ACP：不用 Node、不用适配器，起 agy acp --process-per-session（这样才收 HTTP 的 MCP）"""
+    agy = tmp_path / "agy" / "bin" / "agy.exe"
+    agy.parent.mkdir(parents=True)
+    agy.write_text("")
+    run = lambda args, timeout=0: (0, "1.5.18") if args[1:] == ["--version"] else (0, "")  # noqa: E731
+    found = {a.id: a for a in detect(tmp_path, which=lambda n: None, run=run, local_app_data=str(tmp_path))}
+    a = found["antigravity"]
+    assert a.ready and a.native and a.path == str(agy) and a.logged_in is None and a.version == "1.5.18"
+    program, args, env = localagents.launch("antigravity", tmp_path, which=lambda n: None, local_app_data=str(tmp_path))
+    assert program == str(agy) and args == ["acp", "--process-per-session"]
+
+
+def test_antigravity_tasks_ask_before_changes(tmp_path: Path) -> None:
+    h = Harness(tmp_path, "ask", [("say", "好")], engine="antigravity")
+    asyncio.run(h.turn("hi"))
+    conn = h.conns[0]
+    assert ("config", ("mode", "default")) in conn.calls
+    assert not conn.calls[[c[0] for c in conn.calls].index("prompt")][1].startswith(ASK_NOTE)

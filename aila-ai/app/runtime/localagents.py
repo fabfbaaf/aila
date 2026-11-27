@@ -40,6 +40,17 @@ class Engine:
     install_hint: str
     # 去掉的环境变量：有它们时 Agent 会改用 API 按量计费，而不是你的订阅登录
     drop_env: tuple[str, ...] = ()
+    # 自己就会说 ACP（不用适配器）：直接起它，带上这些参数
+    native: bool = False
+    acp_args: tuple[str, ...] = ()
+    # 「改东西前都先请求批准」是哪个模式：艾拉的权限规则靠它（每个批准请求交给 permissions.Policy）
+    ask_mode: str = "default"
+    # 只读沙箱里要提醒它「要改就请求批准」，不然它直接放弃（Codex）
+    ask_note: bool = False
+    # 当对话的大脑时，艾拉的人格怎么交给它：override 整个换掉 / append 接在它原来的后面
+    persona_mode: str = "append"
+    # 除了 PATH，还在这些地方找（相对 %LOCALAPPDATA%，可以带通配符）：桌面版自带的、官方安装器装的
+    app_paths: tuple[str, ...] = ()
 
 
 ENGINES: dict[str, Engine] = {
@@ -48,12 +59,21 @@ ENGINES: dict[str, Engine] = {
         "@agentclientprotocol/codex-acp/dist/index.js", "CODEX_PATH",
         ("login", "status"), "在终端里运行 codex login，用 ChatGPT 账号登录",
         "先装 Codex：npm install -g @openai/codex", ("OPENAI_API_KEY", "CODEX_API_KEY"),
+        ask_mode="read-only", ask_note=True, app_paths=("OpenAI/Codex/bin/*/codex.exe",),
     ),
     "claude": Engine(
         "claude", "Claude Code", "claude", "@agentclientprotocol/claude-agent-acp", "0.113.0",
         "@agentclientprotocol/claude-agent-acp/dist/index.js", "CLAUDE_CODE_EXECUTABLE",
         ("auth", "status"), "在终端里运行 claude auth login，用官方程序登录",
         "先装 Claude Code：https://claude.com/claude-code", ("ANTHROPIC_API_KEY",),
+        persona_mode="override",
+    ),
+    # Google 的 Antigravity（反重力）命令行：自己就支持 ACP（agy acp）；--process-per-session 才收 HTTP 的 MCP（派工、对话工具要用）
+    "antigravity": Engine(
+        "antigravity", "Antigravity", "agy", "", "", "", "",
+        (), "在终端里运行 agy，用 Google 账号登录一次",
+        "先装 Antigravity 命令行：在 PowerShell 里运行 irm https://antigravity.google/cli/install.ps1 | iex",
+        native=True, acp_args=("acp", "--process-per-session"), app_paths=("agy/bin/agy.exe",),
     ),
 }
 
@@ -68,6 +88,7 @@ class LocalAgent:
     version: str = ""
     logged_in: bool | None = None  # None：问不出来
     adapter: bool = False
+    native: bool = False  # 自己就会说 ACP，不用适配器
     ready: bool = False
     problem: str = ""  # 不能用的原因，写给用户看
     hints: list[str] = field(default_factory=list)
@@ -96,12 +117,10 @@ def _on_path(engine: Engine, which=shutil.which) -> str | None:
 def _app_copies(engine: Engine, local_app_data: str | None = None) -> list[str]:
     """桌面版 Codex 自己带的那份（%LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<版本号>\\codex.exe）：
     它跟着桌面版更新，常常比 npm 装的新——新模型（比如 GPT-6.2）要新的 Codex 才认"""
-    if engine.id != "codex":
-        return []
     base = local_app_data if local_app_data is not None else os.environ.get("LOCALAPPDATA", "")
-    if not base:
+    if not base or not engine.app_paths:
         return []
-    return [str(p) for p in sorted(Path(base, "OpenAI", "Codex", "bin").glob("*/codex.exe"))]
+    return [str(p) for pattern in engine.app_paths for p in sorted(Path(base).glob(pattern))]
 
 
 def _version_key(text: str) -> tuple[int, ...]:
@@ -128,7 +147,10 @@ def _run(args: list[str], timeout: float = CHECK_TIMEOUT) -> tuple[int, str]:
 
 
 def logged_in(engine: Engine, program: str, run=_run) -> bool | None:
-    """问它自己登没登录：codex login status（登录了退出码 0）；claude auth status（JSON 里的 loggedIn）"""
+    """问它自己登没登录：codex login status（登录了退出码 0）；claude auth status（JSON 里的 loggedIn）。
+    没有这种命令的（Antigravity）问不出来，开会话时没登录它会说"""
+    if not engine.login_cmd:
+        return None
     code, out = run([program, *engine.login_cmd])
     if engine.id == "claude":
         try:
@@ -148,7 +170,8 @@ def detect(data_dir: Path, which=shutil.which, run=_run, local_app_data: str | N
     for engine in ENGINES.values():
         info = LocalAgent(engine.id, engine.title)
         info.path = find_program(engine, which, run, local_app_data)
-        info.adapter = (root / engine.script).is_file()
+        info.native = engine.native
+        info.adapter = engine.native or (root / engine.script).is_file()
         if not info.path:
             info.problem = f"没找到 {engine.title}"
             info.hints.append(engine.install_hint)
@@ -160,13 +183,15 @@ def detect(data_dir: Path, which=shutil.which, run=_run, local_app_data: str | N
         if info.logged_in is False:
             info.problem = f"{engine.title} 还没登录"
             info.hints.append(engine.login_hint)
-        if not node:
+        if engine.native:
+            pass  # 自己就会说 ACP：不用 Node、不用适配器
+        elif not node:
             info.problem = info.problem or "没找到 Node.js（适配器要用）"
             info.hints.append("装一个 Node.js：https://nodejs.org")
         elif not info.adapter:
             info.problem = info.problem or "还没装适配器"
             info.hints.append("在 设置 → 编程 → 本机 Agent 里点「装适配器」")
-        info.ready = bool(info.path and node and info.adapter and info.logged_in is not False)
+        info.ready = bool(info.path and (engine.native or (node and info.adapter)) and info.logged_in is not False)
         out.append(info)
     return out
 
@@ -178,9 +203,11 @@ def launch(engine_id: str, data_dir: Path, which=shutil.which, local_app_data: s
         raise LocalAgentError(f"不认识的 Agent：{engine_id}")
     node = which("node")
     program = find_program(engine, which, local_app_data=local_app_data)
-    script = adapters_dir(data_dir) / "node_modules" / engine.script
     if not program:
         raise LocalAgentError(f"没找到 {engine.title}。{engine.install_hint}")
+    if engine.native:
+        return program, list(engine.acp_args), {k: v for k, v in os.environ.items() if k not in engine.drop_env}
+    script = adapters_dir(data_dir) / "node_modules" / engine.script
     if not node:
         raise LocalAgentError("没找到 Node.js，适配器跑不起来。装一个 Node.js 再试。")
     if not script.is_file():
@@ -200,7 +227,7 @@ async def install_adapters(data_dir: Path, which=shutil.which) -> str:
     manifest = root / "package.json"
     if not manifest.exists():
         manifest.write_text('{"private": true}\n', encoding="utf-8")
-    packages = [f"{e.package}@{e.version}" for e in ENGINES.values()]
+    packages = [f"{e.package}@{e.version}" for e in ENGINES.values() if not e.native]
     proc = await asyncio.create_subprocess_exec(
         npm, "install", "--omit=optional", "--no-audit", "--no-fund", *packages,
         cwd=str(root), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

@@ -1293,7 +1293,7 @@ onBeforeUnmount(() => {
           <label v-for="a in localAgents" :key="a.id" :class="{ on: newEngine === a.id, off: !a.ready }" :title="a.ready ? a.version : a.problem">
             <input v-model="newEngine" type="radio" :value="a.id" name="task-engine" :disabled="!a.ready" />{{ a.title }}
           </label>
-          <span v-if="localChecking" class="dim engine-checking">{{ tr('正在找本机的 Codex、Claude Code…') }}</span>
+          <span v-if="localChecking" class="dim engine-checking">{{ tr('正在找本机的编程 Agent…') }}</span>
         </fieldset>
         <p v-if="newKind === 'project' && engineNote" class="dim engine-note">{{ engineNote }}</p>
         <label v-if="newKind === 'project'" class="isolate" :class="{ on: newIsolate }">

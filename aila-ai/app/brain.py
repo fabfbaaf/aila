@@ -191,7 +191,7 @@ class AgentBrain:
                 await stack.aclose()
                 raise
             self._stack, self._conn = stack, conn
-        mode = "override" if self.engine.id == "claude" else "append"  # Codex 只能接在它原来的后面
+        mode = self.engine.persona_mode  # Claude Code 整个换掉；Codex、Antigravity 只能接在它原来的后面
         servers = []
         if self.base_url:
             servers.append(schema.HttpMcpServer(type="http", name=SERVER_NAME, url=f"{self.base_url}/chat/bridge",
@@ -210,7 +210,7 @@ class AgentBrain:
         # 只读：Codex 开在只读沙箱，Claude Code 每次改动前都问（问了也不批）
         try:
             await self._conn.set_config_option(config_id="mode", session_id=self._sid,
-                                               value="read-only" if self.engine.id == "codex" else "default")
+                                               value=self.engine.ask_mode)
         except acp.RequestError:
             pass
 

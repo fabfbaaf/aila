@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 设置 → 编程 →「本机 Agent」：这台电脑上的 Codex、Claude Code 能不能交活。
+ * 设置 → 编程 →「本机 Agent」：这台电脑上的 Codex、Claude Code、Antigravity 能不能交活。
  * 艾拉自己去找（PATH 里的程序、它们自己的登录状态），登录要你在终端里用它们的官方程序做，艾拉不经手账号。
  * 和它们说话要一个 ACP 适配器（Node 程序）：点「装适配器」才下载，不带它们自带的 Codex / Claude，用你装好的。
  */
@@ -44,7 +44,7 @@ async function install(): Promise<void> {
   }
 }
 
-const needsAdapter = (): boolean => agents.value.some((a) => a.path && !a.adapter)
+const needsAdapter = (): boolean => agents.value.some((a) => a.path && !a.native && !a.adapter)
 
 onMounted(check)
 </script>
@@ -53,7 +53,7 @@ onMounted(check)
   <div class="card" :aria-busy="checking || installing">
     <h3>{{ t('本机 Agent') }}</h3>
     <p class="hint">
-      {{ t('开新任务时可以交给这台电脑上的 Codex 或 Claude Code 做：用你自己的账号和额度，进度、改动、要你同意的操作都在任务页里。它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。') }}
+      {{ t('开新任务时可以交给这台电脑上的 Codex、Claude Code 或 Antigravity 做：用你自己的账号和额度，进度、改动、要你同意的操作都在任务页里。它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。') }}
     </p>
     <ul class="list">
       <li v-for="a in agents" :key="a.id" :class="{ off: !a.ready }">
@@ -64,14 +64,15 @@ onMounted(check)
             <template v-else>{{ t('没找到') }}</template>
             <template v-if="a.logged_in === true"> · {{ t('已登录') }}</template>
             <template v-else-if="a.logged_in === false"> · {{ t('没登录') }}</template>
-            <template v-if="a.path"> · {{ a.adapter ? t('适配器装好了') : t('还没装适配器') }}</template>
+            <template v-if="a.path && a.native"> · {{ t('自己就支持 ACP，不用适配器') }}</template>
+            <template v-else-if="a.path"> · {{ a.adapter ? t('适配器装好了') : t('还没装适配器') }}</template>
           </span>
           <span v-if="a.problem" class="problem">{{ a.problem }}<template v-for="h in a.hints" :key="h">：{{ h }}</template></span>
         </div>
         <span class="tag" :class="a.ready ? 'good' : 'warn'">{{ a.ready ? t('能用') : t('还不能用') }}</span>
       </li>
     </ul>
-    <p v-if="checking && !agents.length" class="hint">{{ t('正在找本机的 Codex、Claude Code…') }}</p>
+    <p v-if="checking && !agents.length" class="hint">{{ t('正在找本机的编程 Agent…') }}</p>
     <div class="row">
       <button class="btn" :disabled="checking" @click="check">{{ checking ? t('正在检查…') : t('重新检查') }}</button>
       <button v-if="needsAdapter()" class="btn primary" :disabled="installing" @click="install">

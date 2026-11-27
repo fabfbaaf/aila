@@ -142,7 +142,7 @@ class ExternalAgent:
             await self._ensure()
             await self._apply_wanted()  # 上一轮做着的时候你换了模型：这一轮开始前换上
             self._busy = True
-            prompt = (ASK_NOTE if self._fresh and self.engine.id == "codex" else "") + text
+            prompt = (ASK_NOTE if self._fresh and self.engine.ask_note else "") + text
             self._fresh = False
             task = asyncio.ensure_future(self._conn.prompt(session_id=self._sid,
                                                            prompt=[schema.TextContentBlock(type="text", text=prompt)]))
@@ -329,7 +329,7 @@ class ExternalAgent:
     async def _configure(self, conn: Any, fresh: bool) -> None:
         """Codex：只读沙箱（改东西都来请求批准）；Claude Code：每次改动前都问。然后换成你在任务页选的模型这些；
         新会话你没选过模型时，Codex 用你在 Codex 里设的那个（适配器默认挑的 ChatGPT 账号不一定能用）"""
-        mode = "read-only" if self.engine.id == "codex" else "default"
+        mode = self.engine.ask_mode  # 改东西前都先请求批准的那个模式（localagents.Engine）
         try:
             res = await conn.set_config_option(config_id="mode", session_id=self._sid, value=mode)
             self._record_options(getattr(res, "config_options", None))
