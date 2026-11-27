@@ -293,6 +293,18 @@ def memory_forget_episodes(store: MemoryStore = Depends(get_memory_store)) -> di
 # ---------- 对话的大脑是本机 Agent 时：艾拉的工具用 MCP 挂给它（app/brain.py） ----------
 
 
+@router.get("/chat/brain/models")
+async def chat_brain_models() -> list[dict[str, Any]]:
+    """对话的大脑（本机 Agent）有哪些模型：设置页的下拉。还没开过会话时它要先起来，几秒"""
+    brain = deps.get_chat_brain()
+    if brain is None:
+        raise HTTPException(status_code=409, detail="对话的大脑现在是填的大模型，没有可选的本机模型")
+    try:
+        return await brain.models()
+    except (BrainError, LocalAgentError) as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+
+
 @router.post("/chat/bridge")
 async def chat_bridge(request: Request) -> Response:
     """最小的 MCP（只回 JSON）：tools/list 是这次对话能用的工具，tools/call 交回对话流程去确认、执行"""

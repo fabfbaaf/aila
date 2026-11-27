@@ -2,7 +2,7 @@
 import { t } from '../../i18n'
 import { onActivated, ref } from 'vue'
 import type { AiSettings, AiSettingsUpdate, ChatBrain } from '../../../../shared/settings'
-import type { LocalAgentInfo } from '../../../../shared/agent'
+import type { EngineOption, LocalAgentInfo } from '../../../../shared/agent'
 import { bridge } from '../../platform/bridge'
 import AgendaCard from './AgendaCard.vue'
 
@@ -30,8 +30,30 @@ async function loadAgents(): Promise<void> {
   const res = await api.agentLocal()
   localAgents.value = res.ok && res.data ? res.data : []
 }
+// 选了本机 Agent 当大脑：它有哪些模型（它要先起来，几秒）
+const brainModel = ref('')
+const brainModels = ref<EngineOption['choices']>([])
+const modelsLoading = ref(false)
+async function loadBrainModels(): Promise<void> {
+  if (!settings.value?.chatBrain) {
+    brainModels.value = []
+    return
+  }
+  modelsLoading.value = true
+  const res = await api.aiBrainModels()
+  modelsLoading.value = false
+  const option = res.ok && res.data ? res.data[0] : undefined
+  brainModels.value = option?.choices ?? []
+  if (!brainModel.value && option) brainModel.value = option.current
+  if (!res.ok) brainMsg.value = { ok: false, text: res.error ?? t('没问到它有哪些模型') }
+}
 async function saveBrain(): Promise<void> {
-  await save({ chatBrain: brain.value }, brainMsg)
+  const changedEngine = brain.value !== (settings.value?.chatBrain ?? '')
+  const ok = await save(changedEngine ? { chatBrain: brain.value, chatBrainModel: '' } : { chatBrainModel: brainModel.value }, brainMsg)
+  if (ok && changedEngine) {
+    brainModel.value = ''
+    void loadBrainModels()
+  }
 }
 const busy = ref(false)
 
@@ -46,6 +68,7 @@ async function load(): Promise<void> {
   offline.value = ''
   fill(res.data)
   void loadAgents()
+  void loadBrainModels()
 }
 
 function fill(s: AiSettings): void {
@@ -56,6 +79,7 @@ function fill(s: AiSettings): void {
   coderFastModel.value = s.llm.coderFastModel ?? ''
   provider.value = s.search.provider
   brain.value = s.chatBrain ?? ''
+  brainModel.value = s.chatBrainModel ?? ''
   apiKey.value = ''
   searchKey.value = ''
 }
@@ -182,9 +206,16 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
           </option>
         </select>
       </div>
+      <div v-if="brain && brain === settings.chatBrain" class="row">
+        <span class="label">{{ t('模型') }}</span>
+        <select v-model="brainModel" :disabled="modelsLoading || !brainModels.length">
+          <option v-if="!brainModels.length" value="">{{ modelsLoading ? t('正在问它有哪些模型…') : t('它的默认') }}</option>
+          <option v-for="c in brainModels" :key="c.value" :value="c.value">{{ c.name }}</option>
+        </select>
+      </div>
       <p v-if="brain" class="hint">{{ t('本机 Agent 每说一句要几秒钟，比上面的大模型慢；语音第一句也会晚一点出来。') }}</p>
       <div class="actions">
-        <button class="btn primary" :disabled="busy || brain === (settings.chatBrain ?? '')" @click="saveBrain">{{ t('保存') }}</button>
+        <button class="btn primary" :disabled="busy || (brain === (settings.chatBrain ?? '') && brainModel === (settings.chatBrainModel ?? ''))" @click="saveBrain">{{ t('保存') }}</button>
         <span v-if="brainMsg" class="msg" :class="brainMsg.ok ? 'ok' : 'error'">{{ brainMsg.text }}</span>
       </div>
     </div>

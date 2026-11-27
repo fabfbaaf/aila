@@ -49,6 +49,7 @@ def read() -> dict[str, Any]:
         "language": s.language,
         # 对话的大脑：空 = 上面的大模型；codex / claude = 本机的 Codex / Claude Code
         "chatBrain": s.chat_brain,
+        "chatBrainModel": s.chat_brain_model,
         "voice": {
             "enabled": s.voice,
             "ttsEngine": s.tts_engine,
@@ -84,6 +85,7 @@ class SettingsUpdate(BaseModel):
     personaCatchphrase: str | None = Field(default=None, max_length=12)
     language: Literal["zh", "en"] | None = None
     chatBrain: Literal["", "codex", "claude"] | None = None
+    chatBrainModel: str | None = Field(default=None, max_length=100, pattern=r"^[\w.\[\]:/-]*$")
     searchProvider: Literal["bocha", "tavily", "none"] | None = None
     searchApiKey: str | None = Field(default=None, max_length=300)
     ttsEngine: Literal["melo", "kokoro", "matcha"] | None = None
@@ -145,7 +147,7 @@ ENV_NAMES = {
     "llmBaseUrl": "LLM_BASE_URL", "llmModel": "LLM_MODEL", "llmApiKey": "LLM_API_KEY",
     "coderModel": "AILA_CODER_MODEL", "coderFastModel": "AILA_CODER_FAST_MODEL",
     "computerInventory": "AILA_COMPUTER_INVENTORY",
-    "personaStyle": "AILA_PERSONA_STYLE", "personaCall": "AILA_PERSONA_CALL", "personaCatchphrase": "AILA_PERSONA_CATCHPHRASE", "language": "AILA_LANGUAGE", "chatBrain": "AILA_CHAT_BRAIN",
+    "personaStyle": "AILA_PERSONA_STYLE", "personaCall": "AILA_PERSONA_CALL", "personaCatchphrase": "AILA_PERSONA_CATCHPHRASE", "language": "AILA_LANGUAGE", "chatBrain": "AILA_CHAT_BRAIN", "chatBrainModel": "AILA_CHAT_BRAIN_MODEL",
     "searchProvider": "SEARCH_PROVIDER", "searchApiKey": "SEARCH_API_KEY",
     "calendarUrl": "AILA_CALENDAR_URL", "mailUser": "AILA_MAIL_USER", "mailPass": "AILA_MAIL_PASS", "mailHost": "AILA_MAIL_HOST",
     "ttsEngine": "AILA_TTS_ENGINE", "ttsSpeaker": "AILA_TTS_SPEAKER", "ttsSpeed": "AILA_TTS_SPEED",

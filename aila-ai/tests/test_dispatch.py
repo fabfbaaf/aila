@@ -70,7 +70,7 @@ def test_helper_approvals_and_finish_show_up_in_the_lead_task(tmp_path: Path) ->
     events = rt.store.get(parent).events
     confirm = next(e for e in events if e["type"] == "confirm")
     assert confirm["id"] == "c9" and confirm["call_id"] == f"sub-{cid}-x1"  # 在主任务里点同意，答的就是助手那边的
-    assert confirm["action"].startswith("Codex（后端）：")
+    assert confirm["action"] == "让 Codex（后端）运行命令 npm test"
     assert any(e["type"] == "confirm_end" and e["id"] == "c9" for e in events)
     assert any(e["type"] == "note" and "做完了" in e["text"] for e in events)
 
@@ -156,3 +156,12 @@ def test_own_tools_are_recognised_but_commands_are_not() -> None:
     assert _own_tool("mcp.aila.wait_work") and _own_tool("mcp__aila__delegate")
     assert not _own_tool("mcp.aila.rm_everything") and not _own_tool("mcp.other.delegate") and not _own_tool("rm -rf x")
     assert ExternalAgent  # 引用一下：桥接工具的放行在 test_external_agent 里测
+
+
+def test_helper_of_the_same_kind_keeps_the_leads_model(tmp_path: Path) -> None:
+    rt, parent, _ = setup(tmp_path)
+    rt.store.get(parent).append({"type": "engine_config", "id": "model", "value": "sonnet"})
+    same = child_of(rt, asyncio.run(rt.dispatch.call(parent, "delegate", {"agent": "claude", "title": "前端", "task": "t"})))
+    other = child_of(rt, asyncio.run(rt.dispatch.call(parent, "delegate", {"agent": "codex", "title": "后端", "task": "t"})))
+    assert [(e["id"], e["value"]) for e in rt.store.get(same).events if e["type"] == "engine_config"] == [("model", "sonnet")]
+    assert not [e for e in rt.store.get(other).events if e["type"] == "engine_config"]

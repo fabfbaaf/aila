@@ -149,6 +149,11 @@ class Dispatch:
         except Exception as err:  # 不是 git 仓库、开分支失败
             raise DispatchError(f"派不出去：{err}") from err
         self.rt.rename(child.id, f"{title}（{ENGINES[agent].title}）")
+        if parent.events[0].get("engine") == agent:
+            # 派给同一种 Agent：沿用主任务里选的模型、思考深度这些（不然用它的默认，可能是最贵的那个）
+            for e in parent.events:
+                if e["type"] == "engine_config":
+                    child.append({"type": "engine_config", "id": e["id"], "value": e["value"]})
         self.rt.start(child.id, task)
         branch = (child.branch or {}).get("branch", "")
         self._note(parent_sid, f"派给 {ENGINES[agent].title}：「{title}」，在分支 {branch} 的独立工作区里做")
@@ -282,7 +287,7 @@ class Dispatch:
         if kind == "confirm":
             copy = {k: v for k, v in event.items() if k not in ("seq", "t")}
             copy["call_id"] = f"sub-{sid}-{event.get('call_id', '')}"
-            copy["action"] = f"{name}：{event.get('action', '')}"
+            copy["action"] = f"让 {name}{event.get('action', '')}"  # 卡片上念成「要让 Codex（后端）运行命令 …，可以吗？」
             self._append(parent_sid, copy)
         elif kind == "confirm_end":
             self._append(parent_sid, {k: v for k, v in event.items() if k not in ("seq", "t")})

@@ -55,9 +55,12 @@ class FakeConn:
         if self.fail:
             raise self.fail
         self.sessions.append({"servers": mcp_servers, "system": system_prompt})
-        return schema.NewSessionResponse(session_id=f"s{len(self.sessions)}")
+        model = schema.SessionConfigOptionSelect(id="model", name="Model", category="model", type="select", current_value="big",
+                                                 options=[schema.SessionConfigSelectOption(value=v, name=v) for v in ("big", "luna")])
+        return schema.NewSessionResponse(session_id=f"s{len(self.sessions)}", config_options=[model])
 
     async def set_config_option(self, **kw: Any) -> Any:
+        self.configs = getattr(self, "configs", []) + [(kw.get("config_id"), kw.get("value"))]
         return schema.SetSessionConfigOptionResponse(config_options=[])
 
     async def cancel(self, session_id: str, **kw: Any) -> None:
@@ -199,3 +202,31 @@ def test_settings_choose_the_brain(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setattr(deps, "_brains", {})
     brain = deps.get_chat_brain()
     assert isinstance(brain, AgentBrain) and brain.name == "Claude Code" and deps.get_chat_brain() is brain
+
+
+def test_brain_uses_the_model_chosen_in_settings(tmp_path: Path) -> None:
+    wanted = {"model": "luna"}
+    brain, conns = make(tmp_path, [("say", "好")])
+    brain._model = lambda: wanted["model"]
+
+    async def go() -> list:
+        models = await brain.models()  # 设置页的下拉：还没聊过也能问
+        await collect(brain, convo("你好"))
+        wanted["model"] = "big"  # 聊着聊着在设置里换回来
+        await collect(brain, convo("你好", "好", "再说一句"))
+        return models
+
+    models = asyncio.run(go())
+    assert [c["value"] for c in models[0]["choices"]] == ["big", "luna"] and models[0]["current"] == "luna"
+    assert ("model", "luna") in conns[0].configs and conns[0].configs[-1] == ("model", "big")
+
+
+def test_untitled_approval_uses_the_name_from_the_tool_start(tmp_path: Path) -> None:
+    """Codex 请求批准时常常不带标题，只带编号：用工具开始时报的名字认"""
+    brain, _ = make(tmp_path, [])
+    brain._specs = [{"name": "set_reminder"}]
+    brain.on_update(schema.ToolCallStart(tool_call_id="t1", title="mcp.aila_chat.set_reminder", kind="other"))
+    opts = [schema.PermissionOption(option_id="y", name="y", kind="allow_once"),
+            schema.PermissionOption(option_id="n", name="n", kind="reject_once")]
+    assert brain.on_permission(schema.ToolCallUpdate(tool_call_id="t1", kind="execute"), opts).outcome.option_id == "y"
+    assert brain.on_permission(schema.ToolCallUpdate(tool_call_id="t2", kind="execute"), opts).outcome.option_id == "n"

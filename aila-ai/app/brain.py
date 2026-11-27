@@ -28,7 +28,8 @@ import acp
 from acp import schema
 
 from .llm import Message, ToolCall
-from .runtime.localagents import ENGINES, LocalAgentError, launch
+from .runtime.external import _options_of
+from .runtime.localagents import ENGINES, launch
 
 log = logging.getLogger("aila.brain")
 
@@ -71,7 +72,8 @@ class AgentBrain:
 
     def __init__(self, engine_id: str, data_dir: Path, base_url: str | None,
                  spawn: Callable[..., Any] = acp.spawn_agent_process,
-                 launcher: Callable[[str, Path], tuple[str, list[str], dict[str, str]]] = launch) -> None:
+                 launcher: Callable[[str, Path], tuple[str, list[str], dict[str, str]]] = launch,
+                 model: Callable[[], str] = lambda: "") -> None:
         if engine_id not in ENGINES:
             raise BrainError(f"不认识的 Agent：{engine_id}")
         self.engine = ENGINES[engine_id]
@@ -80,6 +82,8 @@ class AgentBrain:
         self.base_url = base_url
         self.token = secrets.token_urlsafe(32)
         self._spawn, self._launch = spawn, launcher
+        self._model = model  # 设置里选的模型（空 = 它自己的默认）
+        self.options: list[dict[str, Any]] = []  # 它给的模型（开会话时拿到）
         self._stack: AsyncExitStack | None = None
         self._conn: Any = None
         self._sid = ""
@@ -89,6 +93,7 @@ class AgentBrain:
         self._queue: asyncio.Queue[Any] | None = None
         self._turn: asyncio.Future[Any] | None = None
         self._pending: dict[str, asyncio.Future[str]] = {}
+        self._titles: dict[str, str] = {}  # 它的工具调用编号 → 名字（批准请求里可能不带名字）
         self._n = 0
         self._lock = asyncio.Lock()
 
@@ -138,6 +143,7 @@ class AgentBrain:
                 await self._open(system, signature)
                 prompt = _recap(messages) + last
             else:
+                await self._apply_model()  # 聊着聊着在设置里换了模型
                 prompt = last
             self._said_users = users
             self._queue = asyncio.Queue()
@@ -199,12 +205,32 @@ class AgentBrain:
             await self.close()
             raise BrainError(_friendly(self.name, str(err))) from err
         self._sid, self._signature = res.session_id, signature
+        self.options = [o for o in _options_of(getattr(res, "config_options", None)) if o["category"] == "model"]
+        await self._apply_model()
         # 只读：Codex 开在只读沙箱，Claude Code 每次改动前都问（问了也不批）
         try:
             await self._conn.set_config_option(config_id="mode", session_id=self._sid,
                                                value="read-only" if self.engine.id == "codex" else "default")
         except acp.RequestError:
             pass
+
+    async def _apply_model(self) -> None:
+        wanted = self._model()
+        for o in self.options:
+            if wanted and wanted != o["current"] and wanted in [c["value"] for c in o["choices"]]:
+                try:
+                    await self._conn.set_config_option(config_id=o["id"], session_id=self._sid, value=wanted)
+                    o["current"] = wanted
+                except acp.RequestError:
+                    pass  # 它不认这个模型了：用它现在的
+
+    async def models(self) -> list[dict[str, Any]]:
+        """它有哪些模型（设置页的下拉）：还没开过会话就先开一个问它"""
+        async with self._lock:
+            if not self.options:
+                await self._open("", "")
+        wanted = self._model()
+        return [{**o, "current": wanted or o["current"]} for o in self.options]
 
     async def close(self) -> None:
         stack, self._stack, self._conn = self._stack, None, None
@@ -217,7 +243,12 @@ class AgentBrain:
     # ---------- 它说的话、它要的权限、它调艾拉的工具 ----------
 
     def on_update(self, update: Any) -> None:
-        if self._queue is None or getattr(update, "session_update", "") != "agent_message_chunk":
+        kind = getattr(update, "session_update", "")
+        if kind in ("tool_call", "tool_call_update") and getattr(update, "title", None):
+            # 记下工具的名字：Codex 请求批准时常常不带标题，只带编号
+            self._titles[str(getattr(update, "tool_call_id", ""))] = str(update.title)
+            return
+        if self._queue is None or kind != "agent_message_chunk":
             return
         text = getattr(getattr(update, "content", None), "text", None)
         if text:
@@ -225,12 +256,14 @@ class AgentBrain:
 
     def on_permission(self, tool_call: Any, options: list[Any]) -> Any:
         """对话里不让它改东西、跑命令；只有调艾拉给它的工具放行（工具自己要确认的，run_agent 会问你）"""
-        title = str(getattr(tool_call, "title", "") or "")
+        title = str(getattr(tool_call, "title", "") or self._titles.get(str(getattr(tool_call, "tool_call_id", "")), ""))
         names = {s["name"] for s in self._specs}
         own = any(title.startswith(p) and title[len(p):] in names for p in (f"mcp.{SERVER_NAME}.", f"mcp__{SERVER_NAME}__"))
         raw = getattr(tool_call, "raw_input", None)
         command = isinstance(raw, dict) and (raw.get("command") or raw.get("cmd"))
         wanted = "allow_once" if own and not command else "reject_once"
+        if wanted == "reject_once":
+            log.info("对话里没批 %s 的请求：%r（%s）", self.name, title[:120], getattr(tool_call, "kind", ""))
         option = next((o for o in options if str(o.kind) == wanted), None)
         if option is None:
             return schema.RequestPermissionResponse(outcome=schema.DeniedOutcome(outcome="cancelled"))

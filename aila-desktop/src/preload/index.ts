@@ -344,6 +344,8 @@ const api = {
   aiSettings: (): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings'),
   aiSettingsPut: (update: AiSettingsUpdate): Promise<AiResult<AiSettings>> => ipcRenderer.invoke('ai:settings:put', update),
   aiSettingsTest: (): Promise<AiResult<{ ok: boolean; message: string }>> => ipcRenderer.invoke('ai:settings:test'),
+  /** 对话的大脑（本机 Agent）有哪些模型 */
+  aiBrainModels: (): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('ai:brain-models'),
   /** 技能包列表（带上用户的开关）；AI 服务没开时是 null */
   skillsList: (): Promise<SkillInfo[] | null> => ipcRenderer.invoke('skills:list'),
   skillsSet: (id: string, on: boolean): void => ipcRenderer.send('skills:set', id, on),

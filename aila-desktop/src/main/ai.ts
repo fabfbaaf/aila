@@ -1,4 +1,5 @@
 // 主进程调用本地 AI 服务的几个接口：设置、资料库、技能包、看屏幕的状态。对话和语音合成在 index.ts 里
+import type { EngineOption } from '../shared/agent'
 import { readFile, stat } from 'fs/promises'
 import { basename } from 'path'
 import type { KnowledgeAddResult, KnowledgeDoc, MemoryEpisode, SkillInfo, SkillOverrides } from '../shared/cloud'
@@ -125,6 +126,11 @@ export function putAiSettings(aiUrl: string, update: AiSettingsUpdate): Promise<
     })
     return (await json<{ settings: AiSettings }>(res)).settings
   })
+}
+
+/** 对话的大脑（本机 Agent）有哪些模型：它还没起来的话要等几秒 */
+export function brainModels(aiUrl: string): Promise<AiResult<EngineOption[]>> {
+  return attempt(async () => json<EngineOption[]>(await fetch(`${aiUrl}/chat/brain/models`, { signal: AbortSignal.timeout(120_000) })))
 }
 
 export function testLlm(aiUrl: string): Promise<AiResult<{ ok: boolean; message: string }>> {

@@ -38,6 +38,7 @@ import {
   listSkills,
   putAiSettings,
   testLlm,
+  brainModels,
   getPhone,
   setPhone,
   newPhonePairing,
@@ -1407,6 +1408,7 @@ function registerIpc(): void {
     return res
   })
   ipcMain.handle('ai:settings:test', (e) => (fromMainWindow(e) ? testLlm(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('ai:brain-models', (e) => (fromMainWindow(e) ? brainModels(AI_URL) : MAIN_ONLY))
   ipcMain.handle('skills:list', () => listSkills(AI_URL, account?.skillOverrides() ?? {}))
   ipcMain.on('skills:set', (e, id: string, on: boolean) => {
     if (!fromMainWindow(e)) return

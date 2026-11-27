@@ -102,7 +102,8 @@ def get_chat_brain() -> Any:
     if engine not in _brains:
         from .brain import AgentBrain
 
-        _brains[engine] = AgentBrain(engine, settings.data_dir, f"http://{settings.host}:{settings.port}")
+        _brains[engine] = AgentBrain(engine, settings.data_dir, f"http://{settings.host}:{settings.port}",
+                                     model=lambda: settings.chat_brain_model)
     return _brains[engine]
 
 
