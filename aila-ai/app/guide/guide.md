@@ -43,13 +43,13 @@
 子 Agent 没法问你，所以要问的命令它不跑（写进报告由她来跑）；只读模式不能派人改代码。只在 git 仓库里能用。
 另有「查资料的助手」（explore）：要翻很多文件的问题她派只读的助手去查，只拿回报告。
 
-## 交给本机的 Codex、Claude Code
+## 交给本机的 Codex、Claude Code、Antigravity、CodeBuddy
 
-新任务时「谁来做？」选 Codex 或 Claude Code：用这台电脑上装好的它们、你自己的账号和额度，进度、改动、要你同意的操作都在任务页里，能停下、能接着上次说。
+新任务时「谁来做？」选 Codex、Claude Code、Antigravity（Google 的反重力）或 CodeBuddy（腾讯的，WorkBuddy 同一个账号）：用这台电脑上装好的它们、你自己的账号和额度，进度、改动、要你同意的操作都在任务页里，能停下、能接着上次说。
 它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。任务页顶上能换它的模型、思考深度、快速模式（换了下一句起生效，重启后还是你选的）。出方案、审查改动、压缩上下文直接跟它说。
 它们还能互相派活：比如选 Claude Code，说「前端你做，后端交给 Codex」，它用艾拉给的派工工具把后端派给 Codex，Codex 在独立的 git 分支里做（任务列表里标着「派出的」），它要你同意的操作也出现在主任务里；做完由主 Agent 合并回来，合并前跑测试、有冲突不合并，按权限模式问你。
-平时聊天也能交给它们想：设置 → 对话 →「对话的大脑」（page=settings, section=model）选本机的 Codex 或 Claude Code，人格、记忆、表情、语音和提醒这些工具都照旧，只是每句慢几秒。
-要先：装好它们并登录（终端里 codex login、claude auth login），在 设置 → 编程 → 本机 Agent（page=settings, section=agent）点「装适配器」（要 Node.js）。那里会显示找没找到、登没登录。
+平时聊天也能交给它们想：设置 → 对话 →「对话的大脑」（page=settings, section=model）选本机的 Agent，人格、记忆、表情、语音和提醒这些工具都照旧，只是每句慢几秒。
+要先：装好它们并登录（终端里 codex login、claude auth login、agy、codebuddy.cmd），Codex 和 Claude Code 还要在 设置 → 编程 → 本机 Agent（page=settings, section=agent）点「装适配器」（要 Node.js）；Antigravity、CodeBuddy 自己就能接，不用装。那里会显示找没找到、登没登录。
 
 ## 定时任务
 

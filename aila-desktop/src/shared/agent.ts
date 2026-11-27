@@ -72,7 +72,7 @@ export interface AgentSessionSummary {
 }
 
 /** 本机的编程 Agent（通过 ACP 适配器接进来，见 aila-ai/app/runtime/localagents.py） */
-export type AgentEngine = 'codex' | 'claude' | 'antigravity'
+export type AgentEngine = 'codex' | 'claude' | 'antigravity' | 'codebuddy'
 
 /** 本机 Agent 能换的一个设置（模型、思考深度、快速模式）：权限模式由艾拉管，不在里面 */
 export interface EngineOption {
@@ -93,7 +93,7 @@ export interface LocalAgentInfo {
   /** null：问不出来 */
   logged_in: boolean | null
   adapter: boolean
-  /** 自己就会说 ACP，不用适配器（Antigravity） */
+  /** 自己就会说 ACP，不用适配器（Antigravity、CodeBuddy） */
   native?: boolean
   ready: boolean
   /** 不能用的原因（给你看的） */

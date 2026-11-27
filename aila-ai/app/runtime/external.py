@@ -402,12 +402,13 @@ class ExternalAgent:
         if not call_id or call_id in self._tools:
             self._tool_update(update)
             return
-        kind = str(getattr(update, "kind", "") or "other")
+        kind = _kind_of(update)
         title = _short(str(getattr(update, "title", "") or ""), self.root)
         name = TOOL_NAMES.get(kind, "run_command" if kind == "execute" else "tool")
         args = _tool_args(name, update, self.root)
+        raw = getattr(update, "raw_input", None)
         self._tools[call_id] = {"name": name, "kind": kind, "title": title, "full_title": str(getattr(update, "title", "") or ""),
-                                "args": args, "output": "", "diffs": []}
+                                "args": args, "output": "", "diffs": [], "raw": raw if isinstance(raw, dict) else None}
         self._emit(self._flush([{"id": call_id, "name": name, "arguments": json.dumps(args, ensure_ascii=False)}]))
         self._emit({"type": "tool_start", "id": call_id, "name": name, "status": title[:120] or self.engine.title})
         self._collect(call_id, update)
@@ -465,7 +466,7 @@ class ExternalAgent:
         reject = _option(options, "reject_once") or _option(options, "reject_always")
         call_id = str(getattr(tool_call, "tool_call_id", ""))
         info = self._tools.get(call_id)
-        kind_acp = str(getattr(tool_call, "kind", "") or (info or {}).get("kind") or "other")
+        kind_acp = _kind_of(tool_call, (info or {}).get("kind") or "")
         # 判断危险用完整的原文（多行命令的第二行也算）；给你看的标题才用缩短的
         full_title = str(getattr(tool_call, "title", "") or (info or {}).get("full_title") or "")
         title = _short(full_title, self.root)
@@ -494,7 +495,7 @@ class ExternalAgent:
         try:
             self._emit(self.session.append({
                 "type": "confirm", "id": pending.id, "call_id": call_id, "tool": (info or {}).get("name", "run_command"),
-                "kind": kind, "action": _action(kind, title, info, self.root),
+                "kind": kind, "action": _action(kind, title, info, self.root, tool_call),
                 "detail": _detail(kind, command, title, info, tool_call, self.root),
                 "reason": decision.reason, "can_remember": decision.can_remember,
             }))
@@ -553,9 +554,65 @@ def _rel(path: str, root: Path) -> str:
         return path
 
 
+# 有的 Agent（CodeBuddy）不报工具种类，只报 Claude Code 那一套工具名：按名字认
+NAME_KINDS = {"edit": "edit", "multiedit": "edit", "write": "edit", "notebookedit": "edit",
+              "bash": "execute", "bashoutput": "execute", "killshell": "execute", "powershell": "execute",
+              "read": "read", "glob": "search", "grep": "search", "ls": "read",
+              "webfetch": "fetch", "websearch": "fetch"}
+
+
+def _kind_of(update: Any, known: str = "") -> str:
+    """工具种类：它报的；没报（或者报 other）就按工具名认；都不认识是 other（按命令问）"""
+    kind = str(getattr(update, "kind", "") or "")
+    if kind and kind != "other":
+        return kind
+    if known and known != "other":
+        return known
+    for name in (getattr(update, "name", None), getattr(update, "title", None)):
+        if name:
+            found = NAME_KINDS.get(str(name).strip().split(" ")[0].split("(")[0].lower())
+            if found:
+                return found
+    return kind or "other"
+
+
+def _raw_diffs(tool_call: Any, root: Path) -> list[tuple[str, str, str]]:
+    """改文件的参数（Edit 的 old_string/new_string、Write 的 content）→（路径，原文，新文）：
+    它没报 diff 块时，问你用的 diff 由这里按文件现在的内容算出来"""
+    raw = getattr(tool_call, "raw_input", None)
+    if not isinstance(raw, dict):
+        return []
+    path = str(raw.get("file_path") or raw.get("path") or "")
+    if not path:
+        return []
+    target = Path(path) if Path(path).is_absolute() else root / path
+    try:
+        old = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        old = ""
+    if isinstance(raw.get("content"), str):
+        return [(path, old, raw["content"])]
+    edits = raw.get("edits") if isinstance(raw.get("edits"), list) else [raw]
+    new = old
+    for e in edits:
+        if not isinstance(e, dict) or not isinstance(e.get("old_string"), str) or not isinstance(e.get("new_string"), str):
+            return []
+        new = new.replace(e["old_string"], e["new_string"]) if e.get("replace_all") else new.replace(e["old_string"], e["new_string"], 1)
+    return [(path, old, new)]
+
+
+def _raw_diffs_from(info: dict[str, Any] | None, root: Path) -> list[tuple[str, str, str]]:
+    """批准请求里没带参数时，用工具开始时记下的参数"""
+    raw = (info or {}).get("raw")
+    return _raw_diffs(type("R", (), {"raw_input": raw})(), root) if isinstance(raw, dict) else []
+
+
 def _tool_args(name: str, update: Any, root: Path) -> dict[str, Any]:
     title = str(getattr(update, "title", "") or "")
     locations = [str(getattr(loc, "path", "")) for loc in getattr(update, "locations", None) or []]
+    raw = getattr(update, "raw_input", None)
+    if not locations and isinstance(raw, dict) and (raw.get("file_path") or raw.get("path")):
+        locations = [str(raw.get("file_path") or raw.get("path"))]
     first = _rel(locations[0], root) if locations else ""
     if name == "run_command":
         return {"command": _command(update, title), "description": title[:80]}
@@ -594,9 +651,15 @@ def _unified(diffs: list[tuple[str, str, str]], root: Path) -> tuple[str, str, i
     return first, "\n".join(p for p in parts if p), added, removed
 
 
-def _action(kind: str, title: str, info: dict[str, Any] | None, root: Path) -> str:
+def _action(kind: str, title: str, info: dict[str, Any] | None, root: Path, tool_call: Any = None) -> str:
     if kind == "edit":
-        path = (info or {}).get("args", {}).get("path") or title
+        # 有的 Agent（CodeBuddy）开始时不带路径，只在来问的时候带：从这次的参数里补
+        raw = getattr(tool_call, "raw_input", None)
+        raw_path = str(raw.get("file_path") or raw.get("path") or "") if isinstance(raw, dict) else ""
+        args_path = (info or {}).get("args", {}).get("path")
+        if args_path == title:
+            args_path = ""
+        path = args_path or (_rel(raw_path, root) if raw_path else "") or title
         return f"改 {path}"
     if kind == "command":
         return f"运行命令 {title[:80]}" if title else "运行一条命令"
@@ -606,7 +669,7 @@ def _action(kind: str, title: str, info: dict[str, Any] | None, root: Path) -> s
 def _detail(kind: str, command: str, title: str, info: dict[str, Any] | None, tool_call: Any, root: Path) -> str:
     """问你时给你看的内容：改文件是代码算出来的 diff，命令是命令原文"""
     if kind == "edit":
-        diffs = (info or {}).get("diffs") or []
+        diffs = (info or {}).get("diffs") or _raw_diffs(tool_call, root) or _raw_diffs_from(info, root)
         if diffs:
             return _unified(diffs, root)[1][:MAX_DIFF] or "（内容没有变化）"
         locations = [_rel(str(getattr(loc, "path", "")), root) for loc in getattr(tool_call, "locations", None) or []]

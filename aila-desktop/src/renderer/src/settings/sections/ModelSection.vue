@@ -196,7 +196,7 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
 
     <div v-if="settings.chatBrain !== undefined" class="card">
       <h3>{{ t('对话的大脑') }}</h3>
-      <p class="hint">{{ t('平时聊天由谁来想：上面填的大模型，或者这台电脑上的 Codex、Claude Code、Antigravity（用你自己的账号和额度）。人格、记忆、表情、语音、提醒这些工具都照旧；整理记忆、写摘要还用上面的大模型。') }}</p>
+      <p class="hint">{{ t('平时聊天由谁来想：上面填的大模型，或者这台电脑上的 Codex、Claude Code、Antigravity、CodeBuddy（用你自己的账号和额度）。人格、记忆、表情、语音、提醒这些工具都照旧；整理记忆、写摘要还用上面的大模型。') }}</p>
       <div class="row">
         <span class="label">{{ t('大脑') }}</span>
         <select v-model="brain">

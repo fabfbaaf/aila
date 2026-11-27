@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 设置 → 编程 →「本机 Agent」：这台电脑上的 Codex、Claude Code、Antigravity 能不能交活。
+ * 设置 → 编程 →「本机 Agent」：这台电脑上的 Codex、Claude Code、Antigravity、CodeBuddy 能不能交活。
  * 艾拉自己去找（PATH 里的程序、它们自己的登录状态），登录要你在终端里用它们的官方程序做，艾拉不经手账号。
  * 和它们说话要一个 ACP 适配器（Node 程序）：点「装适配器」才下载，不带它们自带的 Codex / Claude，用你装好的。
  */
@@ -53,7 +53,7 @@ onMounted(check)
   <div class="card" :aria-busy="checking || installing">
     <h3>{{ t('本机 Agent') }}</h3>
     <p class="hint">
-      {{ t('开新任务时可以交给这台电脑上的 Codex、Claude Code 或 Antigravity 做：用你自己的账号和额度，进度、改动、要你同意的操作都在任务页里。它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。') }}
+      {{ t('开新任务时可以交给这台电脑上的 Codex、Claude Code、Antigravity 或 CodeBuddy 做：用你自己的账号和额度，进度、改动、要你同意的操作都在任务页里。它们要改文件、跑命令时照样按艾拉的权限模式问你，危险命令总是问。') }}
     </p>
     <ul class="list">
       <li v-for="a in agents" :key="a.id" :class="{ off: !a.ready }">

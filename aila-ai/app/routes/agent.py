@@ -75,7 +75,7 @@ class NewSession(BaseModel):
     mode: ModeName = "ask"
     isolate: bool = False  # 在新分支上做
     # 交给本机的 Codex / Claude Code 做（不填就是艾拉自己做）
-    engine: Literal["codex", "claude", "antigravity"] | None = None
+    engine: Literal["codex", "claude", "antigravity", "codebuddy"] | None = None
     budget: float | None = Field(default=None, ge=0, allow_inf_nan=False, strict=True)
     _valid_budget = field_validator("budget", mode="before")(_budget_input)
 

@@ -493,9 +493,12 @@ data: {"type": "done"}
 | `DELETE /studio/works/{id}` | 删掉（正在做的先打断），会话一起删 |
 | `GET /studio/diary` / `POST /studio/diary` | 看日记 / 写今天的 |
 
-### 本机 Agent（Codex、Claude Code，通过 ACP）
+### 本机 Agent（Codex、Claude Code、Antigravity、CodeBuddy，通过 ACP）
 
-新任务可以交给这台电脑上的 Codex 或 Claude Code 做（`POST /agent/sessions {"engine": "codex" | "claude"}`），会话日志、任务页、终端、手机看到的和艾拉自己做的一样。
+新任务可以交给这台电脑上的 Codex、Claude Code、Antigravity 或 CodeBuddy 做（`POST /agent/sessions {"engine": "codex" | "claude" | "antigravity" | "codebuddy"}`），会话日志、任务页、终端、手机看到的和艾拉自己做的一样。
+
+- **自己会说 ACP 的**：Antigravity（`agy acp --process-per-session`，这样才收 HTTP 的 MCP）、CodeBuddy（`codebuddy --acp`）不用适配器；登录用它们自己的程序（`agy`、`codebuddy.cmd`），这边问不出登没登录，开会话时没登录它们会说。都开在「每次改动前都问」
+- **不报工具种类的**（CodeBuddy 只报 Edit、Bash 这些名字）：按名字认出改文件、跑命令、读文件；改文件的 diff 按它给的参数（`file_path` + `old_string`/`new_string`、`content`、`edits`）和文件现在的内容算，不会把改文件当成叫 Edit 的命令（那样「以后都不用问」会放过以后所有改动）
 
 - **找程序**（`runtime/localagents.py`，`GET /agent/local`）：PATH 里的 `codex`、`claude`；npm 装的 codex 顺着脚本找到真正的 `codex.exe`。登录用它们自己的命令问（`codex login status`、`claude auth status`），不碰令牌文件；登录要你在终端里用官方程序做
 - **适配器**：官方的 `@agentclientprotocol/codex-acp`、`@agentclientprotocol/claude-agent-acp`，设置页点「装适配器」才装（`POST /agent/local/install`，`npm install --omit=optional`，装在 数据目录/acp，开发时 `AILA_ACP_DIR`）。不带它们自带的 Codex / Claude（各四五百 MB），用 `CODEX_PATH`、`CLAUDE_CODE_EXECUTABLE` 指到你装好的；去掉 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`，用你的订阅登录而不是按量计费
@@ -513,7 +516,7 @@ data: {"type": "done"}
 
 ### 对话的大脑换成本机 Agent（`app/brain.py`）
 
-设置里 `AILA_CHAT_BRAIN=codex|claude` 时，对话（`/chat`，手机上也一样）交给本机的 Codex / Claude Code 想，`run_agent` 一点不变：
+设置里 `AILA_CHAT_BRAIN=codex|claude|antigravity|codebuddy` 时，对话（`/chat`，手机上也一样）交给本机的这个 Agent 想，`run_agent` 一点不变：
 `AgentBrain` 实现 `ChatModel.stream()`。人格：开 ACP 会话时交系统提示词（Claude Code 整个换掉，Codex 只能接在后面）；<背景>（记忆）原样放在最新一句前面；会话留着，下一句只发新的，对不上就开新会话并带上最近的对话。艾拉的对话工具用 MCP 挂给它（`POST /chat/bridge`，只认这个大脑的令牌）：它调用时 `stream()` 把调用交回 `run_agent`（照常确认、执行），结果在下一次 `stream()` 交回给它。它自己的改文件、跑命令一律不批，开在空文件夹里。整理记忆、写摘要还用填的大模型。
 
 ### 编程 Agent 评测

@@ -96,7 +96,7 @@ def load_settings() -> Settings:
         persona_catchphrase=os.getenv("AILA_PERSONA_CATCHPHRASE", "").strip()[:12],
         language="en" if os.getenv("AILA_LANGUAGE", "zh").strip().lower() == "en" else "zh",
         chat_brain_model=os.getenv("AILA_CHAT_BRAIN_MODEL", "").strip()[:100],
-        chat_brain=os.getenv("AILA_CHAT_BRAIN", "").strip().lower() if os.getenv("AILA_CHAT_BRAIN", "").strip().lower() in ("codex", "claude", "antigravity") else "",
+        chat_brain=os.getenv("AILA_CHAT_BRAIN", "").strip().lower() if os.getenv("AILA_CHAT_BRAIN", "").strip().lower() in ("codex", "claude", "antigravity", "codebuddy") else "",
         calendar_url=os.getenv("AILA_CALENDAR_URL", "").strip(),
         mail_user=os.getenv("AILA_MAIL_USER", "").strip(),
         mail_pass=os.getenv("AILA_MAIL_PASS", "").strip(),

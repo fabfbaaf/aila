@@ -75,6 +75,14 @@ ENGINES: dict[str, Engine] = {
         "先装 Antigravity 命令行：在 PowerShell 里运行 irm https://antigravity.google/cli/install.ps1 | iex",
         native=True, acp_args=("acp", "--process-per-session"), app_paths=("agy/bin/agy.exe",),
     ),
+    # 腾讯的 CodeBuddy Code（WorkBuddy 背后的那个）：命令行自己就支持 ACP（codebuddy --acp），也收 HTTP 的 MCP。
+    # 登录和 WorkBuddy 桌面版不通用，要在它的命令行里登录一次；WorkBuddy 桌面版带的精简版单独跑不起来，用正式的命令行
+    "codebuddy": Engine(
+        "codebuddy", "CodeBuddy", "codebuddy", "", "", "", "",
+        (), "在终端里运行 codebuddy.cmd，按提示登录一次（国内账号选微信登录）",
+        "先装 CodeBuddy 命令行：npm.cmd install -g @tencent-ai/codebuddy-code",
+        native=True, acp_args=("--acp",), app_paths=("codebuddy/bin/codebuddy.exe",),
+    ),
 }
 
 

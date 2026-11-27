@@ -15,9 +15,9 @@ export function registerAgentCreateIpc(
     if (!fromMain(event)) return notAllowed
     const kind = rawKind === undefined ? 'project' : rawKind
     if (kind !== 'project' && kind !== 'computer') return { ok: false, error: tm('任务类型要是项目或电脑。') }
-    // 交给本机的 Codex / Claude Code / Antigravity：只认这几个名字，只能在项目里
+    // 交给本机的 Codex / Claude Code / Antigravity / CodeBuddy：只认这几个名字，只能在项目里
     const engine = rawEngine === undefined || rawEngine === null ? null : rawEngine
-    if (engine !== null && engine !== 'codex' && engine !== 'claude' && engine !== 'antigravity') return { ok: false, error: tm('不认识的 Agent。') }
+    if (engine !== null && !['codex', 'claude', 'antigravity', 'codebuddy'].includes(engine as string)) return { ok: false, error: tm('不认识的 Agent。') }
     if (engine !== null && kind !== 'project') return { ok: false, error: tm('本机 Agent 只能在项目里做。') }
     if (kind === 'computer') {
       if (cwd !== undefined) return { ok: false, error: tm('电脑任务不用选项目文件夹。') }

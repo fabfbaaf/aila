@@ -461,3 +461,21 @@ def test_account_verification_is_an_error(tmp_path: Path) -> None:
     h = Harness(tmp_path, "ask", [("say", "\n⚠ Verification Required\n")], engine="antigravity")
     events = asyncio.run(h.turn("改一行"))
     assert events[-1]["reason"] == "error" and "验证你的账号" in events[-1]["error"]
+
+
+def test_tools_without_kind_are_recognised_by_name(tmp_path: Path) -> None:
+    """CodeBuddy 不报工具种类，只报 Edit、Bash 这些名字：改文件要按改文件问（diff 由这边算），不能当成叫 Edit 的命令"""
+    h = Harness(tmp_path, "ask", [], engine="codebuddy")
+    (h.root / "calc.py").write_text("a = 1\n", encoding="utf-8")
+    raw = {"file_path": str(h.root / "calc.py"), "old_string": "a = 1", "new_string": "a = 2"}
+    edit = schema.ToolCallStart(tool_call_id="e1", title="Edit", status="pending")  # 开始时不带参数，只在来问时带
+    bash = schema.ToolCallStart(tool_call_id="b1", title="Bash", status="pending", raw_input={"command": "git status"})
+    h.script.extend([("tool", edit), ("ask", schema.ToolCallUpdate(tool_call_id="e1", title="Edit", raw_input=raw)), ("update", done("e1")),
+                     ("tool", bash), ("ask", schema.ToolCallUpdate(tool_call_id="b1", title="Bash", raw_input={"command": "git status"}))])
+    events = asyncio.run(h.turn("改", answer=True))
+    confirms = [e for e in events if e["type"] == "confirm"]
+    assert confirms[0]["kind"] == "edit" and "-a = 1" in confirms[0]["detail"] and "+a = 2" in confirms[0]["detail"]
+    assert confirms[0]["action"] == "改 calc.py" and confirms[0]["tool"] == "edit_file"
+    starts = [e for e in events if e["type"] == "tool_start"]
+    assert [s["name"] for s in starts] == ["edit_file", "run_command"]
+    assert ("config", ("mode", "default")) in h.conns[0].calls  # CodeBuddy 的「Always Ask」

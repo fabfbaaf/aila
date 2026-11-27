@@ -84,7 +84,7 @@ class SettingsUpdate(BaseModel):
     personaCall: str | None = Field(default=None, max_length=12)
     personaCatchphrase: str | None = Field(default=None, max_length=12)
     language: Literal["zh", "en"] | None = None
-    chatBrain: Literal["", "codex", "claude", "antigravity"] | None = None
+    chatBrain: Literal["", "codex", "claude", "antigravity", "codebuddy"] | None = None
     chatBrainModel: str | None = Field(default=None, max_length=100, pattern=r"^[\w.\[\]:/-]*$")
     searchProvider: Literal["bocha", "tavily", "none"] | None = None
     searchApiKey: str | None = Field(default=None, max_length=300)
