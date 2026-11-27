@@ -179,8 +179,9 @@ class FakeModel:
         self.reply = reply
         self.calls: list[list[dict[str, str]]] = []
 
-    async def complete(self, messages: list[dict[str, str]]) -> str:
+    async def complete(self, messages: list[dict[str, str]], max_tokens: int = 600) -> str:
         self.calls.append(messages)
+        self.max_tokens = max_tokens
         if isinstance(self.reply, Exception):
             raise self.reply
         return self.reply
@@ -198,6 +199,7 @@ def test_explain_caches_by_content(tmp_path: Path) -> None:
 
     first, second, other_depth, reloaded = asyncio.run(go())
     assert first["explanation"]["summary"] == "它负责开任务" and not first["cached"]
+    assert model.max_tokens == 1500  # 讲解给足长度，不然 JSON 写到一半被截断
     assert second["cached"] and reloaded["cached"]  # 同样的内容不重复花钱，重启以后也记得
     assert not other_depth["cached"] and len(model.calls) == 2
     system, user = model.calls[0][0]["content"], model.calls[0][1]["content"]

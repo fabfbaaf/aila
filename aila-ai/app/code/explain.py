@@ -44,6 +44,8 @@ DIAGNOSE_SYSTEM = """你是艾拉，在帮用户弄明白一个报错。下面�
 MAX_FACTS = 6000
 MAX_CODE = 9000
 MAX_CACHE = 600
+# 讲解的回答上限：讲整个项目、一条链路时事实多、讲得也长，600（complete 的默认）会把 JSON 截断
+ANSWER_TOKENS = 1500
 
 
 class ExplainCache:
@@ -109,13 +111,15 @@ async def explain(model: Any, cache: ExplainCache, level: str, depth: str, facts
     system = (DIAGNOSE_SYSTEM if level == "diagnose" else SYSTEM).format(depth=DEPTHS[depth], what=LEVELS.get(level, level))
     user = f"【事实】\n{facts}" + (f"\n\n【代码】\n{code}" if code else "")
     try:
-        raw = await model.complete([{"role": "system", "content": system}, {"role": "user", "content": user}])
+        raw = await model.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                   max_tokens=ANSWER_TOKENS)
     except Exception as err:  # 网络、额度、密钥：讲不了就只给事实
         log.info("讲解没成：%s", err)
         out["note"] = f"这次没讲成：{str(err)[:160]}"
         return out
     answer = parse_answer(raw)
     if answer is None:
+        log.info("讲解回的不是 JSON（%s 字，结尾：%r）", len(raw), raw[-80:])
         out["note"] = "模型回的不像样，这次只显示事实。"
         return out
     cache.put(key, answer)
