@@ -20,7 +20,7 @@ from .i18n import localize
 
 from . import deps
 from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
-from .routes import agenda, agent, android, chat, schedules, code, computer, discoveries, extensions, knowledge, phone, screen, settings, studio, voice
+from .routes import agenda, agent, android, chat, schedules, code, computer, discoveries, extensions, knowledge, phone, quotas, screen, settings, studio, voice
 from .routes.chat import ChatMessage, ChatRequest, build_messages
 from .security import LocalOnly
 
@@ -70,6 +70,7 @@ app.include_router(settings.router)
 app.include_router(screen.router)
 app.include_router(code.router)
 app.include_router(agent.router)
+app.include_router(quotas.router)
 app.include_router(computer.router)
 app.include_router(studio.router)
 app.include_router(discoveries.router)

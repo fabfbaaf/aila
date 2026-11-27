@@ -18,6 +18,10 @@ def main(argv: list[str] | None = None) -> int:
         from .selfcheck import main as check
 
         return check()
+    if args[:1] == ["--claude-quota"]:
+        from .runtime.claude_statusline import main as collect
+
+        return collect(args[1:])
 
     from . import winsock
 

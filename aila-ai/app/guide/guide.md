@@ -51,6 +51,14 @@
 平时聊天也能交给它们想：设置 → 对话 →「对话的大脑」（page=settings, section=model）选本机的 Agent，人格、记忆、表情、语音和提醒这些工具都照旧，只是每句慢几秒。
 要先：装好它们并登录（终端里 codex login、claude auth login、agy、codebuddy.cmd），Codex 和 Claude Code 还要在 设置 → 编程 → 本机 Agent（page=settings, section=agent）点「装适配器」（要 Node.js）；Antigravity、CodeBuddy 自己就能接，不用装。那里会显示找没找到、登没登录。
 
+## 平台用量与积分
+
+主窗口的「对话」和「任务」上方直接显示余额和重置倒计时。点厂商，在当前页展开各个额度窗口，查看进度条和按近期用量估算的耗尽时间。没有总量的余额只显示数值，有多次可比较的读数才会估算耗尽时间。录入余额和关联账号在 设置 → 编程 →「平台用量与积分」（page=settings, section=agent）。
+
+- Codex、Grok、Antigravity 用本机已登录的官方 CLI 读取。Claude Code 卡片里可以生成状态栏采集配置，照提示加入 Claude Code 设置，完成一轮对话后刷新。
+- Cursor 和 Grok 用同一个 X 订阅时，在 Cursor 卡片勾选关联开关。Grok 确认共享的池子才会显示在 Cursor 卡片里。独立 Cursor 账单可以在卡片录入。
+- 有其他平台的积分时点「添加平台」。给每个额度填单位和剩余量，也可以填总量与重置时间。以后点「更新记录」继续记同一个额度，便于估算使用速度。
+
 ## 定时任务
 
 位置：设置 → 编程 →「定时任务」（page=settings, section=agent）；也可以在对话里说「每天早上 9 点帮我跑一下测试，没过就查原因」（她会先给你看要设的内容，你同意了才设）。

@@ -1237,6 +1237,22 @@ function registerIpc(): void {
   const mcpJson = (json: unknown): json is string => typeof json === 'string' && json.length >= 2 && json.length <= 50000
   // 本机的 Codex、Claude Code：看情况、装适配器（装适配器要下载，只认主窗口）
   ipcMain.handle('agent:local', (e) => (fromAgent(e) ? agentRelay.localAgents() : notAllowed))
+  ipcMain.handle('agent:quotas', (e, refresh: unknown) => (
+    fromAgent(e) ? agentRelay.providerQuotas(refresh === true) : notAllowed
+  ))
+  ipcMain.handle('agent:quotas:record', (e, raw: unknown) => {
+    if (!fromAgent(e) || !raw || typeof raw !== 'object') return notAllowed
+    const body = raw as import('../shared/providerQuotas').QuotaRecord
+    const fields = [body.provider, body.name, body.window, body.label, body.unit]
+    if (!fields.every((field) => field === undefined || (typeof field === 'string' && field.length <= 60))) return notAllowed
+    if (![body.remaining, body.total, body.reset_at].every((n) => n === null || Number.isFinite(n))) return notAllowed
+    const { provider, name, window, label, unit, remaining, total, reset_at } = body
+    return agentRelay.recordProviderQuota({ provider, name, window, label, unit, remaining, total, reset_at })
+  })
+  ipcMain.handle('agent:quotas:claude', (e) => fromAgent(e) ? agentRelay.claudeQuotaConfig() : notAllowed)
+  ipcMain.handle('agent:quotas:cursor', (e, linked: unknown) => (
+    fromAgent(e) && typeof linked === 'boolean' ? agentRelay.linkCursorQuota(linked) : notAllowed
+  ))
   ipcMain.handle('agent:local:install', (e) => (fromAgent(e) ? agentRelay.installAdapters() : notAllowed))
   // 本机 Agent 任务的模型、思考深度：只认主窗口，名字和值的长度先挡一下，合不合法 AI 服务按它给的选项再查
   const optionText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
