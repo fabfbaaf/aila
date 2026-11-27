@@ -25,6 +25,7 @@ import type {
   LocalAgentInfo
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
+import type { ClaudeQuotaConfig, ProviderQuota, QuotaRecord } from '../shared/providerQuotas'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 import { tm } from './lang'
@@ -87,6 +88,22 @@ export class AgentRelay {
   /** 本机的 Codex、Claude Code：找到没有、登录没有（每个要跑一下它的命令，慢一点） */
   localAgents(): Promise<AiResult<LocalAgentInfo[]>> {
     return this.call('GET', '/agent/local', undefined, 60000)
+  }
+
+  providerQuotas(refresh: boolean): Promise<AiResult<ProviderQuota[]>> {
+    return this.call('GET', refresh ? '/agent/quotas?refresh=true' : '/agent/quotas', undefined, 45000)
+  }
+
+  recordProviderQuota(body: QuotaRecord): Promise<AiResult<ProviderQuota[]>> {
+    return this.call('POST', '/agent/quotas/record', body)
+  }
+
+  claudeQuotaConfig(): Promise<AiResult<ClaudeQuotaConfig>> {
+    return this.call('POST', '/agent/quotas/claude')
+  }
+
+  linkCursorQuota(linked: boolean): Promise<AiResult<ProviderQuota[]>> {
+    return this.call('PUT', '/agent/quotas/cursor', { linked })
   }
 
   /** 本机 Agent 的模型、思考深度、快速模式（还没连上时它要先起来，几秒） */

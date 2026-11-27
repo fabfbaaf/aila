@@ -20,6 +20,7 @@ import AgentApp from '../agent/AgentApp.vue'
 import ProjectsPage from './ProjectsPage.vue'
 import SectionPage from './SectionPage.vue'
 import SettingsPage from './SettingsPage.vue'
+import ProviderQuotasCard from '../settings/sections/ProviderQuotasCard.vue'
 import ChatHistoryPage from './ChatHistoryPage.vue'
 import StudioPage from './StudioPage.vue'
 import CommandPalette from './CommandPalette.vue'
@@ -132,15 +133,22 @@ onBeforeUnmount(() => {
       </button>
     </nav>
     <main class="page">
-      <KeepAlive>
-        <component
-          :is="page.component"
-          :key="route.page"
-          v-bind="page.props"
-          @go="go"
-          @waiting="(n: number) => (waiting = n)"
-        />
-      </KeepAlive>
+      <ProviderQuotasCard
+        v-if="bridge && (route.page === 'chat' || route.page === 'tasks')"
+        compact
+        @manage="go({ page: 'settings', section: 'agent' })"
+      />
+      <div class="page-content">
+        <KeepAlive>
+          <component
+            :is="page.component"
+            :key="route.page"
+            v-bind="page.props"
+            @go="go"
+            @waiting="(n: number) => (waiting = n)"
+          />
+        </KeepAlive>
+      </div>
     </main>
     <CommandPalette v-if="paletteOpen" ref="palette" @close="paletteOpen = false" @act="act" />
     <!-- 开场演出（shared/intro.ts）：第一次打开、或者设置里点「再看一遍」时盖在最上面 -->
@@ -239,9 +247,18 @@ onBeforeUnmount(() => {
 }
 
 .page {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   height: 100%;
   overflow: hidden;
   background: var(--ui-bg);
+}
+
+.page-content {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 </style>

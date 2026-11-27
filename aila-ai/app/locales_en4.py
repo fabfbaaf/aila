@@ -23,4 +23,9 @@ EN4: dict[str, str] = {
     "{0} 改的文件艾拉没存底片，撤销不了：用 git 看改动、还原。": "Aila has no snapshots of files {0} changed, so they can't be undone here: use git to review and revert.",
     "{0} 自己管上下文：要压缩就跟它说 /compact。": "{0} manages its own context: send it /compact to compress.",
     "{0} 的上下文在它自己那边，这里看不到。": "{0} keeps its context on its side; it can't be shown here.",
+    "平台名称为空或数量已到上限。": "Platform name is missing or the platform limit was reached.",
+    "找不到这个平台。": "This platform could not be found.",
+    "找不到这条记录，或额度窗口数量已到上限。": "This reading could not be found, or the allowance limit was reached.",
+    "添加平台需要填写名称。": "A name is required to add a platform.",
+    "剩余量不能超过总量。": "The remaining amount cannot exceed the total.",
 }
