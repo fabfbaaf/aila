@@ -29,7 +29,7 @@ from .commands import Command, load_commands, match
 from .skilltool import read_skill_tool
 from .delivery import DELIVERY, DeliveryError
 from .external import ExternalAgent
-from .localagents import ENGINES
+from .localagents import ENGINES, LocalAgentError
 from .ledger import context_ledger
 from .mcp import TOOL_PREFIX, McpManager, bridge_tools
 from .memory import ProjectMemory, project_key, remember_tool
@@ -185,6 +185,29 @@ class Runtime:
         if budget is not None:
             session.append({"type": "budget", "amount": budget})
         return session
+
+    async def engine_options(self, sid: str) -> list[dict]:
+        """本机 Agent 能换的设置（模型、思考深度、快速模式）：还没连上的话先连上问它"""
+        agent = self._external(sid)
+        try:
+            return await agent.prepare()
+        except LocalAgentError as err:
+            raise RuntimeError_(str(err)) from err
+
+    async def set_engine_option(self, sid: str, option_id: str, value: str) -> list[dict]:
+        agent = self._external(sid)
+        try:
+            options = await agent.set_option(option_id, value)
+        except LocalAgentError as err:
+            raise RuntimeError_(str(err)) from err
+        self._publish(sid, agent.session.events[-1])
+        return options
+
+    def _external(self, sid: str) -> ExternalAgent:
+        agent = self.agent(sid)
+        if not isinstance(agent, ExternalAgent):
+            raise RuntimeError_("这个任务是艾拉自己在做：编程用的模型在 设置 → 对话 里换。")
+        return agent
 
     def _create_external(self, cwd: str | None, mode: Mode, isolate: bool, budget: float | None, kind: str,
                          engine: str) -> Session:

@@ -21,6 +21,7 @@ import type {
   AgentSessionSummary,
   AgentUndoEvent,
   ComputerContext,
+  EngineOption,
   LocalAgentInfo
 } from '../shared/agent'
 import type { AiResult } from '../shared/settings'
@@ -86,6 +87,15 @@ export class AgentRelay {
   /** 本机的 Codex、Claude Code：找到没有、登录没有（每个要跑一下它的命令，慢一点） */
   localAgents(): Promise<AiResult<LocalAgentInfo[]>> {
     return this.call('GET', '/agent/local', undefined, 60000)
+  }
+
+  /** 本机 Agent 的模型、思考深度、快速模式（还没连上时它要先起来，几秒） */
+  engineOptions(sid: string): Promise<AiResult<EngineOption[]>> {
+    return this.call('GET', `/agent/sessions/${encodeURIComponent(sid)}/options`, undefined, 120000)
+  }
+
+  setEngineOption(sid: string, id: string, value: string): Promise<AiResult<EngineOption[]>> {
+    return this.call('PUT', `/agent/sessions/${encodeURIComponent(sid)}/options`, { id, value }, 60000)
   }
 
   /** 装 ACP 适配器（npm，要几十秒） */

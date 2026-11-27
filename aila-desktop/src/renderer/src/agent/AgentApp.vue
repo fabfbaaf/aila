@@ -9,7 +9,7 @@
  */
 import { t as tr, t as tr2, localized, joinList } from '../i18n'
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary, type AgentEngine, type LocalAgentInfo } from '../../../shared/agent'
+import { agentModes, MODE_HINTS as MODE_HINTS_RAW, MODE_LABELS as MODE_LABELS_RAW, type AgentCommandList, type AgentKind, type AgentLedger, type AgentMemoryNote, type AgentMode, type AgentSessionSummary, type AgentEngine, type EngineOption, type LocalAgentInfo } from '../../../shared/agent'
 const MODE_LABELS = localized(MODE_LABELS_RAW)
 const MODE_HINTS = localized(MODE_HINTS_RAW)
 import { commandMenu, pickOnEnter, SOURCE_LABEL, type MenuItem } from './commands'
@@ -211,6 +211,40 @@ function loadLedger(): void {
 }
 /** 这个任务是本机的 Codex / Claude Code 在做（不是艾拉自己）：它的名字；艾拉自己做时是空的 */
 const engineName = computed(() => (current.value?.engine ? current.value.model || current.value.engine : ''))
+/** 本机 Agent 任务能换的设置（模型、思考深度、快速模式）：打开任务时问一次（还没连上的话它要先起来，几秒） */
+const engineOptions = ref<EngineOption[]>([])
+const optionsLoading = ref(false)
+const optionBusy = ref(false)
+async function loadEngineOptions(sid: string): Promise<void> {
+  optionsLoading.value = true
+  try {
+    const opts = await source.engineOptions(sid)
+    if (current.value?.id === sid) engineOptions.value = opts
+  } catch (err) {
+    if (current.value?.id === sid) error.value = (err as Error).message
+  } finally {
+    if (current.value?.id === sid) optionsLoading.value = false
+  }
+}
+async function setEngineOption(id: string, value: string): Promise<void> {
+  const sid = current.value?.id
+  if (!sid || optionBusy.value) return
+  optionBusy.value = true
+  try {
+    const opts = await source.setEngineOption(sid, id, value)
+    if (current.value?.id === sid) engineOptions.value = opts
+  } catch (err) {
+    error.value = (err as Error).message
+  } finally {
+    optionBusy.value = false
+  }
+}
+/** 下拉里每一项怎么写：模型直接写名字；思考深度、快速模式前面带上是什么 */
+function optionText(o: EngineOption, choice: EngineOption['choices'][number]): string {
+  if (o.category === 'thought_level') return tr('思考：{level}', { level: choice.name })
+  if (o.category === 'speed') return tr('快速模式：{on}', { on: choice.name })
+  return choice.name
+}
 const modelLabel = computed(() => {
   if (engineName.value) return engineName.value
   const m = models.value
@@ -271,6 +305,8 @@ async function open(sid: string): Promise<void> {
     if (current.value?.id === sid) for (const e of t.value.events) tr.apply(e)
     t.value = tr
     current.value = { ...s, events: s.events.length }
+    engineOptions.value = []
+    if (s.engine) void loadEngineOptions(sid)
     void refreshList() // 详情请求期间可能又记了用量，重新取服务端累计费用
     picking.value = false
     ledger.value = null
@@ -651,6 +687,8 @@ source.onEvent((sid, e) => {
   if (e.type === 'user' || e.type === 'usage' || e.type === 'turn_end' || e.type === 'undo' || e.type === 'budget') void refreshList()
   if (['usage', 'turn_end', 'compaction', 'tool', 'undo'].includes(e.type)) loadLedger()
   if (e.type === 'tool' && e.memory) void loadNotes() // 她刚记了一条
+  // 本机 Agent 那边的模型变了（它自己换的，或者你在别处换的）：重新问一下（已经连着，很快）
+  if ((e.type === 'engine_options' || e.type === 'engine_config') && current.value?.engine) void loadEngineOptions(sid)
   if (near) void nextTick(scrollToBottom)
 })
 source.onStreamEnd((sid, err) => {
@@ -957,7 +995,26 @@ onBeforeUnmount(() => {
         <select class="mode" :aria-label="tr('当前任务的权限模式')" :value="t.mode" :title="MODE_HINTS[t.mode]" @change="setMode(($event.target as HTMLSelectElement).value as AgentMode)">
           <option v-for="m in currentModes" :key="m" :value="m">{{ MODE_LABELS[m] }}</option>
         </select>
-        <span v-if="engineName" class="model" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">{{ modelLabel }}</span>
+        <template v-if="engineName">
+          <!-- 本机 Agent 的任务：它的模型、思考深度、快速模式（权限模式在左边，由艾拉管） -->
+          <span v-if="engineOptions.length" class="engine-options" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
+            <select
+              v-for="o in engineOptions"
+              :key="o.id"
+              class="mode engine-option"
+              :aria-label="o.name"
+              :title="o.choices.find((c) => c.value === o.current)?.description || o.name"
+              :value="o.current"
+              :disabled="optionBusy"
+              @change="setEngineOption(o.id, ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="c in o.choices" :key="c.value" :value="c.value">{{ optionText(o, c) }}</option>
+            </select>
+          </span>
+          <span v-else class="model engine-label" :title="tr('本机的 {name} 在做：用你自己的账号和它自己的模型', { name: engineName })">
+            {{ optionsLoading ? tr('正在连 {name}…', { name: engineName }) : modelLabel }}
+          </span>
+        </template>
         <span v-else class="model" :title="tr('编程用的模型：在「设置 → 对话」里改')" @click="source.openSettings()">{{ modelLabel }}</span>
         <div class="tabs">
           <button :class="{ on: view === 'chat' }" @click="view = 'chat'">{{ tr('过程') }}</button>
@@ -1754,10 +1811,11 @@ code {
 
 .top {
   display: flex;
+  flex-wrap: wrap; /* 本机 Agent 的任务多几个下拉（模型、思考深度）：窄的时候折到第二行，不把项目名挤没 */
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
   min-height: 52px;
-  padding: 0 18px;
+  padding: 8px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
@@ -1766,8 +1824,8 @@ code {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 180px;
+  min-width: 140px; /* 挤不下时后面的折到下一行，不把项目名挤没 */
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1782,6 +1840,24 @@ code {
   color: var(--ui-faint);
   font-family: var(--ui-mono);
   font-size: 11.5px;
+}
+
+.engine-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.engine-option {
+  max-width: 170px;
+}
+
+.engine-label {
+  cursor: default;
+}
+
+.tabs button {
+  white-space: nowrap;
 }
 
 .mode {

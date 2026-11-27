@@ -1,6 +1,8 @@
 """英文词典（四）：本机 Agent（Codex、Claude Code，runtime/localagents.py、runtime/external.py）"""
 
 EN4: dict[str, str] = {
+    "没有这个选项。": "No such option.",
+    "这个任务是艾拉自己在做：编程用的模型在 设置 → 对话 里换。": "Aila is doing this task herself: change the coding model in Settings → Chat.",
     "不认识的 Agent：{0}": "Unknown agent: {0}",
     "没找到 {0}。{1}": "{0} not found. {1}",
     "没找到 Node.js，适配器跑不起来。装一个 Node.js 再试。": "Node.js not found, so the adapter can't run. Install Node.js and try again.",

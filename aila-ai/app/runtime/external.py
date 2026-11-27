@@ -51,6 +51,8 @@ STOP = {"end_turn": "done", "max_tokens": "max_steps", "max_turn_requests": "max
 # ACP 的工具种类 → 艾拉的工具名（任务页按名字画卡片、权限按种类问）
 TOOL_NAMES = {"read": "read_file", "edit": "edit_file", "delete": "edit_file", "move": "edit_file",
               "search": "search", "execute": "run_command", "fetch": "web_fetch"}
+# 任务页里能换的设置（按这个顺序显示）：模型、思考深度、快速模式。权限模式、计划模式这些不给换
+OPTION_CATEGORIES = ("model", "thought_level", "speed")
 POLICY_KINDS = {"read": "read", "search": "read", "fetch": "web", "edit": "edit", "delete": "edit", "move": "edit",
                 "execute": "command"}
 
@@ -112,6 +114,8 @@ class ExternalAgent:
         self._said = ""
         self._system_error = False
         self._old: set[str] = set()
+        self._busy = False  # 正在做一轮
+        self._lock = asyncio.Lock()  # 打开任务页时先连上（看有哪些模型）和发第一句话可能同时来
 
     @property
     def root(self) -> Path:
@@ -129,6 +133,8 @@ class ExternalAgent:
         task: asyncio.Future[Any] | None = None
         try:
             await self._ensure()
+            await self._apply_wanted()  # 上一轮做着的时候你换了模型：这一轮开始前换上
+            self._busy = True
             prompt = (ASK_NOTE if self._fresh and self.engine.id == "codex" else "") + text
             self._fresh = False
             task = asyncio.ensure_future(self._conn.prompt(session_id=self._sid,
@@ -181,6 +187,7 @@ class ExternalAgent:
 
     def _close(self, reason: str, error: str = "") -> list[Event]:
         """一轮结束：把没说完的话、没结束的工具卡片补上，记一行结束"""
+        self._busy = False
         events = []
         flushed = self._flush()
         if flushed:
@@ -209,9 +216,65 @@ class ExternalAgent:
 
     # ---------- 连上适配器、开会话或接着以前的 ----------
 
+    # ---------- 模型、思考深度、快速模式：你在任务页里换 ----------
+
+    @property
+    def options(self) -> list[dict[str, Any]]:
+        """它给的、你能换的设置（日志里最近一次记的），你选过的值盖在上面（还没连上时也显示你选的）"""
+        recorded = next((e["options"] for e in reversed(self.session.events) if e["type"] == "engine_options"), [])
+        wanted = self._wanted()
+        return [{**o, "current": wanted.get(o["id"], o["current"])} for o in recorded]
+
+    def _wanted(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for e in self.session.events:
+            if e["type"] == "engine_config":
+                out[str(e["id"])] = str(e["value"])
+        return out
+
+    async def prepare(self) -> list[dict[str, Any]]:
+        """连上它（还没连的话），返回能换的设置：任务页打开时要知道有哪些模型"""
+        if not self._busy:
+            await self._ensure()
+        return self.options
+
+    async def set_option(self, option_id: str, value: str) -> list[dict[str, Any]]:
+        """换模型这类设置：记进日志（重启后接着用），连着的话马上换；正在做的这一轮做完、下一轮开始前换"""
+        opt = next((o for o in self.options if o["id"] == option_id), None)
+        if opt is None or value not in [c["value"] for c in opt["choices"]]:
+            raise LocalAgentError("没有这个选项。")
+        self.session.append({"type": "engine_config", "id": option_id, "value": value})
+        if self._conn is not None and not self._busy:
+            await self._apply_wanted()
+        return self.options
+
+    def _record_options(self, config_options: Any) -> None:
+        recorded = next((e["options"] for e in reversed(self.session.events) if e["type"] == "engine_options"), None)
+        opts = _options_of(config_options)
+        if opts and opts != recorded:
+            self._emit_or_keep(self.session.append({"type": "engine_options", "options": opts}))
+
+    def _emit_or_keep(self, event: Event) -> None:
+        if self._queue is not None and self._busy:
+            self._queue.put_nowait(event)
+
+    async def _apply_wanted(self) -> None:
+        recorded = {o["id"]: o["current"] for o in
+                    next((e["options"] for e in reversed(self.session.events) if e["type"] == "engine_options"), [])}
+        for option_id, value in self._wanted().items():
+            if option_id in recorded and recorded[option_id] != value:
+                try:
+                    res = await self._conn.set_config_option(config_id=option_id, session_id=self._sid, value=value)
+                    self._record_options(getattr(res, "config_options", None))
+                except acp.RequestError:
+                    pass  # 它不认了（比如账号换了，没这个模型）：按它现在的
+
     async def _ensure(self) -> None:
-        if self._conn is not None:
-            return
+        async with self._lock:
+            if self._conn is None:
+                await self._connect()
+
+    async def _connect(self) -> None:
         node, args, env = self._launch(self.engine.id, self.data_dir)
         stack = AsyncExitStack()
         try:
@@ -226,8 +289,8 @@ class ExternalAgent:
             if stored and can_load:
                 self._loading = True  # 加载时它会把以前的对话重放一遍：不再记
                 try:
-                    await asyncio.wait_for(conn.load_session(cwd=str(self.root), session_id=stored, mcp_servers=[]),
-                                           SESSION_TIMEOUT)
+                    res = await asyncio.wait_for(conn.load_session(cwd=str(self.root), session_id=stored, mcp_servers=[]),
+                                                 SESSION_TIMEOUT)
                 finally:
                     self._loading = False
                 self._sid = stored
@@ -236,39 +299,49 @@ class ExternalAgent:
                 self._sid = res.session_id
                 self._fresh = True
                 self.session.append({"type": "engine_session", "engine": self.engine.id, "id": self._sid})
-                await self._configure(conn, res)
-            if stored and can_load:
-                await self._configure(conn, None)
+            self._conn = conn  # _configure 里要用
+            self._record_options(getattr(res, "config_options", None))
+            await self._configure(conn, fresh=self._fresh)
         except acp.RequestError as err:
+            self._conn = None
             await stack.aclose()
             raise LocalAgentError(_friendly(self.engine.title, str(err))) from err
         except BaseException:
+            self._conn = None
             await stack.aclose()
             raise
-        self._stack, self._conn = stack, conn
+        self._stack = stack
 
-    async def _configure(self, conn: Any, session: Any) -> None:
-        """Codex：只读沙箱（改东西都来请求批准）、用你在 Codex 里设的模型；Claude Code：每次改动前都问"""
+    async def _configure(self, conn: Any, fresh: bool) -> None:
+        """Codex：只读沙箱（改东西都来请求批准）；Claude Code：每次改动前都问。然后换成你在任务页选的模型这些；
+        新会话你没选过模型时，Codex 用你在 Codex 里设的那个（适配器默认挑的 ChatGPT 账号不一定能用）"""
         mode = "read-only" if self.engine.id == "codex" else "default"
         try:
-            await conn.set_config_option(config_id="mode", session_id=self._sid, value=mode)
+            res = await conn.set_config_option(config_id="mode", session_id=self._sid, value=mode)
+            self._record_options(getattr(res, "config_options", None))
         except acp.RequestError:
             await conn.set_session_mode(session_id=self._sid, mode_id=mode)
-        if self.engine.id == "codex" and session is not None:
+        if self.engine.id == "codex" and fresh and "model" not in self._wanted():
             wanted = codex_model()
-            options = _select_values(session, "model")
-            if wanted and wanted in options:
+            models = [c["value"] for o in self.options if o["id"] == "model" for c in o["choices"]]
+            current = next((o["current"] for o in self.options if o["id"] == "model"), None)
+            if wanted and wanted in models and wanted != current:
                 try:
-                    await conn.set_config_option(config_id="model", session_id=self._sid, value=wanted)
+                    res = await conn.set_config_option(config_id="model", session_id=self._sid, value=wanted)
+                    self._record_options(getattr(res, "config_options", None))
                 except acp.RequestError:
                     pass
+        await self._apply_wanted()
 
     # ---------- 它说的、做的 ----------
 
     def on_update(self, update: Any) -> None:
-        if self._loading or self._queue is None:
-            return
         kind = getattr(update, "session_update", "")
+        if kind == "config_option_update":  # 它的设置变了（换了模型）：不管在不在一轮里都记
+            self._record_options(getattr(update, "config_options", None))
+            return
+        if self._loading or self._queue is None or not self._busy:
+            return
         if kind == "agent_message_chunk":
             text = getattr(getattr(update, "content", None), "text", None)
             if text:
@@ -511,19 +584,27 @@ def _detail(kind: str, command: str, title: str, info: dict[str, Any] | None, to
     return title
 
 
-def _select_values(session: Any, option_id: str) -> list[str]:
-    for opt in getattr(session, "config_options", None) or []:
-        root = getattr(opt, "root", opt)
-        if getattr(root, "id", "") == option_id:
-            values = []
-            for o in getattr(root, "options", None) or []:
-                o = getattr(o, "root", o)
-                if hasattr(o, "value"):
-                    values.append(str(o.value))
-                for sub in getattr(o, "options", None) or []:  # 分组的选项
-                    values.append(str(getattr(sub, "value", "")))
-            return values
-    return []
+def _options_of(config_options: Any) -> list[dict[str, Any]]:
+    """它给的设置里你能换的那几种（模型、思考深度、快速模式），整理成 {id, name, category, current, choices}。
+    权限模式不在里面：那个由艾拉管"""
+    out = []
+    for opt in config_options or []:
+        o = getattr(opt, "root", opt)
+        category = str(getattr(o, "category", "") or "")
+        if category not in OPTION_CATEGORIES or str(getattr(o, "type", "")) != "select":
+            continue
+        choices = []
+        for v in getattr(o, "options", None) or []:
+            v = getattr(v, "root", v)
+            if hasattr(v, "value"):
+                choices.append({"value": str(v.value), "name": str(v.name), "description": str(getattr(v, "description", "") or "")})
+            for sub in getattr(v, "options", None) or []:  # 分组的选项
+                choices.append({"value": str(sub.value), "name": str(sub.name), "description": str(getattr(sub, "description", "") or "")})
+        if choices:
+            out.append({"id": str(o.id), "name": str(o.name), "category": category, "current": str(o.current_value),
+                        "choices": choices})
+    out.sort(key=lambda o: OPTION_CATEGORIES.index(o["category"]))
+    return out
 
 
 def codex_model(home: Path | None = None) -> str:

@@ -38,7 +38,7 @@ import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
 import type { ReviewEntry } from '../shared/review'
-import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, LocalAgentInfo } from '../shared/agent'
+import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, EngineOption, LocalAgentInfo } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import { cleanRoute, type ShellRoute } from '../shared/shell'
 import type { DesktopPrefs, DesktopStatus } from '../shared/desktop'
@@ -189,6 +189,9 @@ const api = {
     ipcRenderer.invoke('agent:create', cwd, mode, isolate, budget, kind, engine),
   /** 本机的 Codex、Claude Code：找到没有、登录没有、适配器装了没有 */
   agentLocal: (): Promise<AiResult<LocalAgentInfo[]>> => ipcRenderer.invoke('agent:local'),
+  /** 本机 Agent 任务的模型、思考深度、快速模式 */
+  agentOptions: (sid: string): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('agent:options', sid),
+  agentSetOption: (sid: string, id: string, value: string): Promise<AiResult<EngineOption[]>> => ipcRenderer.invoke('agent:options:set', sid, id, value),
   /** 装 ACP 适配器（要下载，几十秒） */
   agentLocalInstall: (): Promise<AiResult<{ message: string; agents: LocalAgentInfo[] }>> => ipcRenderer.invoke('agent:local:install'),
   agentComputerContext: (): Promise<AiResult<ComputerContext>> => ipcRenderer.invoke('agent:computer-context'),

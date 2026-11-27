@@ -502,7 +502,8 @@ data: {"type": "done"}
 - **一轮**（`runtime/external.py`，ACP 官方 Python SDK `agent-client-protocol`）：它说的话、工具（命令、改文件、读文件）、计划翻成艾拉的事件；改文件的 diff 由这边按它报的原文、新文生成
 - **权限还是艾拉说了算**：Codex 开在只读沙箱并告诉它「要改东西就请求批准」，Claude Code 开在「每次改动前都问」；每个批准请求按 `permissions.Policy` 决定（允许 / 拒绝 / 在任务页问你），危险命令任何模式都问。它在只读沙箱里自己跑的查看类命令不经过这里
 - **停下、接着说**：打断发 `session/cancel`，进程留着；ACP 会话编号记在日志（`engine_session`），重启后用「加载会话」接着之前的上下文，重放的内容不再记
-- 出方案、`/review`、压缩上下文、撤销这一轮不走艾拉的流程（直接跟它说）；Codex 用 `config.toml` 里设的模型
+- **换模型**：它给的设置里只放出模型、思考深度、快速模式（`GET/PUT /agent/sessions/{sid}/options`；权限模式不给换）。你选的记在日志（`engine_config`），连上、加载会话、每一轮开始前对齐；正在做时换，下一轮开始前换上。新会话没选过时 Codex 用 `config.toml` 里设的模型
+- 出方案、`/review`、压缩上下文、撤销这一轮不走艾拉的流程（直接跟它说）
 
 ### 编程 Agent 评测
 

@@ -33,23 +33,33 @@ class FakeConn:
         self.calls: list[tuple[str, Any]] = []
         self.answers: list[str] = []
         self.forever = asyncio.Event()
+        self.state = {"model": "m-default", "effort": "high", "mode": "agent"}
+
+    def options(self) -> list[Any]:
+        def select(oid: str, category: str, values: list[str]) -> Any:
+            return schema.SessionConfigOptionSelect(id=oid, name=oid.title(), category=category, type="select",
+                                                    current_value=self.state[oid],
+                                                    options=[schema.SessionConfigSelectOption(value=v, name=v.upper()) for v in values])
+        return [select("mode", "mode", ["read-only", "agent", "default"]), select("model", "model", ["m-default", "m-fast", "m-big"]),
+                select("effort", "thought_level", ["low", "high"])]
 
     async def initialize(self, **kw: Any) -> Any:
         return schema.InitializeResponse(protocol_version=1, agent_capabilities=schema.AgentCapabilities(load_session=self.load))
 
     async def new_session(self, cwd: str, **kw: Any) -> Any:
         self.calls.append(("new", cwd))
-        return schema.NewSessionResponse(session_id="acp-1")
+        return schema.NewSessionResponse(session_id="acp-1", config_options=self.options())
 
     async def load_session(self, cwd: str, session_id: str, **kw: Any) -> Any:
         self.calls.append(("load", session_id))
         # 加载时重放以前的对话：不该记进日志
         await self.bridge.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(type="text", text="以前说过的")))
-        return schema.LoadSessionResponse()
+        return schema.LoadSessionResponse(config_options=self.options())
 
     async def set_config_option(self, config_id: str, session_id: str, value: Any, **kw: Any) -> Any:
         self.calls.append(("config", (config_id, value)))
-        return schema.SetSessionConfigOptionResponse(config_options=[])
+        self.state[config_id] = value
+        return schema.SetSessionConfigOptionResponse(config_options=self.options())
 
     async def cancel(self, session_id: str, **kw: Any) -> None:
         self.calls.append(("cancel", session_id))
@@ -329,3 +339,53 @@ def test_runtime_creates_external_sessions(tmp_path: Path) -> None:
         rt.run(s.id, "", review=True)
     with pytest.raises(RuntimeError_):
         rt.undo(s.id)
+
+
+# ---------- 换模型 ----------
+
+
+def test_options_offer_model_and_effort_but_not_mode(tmp_path: Path) -> None:
+    h = Harness(tmp_path, "ask", [])
+    options = asyncio.run(h.agent.prepare())
+    assert [o["id"] for o in options] == ["model", "effort"]  # 权限模式不给换
+    assert options[0]["current"] == "m-default" and [c["value"] for c in options[0]["choices"]] == ["m-default", "m-fast", "m-big"]
+
+
+def test_switching_model_now_and_after_restart(tmp_path: Path) -> None:
+    h = Harness(tmp_path, "ask", [("say", "好")])
+
+    async def go() -> None:
+        await h.agent.prepare()
+        options = await h.agent.set_option("model", "m-big")
+        assert next(o for o in options if o["id"] == "model")["current"] == "m-big"
+        assert ("config", ("model", "m-big")) in h.conns[0].calls
+        with pytest.raises(LocalAgentError):
+            await h.agent.set_option("model", "not-a-model")
+        with pytest.raises(LocalAgentError):
+            await h.agent.set_option("mode", "agent")  # 权限模式不给换
+
+    asyncio.run(go())
+    h.agent = h.make()  # 重启：新进程默认又是 m-default，加载会话后换回你选的
+    asyncio.run(h.turn("接着"))
+    assert ("config", ("model", "m-big")) in h.conns[-1].calls
+    assert next(o for o in h.agent.options if o["id"] == "model")["current"] == "m-big"
+
+
+def test_pick_while_running_applies_next_turn(tmp_path: Path) -> None:
+    h = Harness(tmp_path, "ask", [("say", "好")])
+    asyncio.run(h.turn("一"))
+    h.agent._busy = True  # 正在做：先记下
+    asyncio.run(h.agent.set_option("effort", "low"))
+    assert ("config", ("effort", "low")) not in h.conns[0].calls
+    h.agent._busy = False
+    asyncio.run(h.turn("二"))
+    assert ("config", ("effort", "low")) in h.conns[0].calls
+
+
+def test_runtime_options_routes_reject_aila_sessions(tmp_path: Path) -> None:
+    rt = Runtime(tmp_path / "data", lambda: Scripted([["好"]]), shell=SHELL)
+    proj = tmp_path / "p"
+    proj.mkdir()
+    s = rt.create(str(proj), "ask")
+    with pytest.raises(RuntimeError_, match="设置"):
+        asyncio.run(rt.engine_options(s.id))

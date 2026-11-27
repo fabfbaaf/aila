@@ -326,6 +326,32 @@ async def set_budget(sid: str, req: SetBudget, rt: Runtime = Depends(get_runtime
         raise HTTPException(409, str(err)) from err
 
 
+class SetOption(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=200)
+
+
+@router.get("/sessions/{sid}/options")
+async def engine_options(sid: str, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    """本机 Codex / Claude Code 的模型、思考深度、快速模式（还没连上时先连上问它，要几秒）"""
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return await rt.engine_options(sid)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
+@router.put("/sessions/{sid}/options")
+async def set_engine_option(sid: str, req: SetOption, rt: Runtime = Depends(get_runtime)) -> list[dict]:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return await rt.set_engine_option(sid, req.id, req.value)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
 # ---------- 项目记忆 ----------
 
 

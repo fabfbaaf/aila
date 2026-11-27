@@ -72,6 +72,16 @@ export interface AgentSessionSummary {
 /** 本机的编程 Agent（通过 ACP 适配器接进来，见 aila-ai/app/runtime/localagents.py） */
 export type AgentEngine = 'codex' | 'claude'
 
+/** 本机 Agent 能换的一个设置（模型、思考深度、快速模式）：权限模式由艾拉管，不在里面 */
+export interface EngineOption {
+  id: string
+  name: string
+  category: 'model' | 'thought_level' | 'speed' | string
+  /** 现在用的（你选过的盖在上面，还没连上时也显示你选的） */
+  current: string
+  choices: { value: string; name: string; description?: string }[]
+}
+
 /** 一个本机 Agent 现在的情况：找到没有、登录没有、适配器装了没有 */
 export interface LocalAgentInfo {
   id: AgentEngine

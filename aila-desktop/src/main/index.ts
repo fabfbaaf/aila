@@ -1237,6 +1237,11 @@ function registerIpc(): void {
   // 本机的 Codex、Claude Code：看情况、装适配器（装适配器要下载，只认主窗口）
   ipcMain.handle('agent:local', (e) => (fromAgent(e) ? agentRelay.localAgents() : notAllowed))
   ipcMain.handle('agent:local:install', (e) => (fromAgent(e) ? agentRelay.installAdapters() : notAllowed))
+  // 本机 Agent 任务的模型、思考深度：只认主窗口，名字和值的长度先挡一下，合不合法 AI 服务按它给的选项再查
+  const optionText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
+  ipcMain.handle('agent:options', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.engineOptions(sid) : notAllowed))
+  ipcMain.handle('agent:options:set', (e, sid: unknown, id: unknown, value: unknown) =>
+    fromAgent(e) && sidOk(sid) && optionText(id, 80) && optionText(value, 200) ? agentRelay.setEngineOption(sid, id, value) : notAllowed)
   ipcMain.handle('agent:mcp', (e) => (fromAgent(e) ? agentRelay.mcp() : notAllowed))
   ipcMain.handle('agent:mcp:preview', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpPreview(json) : notAllowed))
   ipcMain.handle('agent:mcp:import', (e, json: unknown) => (fromAgent(e) && mcpJson(json) ? agentRelay.mcpImport(json) : notAllowed))
