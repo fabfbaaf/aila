@@ -67,6 +67,8 @@ export interface AgentSessionSummary {
   pending?: { id: string; tool: string; action: string; can_remember: boolean } | null
   /** 本机的 Codex / Claude Code 在做（不是艾拉自己）：codex、claude；艾拉自己做时没有 */
   engine?: AgentEngine | null
+  /** 跨 Agent 派工：派出这个任务的主任务（主 Agent 用艾拉的派工工具派出来的）；自己开的没有 */
+  parent?: string | null
 }
 
 /** 本机的编程 Agent（通过 ACP 适配器接进来，见 aila-ai/app/runtime/localagents.py） */

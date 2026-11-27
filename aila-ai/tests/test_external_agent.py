@@ -404,3 +404,31 @@ def test_newest_codex_wins_including_the_desktop_app_copy(tmp_path: Path) -> Non
     assert find_program(engine, which=lambda n: "C:/npm/codex.exe", run=run, local_app_data=str(tmp_path)) == npm
     # 只有桌面版带的那份也能用
     assert find_program(engine, which=lambda n: None, run=run, local_app_data=str(tmp_path)) == str(app)
+
+
+def test_own_dispatch_tools_pass_without_asking_but_commands_still_ask(tmp_path: Path) -> None:
+    h = Harness(tmp_path, "ask", [])
+    own = schema.ToolCallStart(tool_call_id="m1", title="mcp.aila.wait_work", kind="other", status="pending")
+    sneaky = schema.ToolCallStart(tool_call_id="m2", title="mcp.aila.delegate", kind="execute", status="pending", raw_input={"command": "rm -rf /"})
+    h.script.extend([("tool", own), ("ask", schema.ToolCallUpdate(tool_call_id="m1", title="mcp.aila.wait_work", kind="other")),
+                     ("tool", sneaky), ("ask", schema.ToolCallUpdate(tool_call_id="m2", title="mcp.aila.delegate", kind="execute", raw_input={"command": "rm -rf /"}))])
+    events = asyncio.run(h.turn("派活", answer=False))
+    confirms = [e for e in events if e["type"] == "confirm"]
+    assert [c["detail"] for c in confirms] == ["rm -rf /"]  # 艾拉自己的工具直接放行，带命令的照样问
+    assert h.conns[0].answers == ["yes", "no"]
+
+
+def test_usage_limit_is_said_plainly(tmp_path: Path) -> None:
+    class Boom(Exception):
+        pass
+    h = Harness(tmp_path, "ask", [("say", "You've hit your usage limit. Upgrade to Pro or try again at Nov 27th.")])
+    import acp
+    async def broken_prompt(*a, **k):
+        await h.conns[-1].bridge.session_update("acp-1", schema.AgentMessageChunk(content=schema.TextContentBlock(type="text", text="You've hit your usage limit. Try again at Nov 27th.")))
+        raise acp.RequestError(-32603, "Internal error")
+    async def go() -> list:
+        await h.agent.prepare()
+        h.conns[-1].prompt = broken_prompt
+        return [e async for e in h.agent.turn("hi")]
+    events = asyncio.run(go())
+    assert events[-1]["reason"] == "error" and "额度用完了" in events[-1]["error"]

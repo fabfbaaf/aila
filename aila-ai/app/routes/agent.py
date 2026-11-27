@@ -39,12 +39,13 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..computer import computer_shell
 from ..deps import get_runtime
+from ..runtime.dispatch import SERVER_NAME, TOOLS, DispatchError
 from ..runtime.localagents import LocalAgentError, detect, install_adapters
 from ..runtime.permissions import MODE_LABELS
 from ..runtime.pricing import validate_budget
@@ -532,3 +533,49 @@ async def plan_reject(sid: str, rt: Runtime = Depends(get_runtime)) -> Event:
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
 
+
+# ---------- 跨 Agent 派工：给本机 Agent 挂的 MCP 服务（runtime/dispatch.py） ----------
+# 最小的 MCP（Streamable HTTP，只回 JSON）：initialize、tools/list、tools/call。
+# 只认开会话时交给那个 Agent 的令牌（Authorization: Bearer …），令牌决定是哪个任务在派活
+
+
+@router.post("/bridge")
+async def bridge(request: Request, rt: Runtime = Depends(get_runtime)) -> Response:
+    auth = request.headers.get("authorization", "")
+    parent = rt.dispatch.session_for(auth[7:]) if auth.lower().startswith("bearer ") else None
+    if parent is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        msg = await request.json()
+    except ValueError:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, status_code=400)
+    if not isinstance(msg, dict):
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "batch not supported"}}, status_code=400)
+    method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+    if mid is None:  # 通知（notifications/initialized 这些）：收到就好
+        return Response(status_code=202)
+
+    def ok(result: dict) -> JSONResponse:
+        return JSONResponse({"jsonrpc": "2.0", "id": mid, "result": result})
+
+    if method == "initialize":
+        return ok({"protocolVersion": params.get("protocolVersion") or "2025-06-18", "capabilities": {"tools": {"listChanged": False}},
+                   "serverInfo": {"name": SERVER_NAME, "title": "艾拉", "version": "0.3"}})
+    if method == "ping":
+        return ok({})
+    if method == "tools/list":
+        return ok({"tools": TOOLS})
+    if method == "tools/call":
+        name, args = str(params.get("name", "")), params.get("arguments") or {}
+        try:
+            text, error = await rt.dispatch.call(parent, name, args if isinstance(args, dict) else {}), False
+        except (DispatchError, RuntimeError_) as err:
+            text, error = str(err), True
+        return ok({"content": [{"type": "text", "text": text}], "isError": error})
+    return JSONResponse({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"unknown method {method}"}})
+
+
+@router.get("/bridge")
+async def bridge_stream() -> Response:
+    """不提供服务端推送的流（Streamable HTTP 允许不提供）"""
+    return Response(status_code=405)

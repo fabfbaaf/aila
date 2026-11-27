@@ -952,6 +952,7 @@ onBeforeUnmount(() => {
               <div class="meta">
                 <span>{{ sessionLabel(s) }}</span>
                 <span v-if="s.branch" class="meta-branch" :title="tr('在分支 {branch} 上做', { branch: s.branch })"><Icon name="branch" :size="12" /></span>
+                <span v-if="s.parent" class="meta-sub" :title="tr('主任务派出来的：它要你同意的操作也会出现在主任务里')">{{ tr('派出的') }}</span>
                 <span class="dot">·</span>
                 <span>{{ when(s.updated) }}</span>
                 <span v-if="s.plan && s.plan.decision === 'approved' && !s.plan.finished" class="meta-plan">
@@ -1850,6 +1851,14 @@ code {
 
 .engine-option {
   max-width: 170px;
+}
+
+.meta-sub {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
 }
 
 .engine-label {

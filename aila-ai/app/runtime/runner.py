@@ -28,6 +28,7 @@ from ..extensions import ExtensionStore, skills_context
 from .commands import Command, load_commands, match
 from .skilltool import read_skill_tool
 from .delivery import DELIVERY, DeliveryError
+from .dispatch import Dispatch
 from .external import ExternalAgent
 from .localagents import ENGINES, LocalAgentError
 from .ledger import context_ledger
@@ -91,6 +92,7 @@ class Runtime:
         memory_store: "Callable[[], MemoryStore] | None" = None,
         language: Callable[[], str] = lambda: "zh",
         web_search: Callable[[], SearchProvider | None] | None = None,
+        bridge_url: str | None = None,
     ) -> None:
         # 界面语言：英文时新会话开头说一声，让她用英文回答（定下来就不改，前缀缓存不断）
         self.language = language
@@ -133,16 +135,18 @@ class Runtime:
         self._operations: set[str] = set()
         # 正在 /review 的会话 → 这一轮结束后要换回的权限模式
         self._reviewing: dict[str, Mode] = {}
+        # 跨 Agent 派工：本机 Agent 当主 Agent 时给它挂的派工工具（dispatch.py）；bridge_url 是艾拉自己的地址
+        self.dispatch = Dispatch(self, bridge_url)
 
     # ---------- 会话 ----------
 
     def create(self, cwd: str | None = None, mode: Mode = "ask", isolate: bool = False,
                budget: float | None = None, *, kind: Literal["project", "computer"] = "project",
-               engine: str | None = None) -> Session:
+               engine: str | None = None, parent: str | None = None) -> Session:
         """isolate：在新分支上做（git worktree），合并之前你的代码一个字都不动。
         engine：交给本机的 Codex / Claude Code 做（external.py）；不给就是艾拉自己做"""
         if engine is not None:
-            return self._create_external(cwd, mode, isolate, budget, kind, engine)
+            return self._create_external(cwd, mode, isolate, budget, kind, engine, parent)
         try:
             budget = validate_budget(budget)
         except ValueError as err:
@@ -210,7 +214,7 @@ class Runtime:
         return agent
 
     def _create_external(self, cwd: str | None, mode: Mode, isolate: bool, budget: float | None, kind: str,
-                         engine: str) -> Session:
+                         engine: str, parent: str | None = None) -> Session:
         """本机 Agent 的会话：日志和艾拉自己的一样（任务页、终端、手机都能看），开头记着是谁在做"""
         if engine not in ENGINES:
             raise RuntimeError_(f"不认识的 Agent：{engine}")
@@ -226,7 +230,7 @@ class Runtime:
         if not root.is_dir():
             raise RuntimeError_(f"{cwd} 不是一个目录。")
         root = root.resolve()
-        meta: dict = {"engine": engine}
+        meta: dict = {"engine": engine, **({"parent": parent} if parent else {})}  # parent：哪个任务派出来的
         if isolate:
             try:
                 meta["branch"] = asdict(open_branch(root, self.work_dir))
@@ -249,7 +253,7 @@ class Runtime:
             # 本机的 Codex / Claude Code 在做：权限还是按艾拉的规则（它们的批准请求交给 Policy）
             mode = session.mode if session.mode in MODES else "ask"
             external = ExternalAgent(session, str(engine), Policy(session.cwd, self.rules, mode, self.mcp),
-                                     self.confirms, self.data_dir)
+                                     self.confirms, self.data_dir, servers=lambda: self.dispatch.servers(sid))
             if _unfinished(session):
                 external.repair()
             self._agents[sid] = external  # type: ignore[assignment]

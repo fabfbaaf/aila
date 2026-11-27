@@ -116,7 +116,7 @@ def get_runtime() -> Runtime:
                       fast_factory=lambda: get_coder_fast_model(), mcp_config=settings.mcp_config,
                       computer_inventory=settings.computer_inventory, extensions=get_extensions(),
                       memory_store=lambda: get_memory_store(), language=lambda: settings.language,
-                      web_search=search_provider)
+                      web_search=search_provider, bridge_url=f"http://{settings.host}:{settings.port}")
     runtime.mcp.on_change = restart_mcp  # 编程这边改了 mcp.json，对话那边跟着重连
     runtime.watchers.append(get_notifier().watch)  # 等你同意、做完了：告诉手机（app/notify.py）
     return runtime

@@ -505,6 +505,12 @@ data: {"type": "done"}
 - **换模型**：它给的设置里只放出模型、思考深度、快速模式（`GET/PUT /agent/sessions/{sid}/options`；权限模式不给换）。你选的记在日志（`engine_config`），连上、加载会话、每一轮开始前对齐；正在做时换，下一轮开始前换上。新会话没选过时 Codex 用 `config.toml` 里设的模型
 - 出方案、`/review`、压缩上下文、撤销这一轮不走艾拉的流程（直接跟它说）
 
+### 跨 Agent 派工（`runtime/dispatch.py`）
+
+本机 Agent 当主 Agent 时，艾拉给它挂一个本机 MCP 服务（`POST /agent/bridge`，最小的 Streamable HTTP，只认开会话时给的令牌），工具：
+`delegate`（派给 codex / claude：开一个新的本机 Agent 会话，在独立 git 工作区里做，开头记着 `parent`）、`work_status`、`wait_work`（一次最多等 50 秒，Agent 的工具调用有超时）、`merge_work`（按主任务的权限模式问你，给你看的 diff 由这边生成；问你时不卡住主 Agent，同意后在后台跑测试、合并，主任务里有合并卡片）、`discard_work`。
+助手要你同意的操作原样转到主任务（在主任务里点就行），做完、出错在主任务里说一声；主 Agent 调这几个工具本身不用问。
+
 ### 编程 Agent 评测
 
 用独立的小项目评测任务成功率、主 Agent 步数、用时、工具调用、输入/缓存/输出 token 和失败原因。每次复制 fixture 到临时目录，初始化 git 并提交起点；会话和规则也在临时目录，用完清理，不碰 `data/` 和原 fixture。不改运行时。

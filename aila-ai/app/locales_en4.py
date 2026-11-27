@@ -1,6 +1,15 @@
 """英文词典（四）：本机 Agent（Codex、Claude Code，runtime/localagents.py、runtime/external.py）"""
 
 EN4: dict[str, str] = {
+    "没有叫 {0} 的工具。": "There is no tool called {0}.",
+    "只能派给 {0}。": "Can only hand work to {0}.",
+    "要写清楚让它做什么。": "Say clearly what it should do.",
+    "没有这个编号的活（只能管这个任务派出去的）。": "No work with that id (only work handed out by this task can be managed).",
+    "它还在做，等它做完再合并（wait_work）。": "It's still working; wait for it to finish before merging (wait_work).",
+    "这块活的分支已经没了。": "This work's branch no longer exists.",
+    "它还在做，先等它做完（或者让用户在任务页里打断）再放弃。": "It's still working; wait for it to finish (or ask the user to stop it on the task page) before discarding.",
+    "派不出去：{0}": "Couldn't hand it out: {0}",
+    "没合并：{0}": "Not merged: {0}",
     "没有这个选项。": "No such option.",
     "这个任务是艾拉自己在做：编程用的模型在 设置 → 对话 里换。": "Aila is doing this task herself: change the coding model in Settings → Chat.",
     "不认识的 Agent：{0}": "Unknown agent: {0}",

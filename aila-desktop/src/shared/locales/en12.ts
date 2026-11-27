@@ -4,6 +4,8 @@ export const EN12: Record<string, string> = {
   "本机 Agent 只能在项目里做。": "Local agents only work inside a project.",
   "{name} 用你自己的账号和额度在做；它要改文件、跑命令时按上面的权限模式问你，危险命令总是问。": "{name} works with your own account and quota. When it wants to edit files or run commands it asks according to the permission mode above; dangerous commands always ask.",
   "谁来做？": "Who does it?",
+  "派出的": "Handed out",
+  "主任务派出来的：它要你同意的操作也会出现在主任务里": "Handed out by a lead task: its approval requests also show up in the lead task",
   "本机的 {name} 在做：用你自己的账号和它自己的模型": "{name} on this computer is doing this, with your own account and its own model",
   "要 {name} 做什么？": "What should {name} do?",
   "思考：{level}": "Reasoning: {level}",

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import logging
 import os
 import re
 from contextlib import AsyncExitStack
@@ -32,6 +33,9 @@ from ..confirm import Confirmations
 from .localagents import ENGINES, LocalAgentError, launch
 from .permissions import Policy
 from .session import Event, Session
+
+# 适配器会发一些我们不处理的通知（比如登录状态 auth/status_update）：SDK 每次都打一大段错误，不是问题，不记
+logging.getLogger("acp.connection").addFilter(lambda record: "auth/status_update" not in record.getMessage())
 
 INIT_TIMEOUT = 60
 SESSION_TIMEOUT = 120
@@ -92,7 +96,8 @@ class ExternalAgent:
 
     def __init__(self, session: Session, engine_id: str, policy: Policy, confirms: Confirmations | None,
                  data_dir: Path, spawn: Callable[..., Any] = acp.spawn_agent_process,
-                 launcher: Callable[[str, Path], tuple[str, list[str], dict[str, str]]] = launch) -> None:
+                 launcher: Callable[[str, Path], tuple[str, list[str], dict[str, str]]] = launch,
+                 servers: Callable[[], list[dict[str, Any]]] | None = None) -> None:
         if engine_id not in ENGINES:
             raise LocalAgentError(f"不认识的 Agent：{engine_id}")
         self.session = session
@@ -102,6 +107,8 @@ class ExternalAgent:
         self.data_dir = data_dir
         self._spawn = spawn
         self._launch = launcher
+        # 给它挂的 MCP 服务（艾拉的派工工具，dispatch.py）：开会话、加载会话时都带上
+        self._servers = servers or (lambda: [])
         self._stack: AsyncExitStack | None = None
         self._conn: Any = None
         self._sid = ""
@@ -156,7 +163,9 @@ class ExternalAgent:
         except LocalAgentError as err:
             reason, error = "error", str(err)
         except acp.RequestError as err:
-            reason, error = "error", _friendly(self.engine.title, str(err))
+            # 它常常先把真正的原因说出来（额度用完了、模型不能用），再报一个笼统的「Internal error」：用它说的
+            reason, error = "error", (_error_text(self.engine.title, self._said) if self._said.strip()
+                                      else _friendly(self.engine.title, str(err)))
             await self.close()
         except (OSError, EOFError, ConnectionError, TimeoutError) as err:
             reason, error = "error", f"{self.engine.title} 的适配器断开了：{err}"
@@ -269,6 +278,11 @@ class ExternalAgent:
                 except acp.RequestError:
                     pass  # 它不认了（比如账号换了，没这个模型）：按它现在的
 
+    def _mcp(self) -> list[Any]:
+        return [schema.HttpMcpServer(type="http", name=s["name"], url=s["url"],
+                                     headers=[schema.HttpHeader(name=h["name"], value=h["value"]) for h in s.get("headers", [])])
+                for s in self._servers()]
+
     async def _ensure(self) -> None:
         async with self._lock:
             if self._conn is None:
@@ -289,13 +303,13 @@ class ExternalAgent:
             if stored and can_load:
                 self._loading = True  # 加载时它会把以前的对话重放一遍：不再记
                 try:
-                    res = await asyncio.wait_for(conn.load_session(cwd=str(self.root), session_id=stored, mcp_servers=[]),
+                    res = await asyncio.wait_for(conn.load_session(cwd=str(self.root), session_id=stored, mcp_servers=self._mcp()),
                                                  SESSION_TIMEOUT)
                 finally:
                     self._loading = False
                 self._sid = stored
             else:
-                res = await asyncio.wait_for(conn.new_session(cwd=str(self.root), mcp_servers=[]), SESSION_TIMEOUT)
+                res = await asyncio.wait_for(conn.new_session(cwd=str(self.root), mcp_servers=self._mcp()), SESSION_TIMEOUT)
                 self._sid = res.session_id
                 self._fresh = True
                 self.session.append({"type": "engine_session", "engine": self.engine.id, "id": self._sid})
@@ -460,6 +474,9 @@ class ExternalAgent:
         command = _command(tool_call, full_title) if kind == "command" else ""
         if kind == "command" and not command and info is not None:
             command = str(info["args"].get("command") or "")
+        if _own_tool(full_title) and not _command(tool_call, "") and kind_acp not in ("edit", "delete", "move") and allow is not None:
+            # 调艾拉自己给它的派工工具（dispatch.py）：本身不改东西，合并时艾拉会另外问你
+            return _choose(allow)
         decision = self.policy.decide(kind, command)
         if decision.verdict == "allow" and allow is not None:
             return _choose(allow)
@@ -504,6 +521,17 @@ def _choose(option: Any) -> Any:
 
 def _todo_status(status: str) -> str:
     return {"in_progress": "in_progress", "completed": "completed"}.get(str(status), "pending")
+
+
+def _own_tool(title: str) -> bool:
+    """是不是艾拉给它的派工工具：Codex 叫它「mcp.aila.delegate」，Claude Code 叫「mcp__aila__delegate」"""
+    from .dispatch import SERVER_NAME, TOOLS
+
+    name = title.strip()
+    for prefix in (f"mcp.{SERVER_NAME}.", f"mcp__{SERVER_NAME}__"):
+        if name.startswith(prefix) and name[len(prefix):] in {t["name"] for t in TOOLS}:
+            return True
+    return False
 
 
 def _short(title: str, root: Path) -> str:
@@ -623,9 +651,11 @@ def codex_model(home: Path | None = None) -> str:
 
 
 def _error_text(title: str, said: str) -> str:
-    """Codex 把服务端的错误原样（JSON）说出来：挑出里面的 message"""
+    """Codex 把服务端的错误原样（JSON）说出来：挑出里面的 message；额度用完了单独说清楚"""
     m = re.search(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"', said)
     detail = m.group(1) if m else said.strip().splitlines()[-1] if said.strip() else "没说原因"
+    if "usage limit" in detail.lower():
+        return f"{title} 的额度用完了（你账号的用量上限），等它恢复或者在它那边加额度再试。它的原话：{detail[:300]}"
     if "not supported" in detail and "model" in detail:
         return f"{title} 用的模型你的账号不能用：{detail[:200]}。在 {title} 的设置里换一个模型再试。"
     return f"{title} 出错了：{detail[:300]}"
