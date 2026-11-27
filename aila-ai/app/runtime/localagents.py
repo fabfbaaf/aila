@@ -4,7 +4,8 @@
 @agentclientprotocol/codex-acp、@agentclientprotocol/claude-agent-acp）。适配器自己也会带一份 Codex / Claude，
 很大（各四五百 MB），所以装的时候不带（--omit=optional），用 CODEX_PATH / CLAUDE_CODE_EXECUTABLE 指到你已经装好的那个。
 
-- 找程序：先看 PATH 里的 codex / claude；npm 装的 codex 在 PATH 里是个脚本，顺着找到里面真正的 codex.exe
+- 找程序：PATH 里的 codex / claude（npm 装的 codex 在 PATH 里是个脚本，顺着找到里面真正的 codex.exe），
+  还有桌面版 Codex 自己带的那份；有几个就用版本最新的（新模型要新的 Codex 才认）
 - 登录：用它们自己的命令问（codex login status、claude auth status），只看登没登录，不碰令牌文件
 - 登录本身要你在终端里用官方程序做（codex login、claude auth login），艾拉不经手账号
 - 适配器装在 数据目录/acp（设置页点「装适配器」才下载，要 Node.js）
@@ -15,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
@@ -78,7 +80,7 @@ def adapters_dir(data_dir: Path) -> Path:
     return Path(os.environ.get("AILA_ACP_DIR") or data_dir / "acp")
 
 
-def find_program(engine: Engine, which=shutil.which) -> str | None:
+def _on_path(engine: Engine, which=shutil.which) -> str | None:
     """PATH 里找；npm 装的 codex 是个脚本（codex.cmd），顺着找到里面的 codex.exe（适配器要真正的程序）"""
     found = which(engine.command)
     if not found:
@@ -89,6 +91,31 @@ def find_program(engine: Engine, which=shutil.which) -> str | None:
         for exe in sorted(package.glob("**/vendor/*/bin/codex.exe")) + sorted(package.glob("**/vendor/*/codex/codex.exe")):
             return str(exe)
     return str(path)
+
+
+def _app_copies(engine: Engine, local_app_data: str | None = None) -> list[str]:
+    """桌面版 Codex 自己带的那份（%LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<版本号>\\codex.exe）：
+    它跟着桌面版更新，常常比 npm 装的新——新模型（比如 GPT-6.2）要新的 Codex 才认"""
+    if engine.id != "codex":
+        return []
+    base = local_app_data if local_app_data is not None else os.environ.get("LOCALAPPDATA", "")
+    if not base:
+        return []
+    return [str(p) for p in sorted(Path(base, "OpenAI", "Codex", "bin").glob("*/codex.exe"))]
+
+
+def _version_key(text: str) -> tuple[int, ...]:
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+
+def find_program(engine: Engine, which=shutil.which, run=None, local_app_data: str | None = None) -> str | None:
+    """用哪个程序：PATH 里的和桌面版带的都看，挑版本最新的（问不出版本的排最后）"""
+    candidates = [p for p in [_on_path(engine, which), *_app_copies(engine, local_app_data)] if p]
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else None
+    run = run or _run
+    return max(candidates, key=lambda p: _version_key(run([p, "--version"])[1]))
 
 
 def _run(args: list[str], timeout: float = CHECK_TIMEOUT) -> tuple[int, str]:
@@ -114,13 +141,13 @@ def logged_in(engine: Engine, program: str, run=_run) -> bool | None:
     return code == 0 and "not logged in" not in out.lower()
 
 
-def detect(data_dir: Path, which=shutil.which, run=_run) -> list[LocalAgent]:
+def detect(data_dir: Path, which=shutil.which, run=_run, local_app_data: str | None = None) -> list[LocalAgent]:
     root = adapters_dir(data_dir) / "node_modules"
     node = which("node")
     out = []
     for engine in ENGINES.values():
         info = LocalAgent(engine.id, engine.title)
-        info.path = find_program(engine, which)
+        info.path = find_program(engine, which, run, local_app_data)
         info.adapter = (root / engine.script).is_file()
         if not info.path:
             info.problem = f"没找到 {engine.title}"
@@ -144,13 +171,13 @@ def detect(data_dir: Path, which=shutil.which, run=_run) -> list[LocalAgent]:
     return out
 
 
-def launch(engine_id: str, data_dir: Path, which=shutil.which) -> tuple[str, list[str], dict[str, str]]:
+def launch(engine_id: str, data_dir: Path, which=shutil.which, local_app_data: str | None = None) -> tuple[str, list[str], dict[str, str]]:
     """起适配器的命令和环境变量：node 适配器入口，指到你装好的程序，去掉会改成按量计费的密钥"""
     engine = ENGINES.get(engine_id)
     if engine is None:
         raise LocalAgentError(f"不认识的 Agent：{engine_id}")
     node = which("node")
-    program = find_program(engine, which)
+    program = find_program(engine, which, local_app_data=local_app_data)
     script = adapters_dir(data_dir) / "node_modules" / engine.script
     if not program:
         raise LocalAgentError(f"没找到 {engine.title}。{engine.install_hint}")

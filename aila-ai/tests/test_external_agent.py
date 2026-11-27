@@ -299,7 +299,7 @@ def test_detect_finds_programs_and_login(tmp_path: Path) -> None:
     import os
     os.environ["AILA_ACP_DIR"] = str(tmp_path / "acp")
     try:
-        found = {a.id: a for a in detect(tmp_path, which=paths.get, run=run)}
+        found = {a.id: a for a in detect(tmp_path, which=paths.get, run=run, local_app_data="")}
     finally:
         os.environ.pop("AILA_ACP_DIR")
     assert found["codex"].path == str(exe) and found["codex"].ready and found["codex"].logged_in
@@ -308,11 +308,11 @@ def test_detect_finds_programs_and_login(tmp_path: Path) -> None:
 
 
 def test_detect_without_programs_or_node(tmp_path: Path) -> None:
-    found = {a.id: a for a in detect(tmp_path, which=lambda name: None, run=lambda *a, **k: (-1, ""))}
+    found = {a.id: a for a in detect(tmp_path, which=lambda name: None, run=lambda *a, **k: (-1, ""), local_app_data="")}
     assert not found["codex"].ready and "没找到" in found["codex"].problem
-    assert find_program(localagents.ENGINES["claude"], which=lambda n: None) is None
+    assert find_program(localagents.ENGINES["claude"], which=lambda n: None, local_app_data="") is None
     with pytest.raises(LocalAgentError):
-        localagents.launch("codex", tmp_path, which=lambda n: None)
+        localagents.launch("codex", tmp_path, which=lambda n: None, local_app_data="")
 
 
 def test_codex_model_reads_only_the_global_setting(tmp_path: Path) -> None:
@@ -389,3 +389,18 @@ def test_runtime_options_routes_reject_aila_sessions(tmp_path: Path) -> None:
     s = rt.create(str(proj), "ask")
     with pytest.raises(RuntimeError_, match="设置"):
         asyncio.run(rt.engine_options(s.id))
+
+
+def test_newest_codex_wins_including_the_desktop_app_copy(tmp_path: Path) -> None:
+    app = tmp_path / "OpenAI" / "Codex" / "bin" / "abc123" / "codex.exe"
+    app.parent.mkdir(parents=True)
+    app.write_text("")
+    npm = str(Path("C:/npm/codex.exe"))
+    versions = {npm: "codex-cli 0.155.1", str(app): "codex-cli 0.167.0-alpha.3.2"}
+    run = lambda args, timeout=0: (0, versions.get(args[0], ""))  # noqa: E731
+    engine = localagents.ENGINES["codex"]
+    assert find_program(engine, which=lambda n: "C:/npm/codex.exe", run=run, local_app_data=str(tmp_path)) == str(app)
+    versions[npm] = "codex-cli 0.172.0"
+    assert find_program(engine, which=lambda n: "C:/npm/codex.exe", run=run, local_app_data=str(tmp_path)) == npm
+    # 只有桌面版带的那份也能用
+    assert find_program(engine, which=lambda n: None, run=run, local_app_data=str(tmp_path)) == str(app)
