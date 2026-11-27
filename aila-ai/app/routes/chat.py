@@ -3,12 +3,13 @@
 import asyncio
 import json
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .. import deps
@@ -24,6 +25,8 @@ from .discoveries import get_discoveries
 from ..memory.episodes import Line, chat_context
 from ..memory.store import EPISODE, MemoryStore
 from ..persona import bond_note, system_prompt
+from ..brain import SERVER_NAME as BRAIN_SERVER, BrainError
+from ..runtime.localagents import LocalAgentError
 from ..i18n import localize, localize_event
 from ..sse import with_heartbeat
 from ..tags import Event
@@ -169,11 +172,17 @@ async def chat(
     # 这次能用哪些工具：用户开着的技能包里的（资料库空着时不给）
     toolbox = await asyncio.to_thread(registry.toolbox, req.skills)
 
+    # 对话的大脑：设置里选了本机的 Codex / Claude Code 就交给它想（app/brain.py），流程、工具、确认都不变
+    brain = deps.get_chat_brain() or model
+
     async def events() -> AsyncIterator[str]:
         try:
-            async for event in run_agent(model, messages, toolbox, confirms, frozenset(m.name for m in motions)):
+            async for event in run_agent(brain, messages, toolbox, confirms, frozenset(m.name for m in motions)):
                 yield sse(event)
             yield sse({"type": "done"})
+        except (BrainError, LocalAgentError) as err:  # 本机 Agent 没登录、额度用完、断开了：原话告诉你
+            log.warning("对话的大脑出错：%s", err)
+            yield sse({"type": "error", "code": "unknown", "message": str(err)})
         except Exception as err:  # 出错也要告诉桌面端，让艾拉有反应，而不是一直等
             code, message = classify_error(err)
             log.warning("大模型调用失败（%s）：%s", code, err)
@@ -279,3 +288,40 @@ def memory_forget_episode(entry_id: str, store: MemoryStore = Depends(get_memory
 @router.delete("/memory/episodes")
 def memory_forget_episodes(store: MemoryStore = Depends(get_memory_store)) -> dict[str, int]:
     return {"deleted": store.forget_episodes()}
+
+
+# ---------- 对话的大脑是本机 Agent 时：艾拉的工具用 MCP 挂给它（app/brain.py） ----------
+
+
+@router.post("/chat/bridge")
+async def chat_bridge(request: Request) -> Response:
+    """最小的 MCP（只回 JSON）：tools/list 是这次对话能用的工具，tools/call 交回对话流程去确认、执行"""
+    brain = deps.get_chat_brain()
+    auth = request.headers.get("authorization", "")
+    if brain is None or not auth.lower().startswith("bearer ") or not secrets.compare_digest(auth[7:], brain.token):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        msg = await request.json()
+    except ValueError:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, status_code=400)
+    if not isinstance(msg, dict):
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "batch not supported"}}, status_code=400)
+    method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+    if mid is None:
+        return Response(status_code=202)
+
+    def ok(result: dict) -> JSONResponse:
+        return JSONResponse({"jsonrpc": "2.0", "id": mid, "result": result})
+
+    if method == "initialize":
+        return ok({"protocolVersion": params.get("protocolVersion") or "2025-06-18", "capabilities": {"tools": {"listChanged": False}},
+                   "serverInfo": {"name": BRAIN_SERVER, "title": "艾拉的工具", "version": "0.3"}})
+    if method == "ping":
+        return ok({})
+    if method == "tools/list":
+        return ok({"tools": brain.specs})
+    if method == "tools/call":
+        args = params.get("arguments") or {}
+        text = await brain.tool_call(str(params.get("name", "")), args if isinstance(args, dict) else {})
+        return ok({"content": [{"type": "text", "text": text}], "isError": False})
+    return JSONResponse({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"unknown method {method}"}})

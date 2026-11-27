@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { t } from '../../i18n'
 import { onActivated, ref } from 'vue'
-import type { AiSettings, AiSettingsUpdate } from '../../../../shared/settings'
+import type { AiSettings, AiSettingsUpdate, ChatBrain } from '../../../../shared/settings'
+import type { LocalAgentInfo } from '../../../../shared/agent'
 import { bridge } from '../../platform/bridge'
 import AgendaCard from './AgendaCard.vue'
 
@@ -20,6 +21,18 @@ const searchKey = ref('')
 
 const llmMsg = ref<{ ok: boolean; text: string } | null>(null)
 const searchMsg = ref<{ ok: boolean; text: string } | null>(null)
+
+// 对话的大脑：填的大模型，或者本机的 Codex / Claude Code（能用的才能选）
+const brain = ref<ChatBrain>('')
+const brainMsg = ref<{ ok: boolean; text: string } | null>(null)
+const localAgents = ref<LocalAgentInfo[]>([])
+async function loadAgents(): Promise<void> {
+  const res = await api.agentLocal()
+  localAgents.value = res.ok && res.data ? res.data : []
+}
+async function saveBrain(): Promise<void> {
+  await save({ chatBrain: brain.value }, brainMsg)
+}
 const busy = ref(false)
 
 const MODELS = ['deepseek-flash', 'deepseek-v4-pro', 'qwen-plus', 'qwen-max', 'moonshot-v1-8k', 'glm-4-plus']
@@ -32,6 +45,7 @@ async function load(): Promise<void> {
   }
   offline.value = ''
   fill(res.data)
+  void loadAgents()
 }
 
 function fill(s: AiSettings): void {
@@ -41,6 +55,7 @@ function fill(s: AiSettings): void {
   coderModel.value = s.llm.coderModel ?? ''
   coderFastModel.value = s.llm.coderFastModel ?? ''
   provider.value = s.search.provider
+  brain.value = s.chatBrain ?? ''
   apiKey.value = ''
   searchKey.value = ''
 }
@@ -152,6 +167,25 @@ onActivated(load) // 第一次显示和每次切回来都会触发（KeepAlive�
         <button class="btn primary" :disabled="busy" @click="saveLlm">{{ t('保存并测试') }}</button>
         <button class="btn" :disabled="busy" @click="test">{{ t('测试连接') }}</button>
         <span v-if="llmMsg" class="msg" :class="llmMsg.ok ? 'ok' : 'error'">{{ llmMsg.text }}</span>
+      </div>
+    </div>
+
+    <div v-if="settings.chatBrain !== undefined" class="card">
+      <h3>{{ t('对话的大脑') }}</h3>
+      <p class="hint">{{ t('平时聊天由谁来想：上面填的大模型，或者这台电脑上的 Codex、Claude Code（用你自己的账号和额度）。人格、记忆、表情、语音、提醒这些工具都照旧；整理记忆、写摘要还用上面的大模型。') }}</p>
+      <div class="row">
+        <span class="label">{{ t('大脑') }}</span>
+        <select v-model="brain">
+          <option value="">{{ t('上面填的大模型') }}</option>
+          <option v-for="a in localAgents" :key="a.id" :value="a.id" :disabled="!a.ready && brain !== a.id">
+            {{ a.ready ? t('本机的 {name}', { name: a.title }) : t('本机的 {name}（{why}）', { name: a.title, why: a.problem }) }}
+          </option>
+        </select>
+      </div>
+      <p v-if="brain" class="hint">{{ t('本机 Agent 每说一句要几秒钟，比上面的大模型慢；语音第一句也会晚一点出来。') }}</p>
+      <div class="actions">
+        <button class="btn primary" :disabled="busy || brain === (settings.chatBrain ?? '')" @click="saveBrain">{{ t('保存') }}</button>
+        <span v-if="brainMsg" class="msg" :class="brainMsg.ok ? 'ok' : 'error'">{{ brainMsg.text }}</span>
       </div>
     </div>
 

@@ -90,6 +90,22 @@ def get_model() -> ChatModel:
     return OpenAICompatibleModel(settings)
 
 
+_brains: dict[str, Any] = {}
+
+
+def get_chat_brain() -> Any:
+    """对话用的大脑：设置里选了本机的 Codex / Claude Code 就是它（app/brain.py），否则 None（用上面的大模型）。
+    每种一个，留着会话接着聊；整理记忆、写摘要这些后台的活还用上面的大模型"""
+    engine = settings.chat_brain
+    if not engine:
+        return None
+    if engine not in _brains:
+        from .brain import AgentBrain
+
+        _brains[engine] = AgentBrain(engine, settings.data_dir, f"http://{settings.host}:{settings.port}")
+    return _brains[engine]
+
+
 # ---------- 编程 Agent ----------
 
 

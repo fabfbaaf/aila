@@ -511,6 +511,11 @@ data: {"type": "done"}
 `delegate`（派给 codex / claude：开一个新的本机 Agent 会话，在独立 git 工作区里做，开头记着 `parent`）、`work_status`、`wait_work`（一次最多等 50 秒，Agent 的工具调用有超时）、`merge_work`（按主任务的权限模式问你，给你看的 diff 由这边生成；问你时不卡住主 Agent，同意后在后台跑测试、合并，主任务里有合并卡片）、`discard_work`。
 助手要你同意的操作原样转到主任务（在主任务里点就行），做完、出错在主任务里说一声；主 Agent 调这几个工具本身不用问。
 
+### 对话的大脑换成本机 Agent（`app/brain.py`）
+
+设置里 `AILA_CHAT_BRAIN=codex|claude` 时，对话（`/chat`，手机上也一样）交给本机的 Codex / Claude Code 想，`run_agent` 一点不变：
+`AgentBrain` 实现 `ChatModel.stream()`。人格：开 ACP 会话时交系统提示词（Claude Code 整个换掉，Codex 只能接在后面）；<背景>（记忆）原样放在最新一句前面；会话留着，下一句只发新的，对不上就开新会话并带上最近的对话。艾拉的对话工具用 MCP 挂给它（`POST /chat/bridge`，只认这个大脑的令牌）：它调用时 `stream()` 把调用交回 `run_agent`（照常确认、执行），结果在下一次 `stream()` 交回给它。它自己的改文件、跑命令一律不批，开在空文件夹里。整理记忆、写摘要还用填的大模型。
+
 ### 编程 Agent 评测
 
 用独立的小项目评测任务成功率、主 Agent 步数、用时、工具调用、输入/缓存/输出 token 和失败原因。每次复制 fixture 到临时目录，初始化 git 并提交起点；会话和规则也在临时目录，用完清理，不碰 `data/` 和原 fixture。不改运行时。

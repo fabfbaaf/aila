@@ -45,6 +45,8 @@ class Settings:
     persona_catchphrase: str = ""
     # 界面语言（桌面端设置里选的）：en 时她用英文回答
     language: str = "zh"
+    # 对话的大脑：空 = 上面填的大模型；codex / claude = 本机的 Codex / Claude Code（app/brain.py）
+    chat_brain: str = ""
     # 日历订阅链接（ICS）、邮箱和授权码（只读，见 app/agenda.py、app/mail.py）；都是私密的，不回显
     calendar_url: str = ""
     mail_user: str = ""
@@ -91,6 +93,7 @@ def load_settings() -> Settings:
         persona_call=os.getenv("AILA_PERSONA_CALL", "").strip()[:12],
         persona_catchphrase=os.getenv("AILA_PERSONA_CATCHPHRASE", "").strip()[:12],
         language="en" if os.getenv("AILA_LANGUAGE", "zh").strip().lower() == "en" else "zh",
+        chat_brain=os.getenv("AILA_CHAT_BRAIN", "").strip().lower() if os.getenv("AILA_CHAT_BRAIN", "").strip().lower() in ("codex", "claude") else "",
         calendar_url=os.getenv("AILA_CALENDAR_URL", "").strip(),
         mail_user=os.getenv("AILA_MAIL_USER", "").strip(),
         mail_pass=os.getenv("AILA_MAIL_PASS", "").strip(),
