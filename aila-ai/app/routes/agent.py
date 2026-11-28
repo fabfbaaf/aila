@@ -3,6 +3,8 @@
   POST   /agent/sessions                   新建会话 {cwd, mode, isolate（在新分支上做）}
   POST   /agent/sessions/{id}/merge        在新分支上做时：跑测试、合并回你的代码 {run_tests}
   POST   /agent/sessions/{id}/discard      放弃分支（你的代码保持原样）
+  GET    /agent/sessions/{id}/delivery     交付卡：改了哪些文件和 diff、最后一次测试、PR 和 CI、验收结论（?ci=false 不问 CI）
+  POST   /agent/sessions/{id}/acceptance   验收 {verdict: accepted | rejected, note, comments: [{file, line, side, text}]}；退回修改会接着做一轮
   POST   /agent/tasks                      新建会话并马上开始做 {text, cwd 或 project（代码库里的项目 id）, mode}
   GET    /agent/sessions                   会话列表（最近的在前）
   GET    /agent/sessions/{id}              会话的全部日志事件（界面据此重建）
@@ -56,7 +58,7 @@ from ..runtime.mcp import McpError, parse_import
 from ..runtime.memory import MemoryError_
 from ..runtime.runner import Runtime, RuntimeError_
 from ..runtime.session import Event
-from ..i18n import localize_event, localize_labels, localize_summary
+from ..i18n import localize, localize_event, localize_labels, localize_summary
 from ..sse import with_heartbeat
 
 router = APIRouter(prefix="/agent")
@@ -246,6 +248,35 @@ async def merge(sid: str, req: Merge, rt: Runtime = Depends(get_runtime)) -> dic
     _session_or_404(rt, sid)
     try:
         return await rt.merge(sid, req.run_tests)
+    except RuntimeError_ as err:
+        raise HTTPException(409, str(err)) from err
+
+
+class Accept(BaseModel):
+    verdict: Literal["accepted", "rejected"]
+    note: str = Field(default="", max_length=4000)
+    comments: list[dict] = Field(default_factory=list, max_length=50)
+
+
+@router.get("/sessions/{sid}/delivery")
+async def delivery(sid: str, ci: bool = True, rt: Runtime = Depends(get_runtime)) -> dict:
+    try:
+        card = await rt.delivery(sid, with_ci=ci)
+    except RuntimeError_ as err:
+        raise HTTPException(404 if rt.store.get(sid) is None else 409, str(err)) from err
+    # 卡片上代码写的说明按现在的语言
+    for part in (card.get("changes"), card.get("ci")):
+        if isinstance(part, dict) and part.get("note"):
+            part["note"] = localize(part["note"])
+    return card
+
+
+@router.post("/sessions/{sid}/acceptance")
+async def accept(sid: str, req: Accept, rt: Runtime = Depends(get_runtime)) -> Event:
+    if rt.store.get(sid) is None:
+        raise HTTPException(404, "没有这个会话。")
+    try:
+        return rt.accept(sid, req.verdict, req.note, req.comments)
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
 

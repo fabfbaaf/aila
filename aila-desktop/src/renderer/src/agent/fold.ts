@@ -247,6 +247,8 @@ export class Transcript {
         if (e.review) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('审查没提交的改动')), review: true, tag: 'review' })
         else if (e.plan_request) this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('出方案')), tag: 'plan' })
         else if (typeof e.plan_stage === 'number') this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('第 {n} 阶段', { n: e.plan_stage + 1 })), tag: 'stage' })
+        else if (e.rejection) // 退回修改：text 是一句标题，detail 是代码按你的意见拼出来、交给她的那段话
+          this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('退回修改')), tag: 'command', detail: String(e.text ?? '') })
         else if (typeof e.command === 'string')
           this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `/${e.command}`), tag: 'command', detail: String(e.text ?? '') })
         else this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
@@ -365,6 +367,13 @@ export class Transcript {
         this.closeText()
         this.items.push({ kind: 'note', key: this.key(), text: t('计划停在第 {n} 阶段：{why}', { n: Number(e.stage ?? 0) + 1, why: String(e.text ?? '') }) })
         break
+      case 'acceptance': {
+        this.closeText()
+        const n = Array.isArray(e.comments) ? e.comments.length : 0
+        const head = e.verdict === 'accepted' ? t('你验收通过了') : n ? t('你退回了修改（{n} 条意见）', { n }) : t('你退回了修改')
+        this.items.push({ kind: 'note', key: this.key(), text: typeof e.note === 'string' && e.note ? `${head}：${e.note}` : head })
+        break
+      }
       case 'plan_end':
         this.closeText()
         this.items.push({ kind: 'note', key: this.key(), text: t('计划全部做完了') })

@@ -39,6 +39,7 @@ import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { ClaudeQuotaConfig, ProviderQuota, QuotaRecord } from '../shared/providerQuotas'
 import type { DiaryEntry, Work, WorkDetail } from '../shared/studio'
 import type { ReviewEntry } from '../shared/review'
+import type { AcceptanceEvent, DeliveryCard, LineComment, Verdict } from '../shared/delivery'
 import type { AgentActivity, AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, ComputerContext, EngineOption, LocalAgentInfo, ModelGroup, ModelUse, PairPick } from '../shared/agent'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem, PendingFix, WorkbenchFocus } from '../shared/workbench'
 import type { AreaView, ChainView, Diagnosis, EndpointInfo, ExplainDepth, ExplainTarget, Explanation, FileDetail, FunctionDetail } from '../shared/understand'
@@ -223,6 +224,12 @@ const api = {
   agentMerge: (sid: string, runTests: boolean): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:merge', sid, runTests),
   agentDiscard: (sid: string): Promise<AiResult<AgentEvent>> => ipcRenderer.invoke('agent:discard', sid),
   agentUndo: (sid: string, turnSeq: number): Promise<AiResult<AgentUndoEvent>> => ipcRenderer.invoke('agent:undo', sid, turnSeq),
+  /** 交付卡（ci：要不要问 PR 上的 CI，慢一点）和验收（退回修改会接着做一轮） */
+  agentDelivery: (sid: string, ci: boolean): Promise<AiResult<DeliveryCard>> => ipcRenderer.invoke('agent:delivery', sid, ci),
+  agentAccept: (sid: string, verdict: Verdict, note: string, comments: LineComment[]): Promise<AiResult<AcceptanceEvent>> =>
+    ipcRenderer.invoke('agent:accept', sid, verdict, note, comments),
+  /** 用系统浏览器打开交付卡上的 PR、CI 链接（只认 GitHub） */
+  agentOpenGithub: (url: string): Promise<AiResult<unknown>> => ipcRenderer.invoke('agent:open-github', url),
   /** 仅主窗口：改会话标题、删除会话 */
   agentRename: (sid: string, title: string): Promise<AiResult<AgentSessionSummary>> => ipcRenderer.invoke('agent:rename', sid, title),
   agentDelete: (sid: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:delete', sid),

@@ -25,7 +25,9 @@ import UndoResult from './UndoResult.vue'
 import BudgetControls from './BudgetControls.vue'
 import ModelPicker from './ModelPicker.vue'
 import CollaborationPanel from './CollaborationPanel.vue'
-import type { PairAction, PairPick } from '../../../shared/agent'
+import DeliveryCard from './DeliveryCard.vue'
+import type { AgentEvent, PairAction, PairPick } from '../../../shared/agent'
+import type { AcceptanceEvent } from '../../../shared/delivery'
 import { AILA, engineOf, modelName, pickLabel, stillLoading, switchKind, taskPick, validPick, type ModelPick } from './models'
 import { parseBudget, validBudget } from '../../../shared/budget'
 import Icon from '../theme/Icon.vue'
@@ -254,6 +256,22 @@ const pending = computed(() => t.value.pending)
 const files = computed(() => [...t.value.files.entries()])
 const usage = computed(() => t.value.usage)
 const undoBusy = computed(() => !!current.value && undoing.has(current.value.id))
+/** 交付卡什么时候重新算：任务停下来时的最后一个事件号（正在做时不算） */
+const deliveryStamp = computed(() => (running.value ? null : t.value.lastSeq))
+
+/** 交付卡上验收了：记进这边的日志；退回修改时服务那边已经开始新的一轮，接上事件流 */
+function onDecided(event: AcceptanceEvent): void {
+  const sid = current.value?.id
+  if (!sid) return
+  error.value = ''
+  t.value.apply(event as unknown as AgentEvent)
+  if (event.verdict === 'rejected' && !streaming.has(sid)) {
+    streaming.add(sid)
+    source.watch(sid, t.value.lastSeq)
+  }
+  void nextTick(scrollToBottom)
+  void refreshList()
+}
 const undoTarget = computed(() => {
   const sid = current.value?.id
   if (!sid || opening.value || merging.value || streaming.has(sid)) return undefined
@@ -1398,6 +1416,15 @@ onBeforeUnmount(() => {
           <Icon name="play" :size="12" :stroke="2" />{{ tr('接着做第 {n} 阶段', { n: (plan.current ?? 0) + 1 }) }}
         </button>
       </section>
+      <DeliveryCard
+        v-if="current.kind !== 'computer'"
+        :source="source"
+        :sid="current.id"
+        :stamp="deliveryStamp"
+        :busy="running || !!merging || undoBusy"
+        @decided="onDecided"
+        @error="error = $event"
+      />
       <section v-if="t.branch">
         <h3>{{ tr('分支') }}</h3>
         <p v-if="current?.pair" class="dim">{{ tr('这项工作在主任务里和另一项一起验收、收回。') }}</p>

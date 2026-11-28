@@ -2,6 +2,7 @@
 import { SseParser } from '../../../shared/chat'
 import type { AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, EngineOption, LocalAgentInfo, ModelGroup, ModelUse, PairPick } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
+import type { AcceptanceEvent, DeliveryCard, LineComment, Verdict } from '../../../shared/delivery'
 import { bridge } from '../platform/bridge'
 import { t } from '../i18n'
 
@@ -42,6 +43,12 @@ export interface AgentSource {
   merge(sid: string, runTests: boolean): Promise<AgentEvent>
   discard(sid: string): Promise<AgentEvent>
   undo(sid: string, turnSeq: number): Promise<AgentUndoEvent>
+  /** 交付卡：ci=true 时连 PR 上的 CI 一起问（慢一点） */
+  delivery(sid: string, ci?: boolean): Promise<DeliveryCard>
+  /** 验收：退回修改时服务那边接着开一轮，用 watch 接事件 */
+  accept(sid: string, verdict: Verdict, note: string, comments: LineComment[]): Promise<AcceptanceEvent>
+  /** 用系统浏览器打开 PR、CI 的链接 */
+  openGithub(url: string): Promise<void>
   /** review：/review，只读地审没提交的改动；plan：先出方案（这一轮只读，text 是目标） */
   send(sid: string, text: string, review?: boolean, plan?: boolean): void
   /** 长任务：批准计划并开始做（事件从 onEvent 来）、停下以后接着做、不要这份计划 */
@@ -95,6 +102,9 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     merge: async (sid, runTests) => unwrap(await api.agentMerge(sid, runTests)),
     discard: async (sid) => unwrap(await api.agentDiscard(sid)),
     undo: async (sid, turnSeq) => unwrap(await api.agentUndo(sid, turnSeq)),
+    delivery: async (sid, ci = false) => unwrap(await api.agentDelivery(sid, ci)),
+    accept: async (sid, verdict, note, comments) => unwrap(await api.agentAccept(sid, verdict, note, comments)),
+    openGithub: async (url) => void unwrap(await api.agentOpenGithub(url)),
     send: (sid, text, review = false, plan = false) => api.agentSend(sid, text, review, plan),
     plan: async (sid, action, pauseEach = false) => void unwrap(await api.agentPlan(sid, action, pauseEach)),
     watch: (sid, after) => api.agentWatch(sid, after),
@@ -187,6 +197,9 @@ function web(): AgentSource {
     merge: (sid, runTests) => call('POST', `/agent/sessions/${sid}/merge`, { run_tests: runTests }),
     discard: (sid) => call('POST', `/agent/sessions/${sid}/discard`),
     undo: (sid, turnSeq) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/undo`, { turn_seq: turnSeq }),
+    delivery: (sid, ci = false) => call('GET', `/agent/sessions/${encodeURIComponent(sid)}/delivery?ci=${ci}`),
+    accept: (sid, verdict, note, comments) => call('POST', `/agent/sessions/${encodeURIComponent(sid)}/acceptance`, { verdict, note, comments }),
+    openGithub: async (url) => void window.open(url, '_blank', 'noopener'),
     send: (sid, text, review = false, plan = false) =>
       void stream(sid, `/agent/sessions/${sid}/messages`, {
         method: 'POST',
