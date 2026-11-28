@@ -187,3 +187,29 @@ def test_churn_counts_recent_commits(tmp_path: Path) -> None:
     idx.refresh(embed=False)
     nodes = {n["id"]: n for n in idx.graph(set(), projects.churn(p.id))["nodes"]}
     assert nodes["hot.py"]["churn"] == 3 and nodes["cold.py"]["churn"] == 1
+
+
+def test_examples_in_docs_and_comments_are_not_requests() -> None:
+    """文档里举的例子（「请求接口："/agent/sessions"」）、注释里写的路径不算真的请求；代码里的照样算"""
+    py = '''"""扫接口：比如 "/agent/sessions"、"/chat"。"""
+
+
+def call(client):
+    """也会请求 "/health" 这种"""
+    # 以前是 "/old/path"
+    x = 1  # 再比如 "/in/comment"
+    return client.get("/agent/tasks")
+'''
+    keys = {e.key for e in scan("app/x.py", py, "python") if e.role == "call"}
+    assert keys == {"/agent/tasks"}
+    ts = '''// 以前请求 "/old/api"
+/* 也可以写成 "/block/api" */
+const url = "http://127.0.0.1:8765/agent/sessions"
+fetch(`${base}/code/${id}/graph`) // 后面的 "/trailing"
+'''
+    keys = {e.key for e in scan("src/x.ts", ts, "typescript") if e.role == "call"}
+    assert keys == {"/agent/sessions", "/code/{}/graph"}
+    java = '// 调 "/api/old"\nString u = "/api/me";\n'
+    assert {e.key for e in scan("A.java", java, "java") if e.role == "call"} == {"/api/me"}
+    broken = 'def f(:\n    return "/still/found"\n'  # 写到一半分不了词：原样扫，不漏
+    assert {e.key for e in scan("b.py", broken, "python") if e.role == "call"} == {"/still/found"}

@@ -91,6 +91,63 @@ def _join(prefix: str, path: str) -> str:
     return "/" + "/".join(p for p in f"{prefix}/{path}".split("/") if p)
 
 
+# 注释里的 // 和 /* */：// 前面是冒号（http://）、引号、反斜杠的不算（在字符串里）
+WEB_BLOCK = re.compile(r"/\*.*?\*/", re.S)
+WEB_LINE = re.compile(r"(?<![:\"'`\\])//[^\n]*")
+
+
+def without_notes(text: str, family: str) -> str:
+    """把注释和文档字符串换成空格（换行留着，行号不变）：找「请求了哪个接口」时不算它们。
+    不然文档里举的例子（「请求接口："/agent/sessions"」）会被当成真的请求，连出不存在的线"""
+    blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))  # noqa: E731
+    if family == "python":
+        return _python_without_notes(text)
+    if family in ("web", "java"):
+        return WEB_LINE.sub(blank, WEB_BLOCK.sub(blank, text))
+    return text
+
+
+def _python_without_notes(text: str) -> str:
+    """Python：用标准库的分词认出注释和文档字符串（模块、类、函数开头单独一行的字符串），换成空格。
+    分词失败（代码写到一半）就原样返回，宁可多连也别漏"""
+    import io
+    import tokenize
+
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return text
+    lines = text.splitlines(keepends=True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+
+    def offset(pos: tuple[int, int]) -> int:
+        row, col = pos
+        return starts[row - 1] + col if row - 1 < len(starts) else len(text)
+
+    spans: list[tuple[int, int]] = []
+    before = tokenize.NEWLINE  # 上一个有意义的记号（跳过空行、注释）
+    statement_start = {tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT}
+    for i, tok in enumerate(tokens):
+        if tok.type == tokenize.COMMENT:
+            spans.append((offset(tok.start), offset(tok.end)))
+        elif tok.type == tokenize.STRING and before in statement_start:
+            after = next((t.type for t in tokens[i + 1:] if t.type not in (tokenize.NL, tokenize.COMMENT)), tokenize.ENDMARKER)
+            if after in (tokenize.NEWLINE, tokenize.ENDMARKER):
+                spans.append((offset(tok.start), offset(tok.end)))  # 单独一行的字符串：文档字符串
+        if tok.type not in (tokenize.NL, tokenize.COMMENT):
+            before = tok.type
+    if not spans:
+        return text
+    out = list(text)
+    for a, b in spans:
+        for j in range(a, min(b, len(out))):
+            if out[j] != "\n":
+                out[j] = " "
+    return "".join(out)
+
+
 def scan(path: str, text: str, lang: str) -> list[Endpoint]:
     """一个文件提供了哪些接口、请求了哪些接口、收发哪些 IPC 消息"""
     family = FAMILY.get(lang, "")
@@ -130,7 +187,7 @@ def scan(path: str, text: str, lang: str) -> list[Endpoint]:
 
     pattern = STRING.get(family)
     if pattern:
-        for m in pattern.finditer(text):
+        for m in pattern.finditer(without_notes(text, family)):
             raw = m.group(m.lastindex or 1)
             if raw in serving:
                 continue
