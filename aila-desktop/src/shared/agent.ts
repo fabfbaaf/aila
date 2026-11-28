@@ -36,6 +36,7 @@ export interface AgentUsage {
 }
 
 export interface AgentSessionSummary {
+  collaborators?: PairPick[]
   id: string
   cwd: string
   kind?: AgentKind
@@ -65,14 +66,27 @@ export interface AgentSessionSummary {
   edits?: number
   /** 还没回答的确认（action 是代码按参数生成的说明） */
   pending?: { id: string; tool: string; action: string; can_remember: boolean } | null
-  /** 本机的 Codex / Claude Code 在做（不是艾拉自己）：codex、claude；艾拉自己做时没有 */
+  /** 做这件任务的本机 Agent，艾拉自己做时没有 */
   engine?: AgentEngine | null
   /** 跨 Agent 派工：派出这个任务的主任务（主 Agent 用艾拉的派工工具派出来的）；自己开的没有 */
   parent?: string | null
+  /** 换了别家的模型接着做：从哪个任务接过来的 / 交给了哪个任务 */
+  handed_from?: string | null
+  handed_to?: string | null
+  pair?: boolean
+  pair_pending?: boolean
 }
 
 /** 本机的编程 Agent（通过 ACP 适配器接进来，见 aila-ai/app/runtime/localagents.py） */
-export type AgentEngine = 'codex' | 'claude' | 'antigravity' | 'codebuddy'
+export const AGENT_ENGINES = [
+  'codex', 'claude', 'antigravity', 'codebuddy', 'copilot', 'kimi', 'opencode', 'cursor', 'qwen', 'minimax', 'codex-alt', 'claude-alt'
+] as const
+
+export type AgentEngine = (typeof AGENT_ENGINES)[number]
+
+export function isAgentEngine(value: unknown): value is AgentEngine {
+  return typeof value === 'string' && (AGENT_ENGINES as readonly string[]).includes(value)
+}
 
 /** 本机 Agent 能换的一个设置（模型、思考深度、快速模式）：权限模式由艾拉管，不在里面 */
 export interface EngineOption {
@@ -93,14 +107,42 @@ export interface LocalAgentInfo {
   /** null：问不出来 */
   logged_in: boolean | null
   adapter: boolean
-  /** 自己就会说 ACP，不用适配器（Antigravity、CodeBuddy） */
+  /** 自己就会说 ACP，不用适配器 */
   native?: boolean
   ready: boolean
   /** 不能用的原因（给你看的） */
   problem: string
   /** 怎么弄好（登录命令、装什么） */
   hints: string[]
+  /** 账号叫什么（ChatGPT、Claude……） */
+  account?: string
+  /** 能在艾拉里点「登录」（开一个窗口跑它的官方登录命令） */
+  can_login?: boolean
+  /** 适配器还没装：第一次用时自动装（要联网） */
+  installs_adapter?: boolean
 }
+
+/** 选模型：一个账号下的一组模型（艾拉自己的、ChatGPT、Claude……，见 aila-ai/app/runtime/catalog.py） */
+export interface ModelGroup {
+  /** aila：艾拉自己（设置里填的大模型）；别的是本机 Agent */
+  engine: 'aila' | AgentEngine
+  /** 账号的名字 */
+  title: string
+  agent?: string
+  ready: boolean
+  logged_in: boolean | null
+  problem: string
+  hints: string[]
+  can_login: boolean
+  installs_adapter: boolean
+  can_install?: boolean
+  /** 还在问它有哪些模型：过一会儿再拿 */
+  loading: boolean
+  /** value 是空的是「它自己默认的」 */
+  models: { value: string; name: string; description?: string; default?: boolean }[]
+}
+
+export type ModelUse = 'chat' | 'task'
 
 /** 一个事件。带 seq 的写在会话日志里；text_delta、reasoning_delta、tool_start 只是实时推送 */
 export interface AgentEvent {
@@ -109,6 +151,14 @@ export interface AgentEvent {
   t?: number
   [key: string]: unknown
 }
+
+export const MAX_COLLABORATORS = 4
+export type PairPick = { agent: AgentEngine; model: string }
+export type PairAction =
+  | { action: 'approve'; proposal_id: string; picks: PairPick[] }
+  | { action: 'reject'; proposal_id: string }
+  | { action: 'validate' }
+  | { action: 'close' }
 
 /** 撤销只追加这一条结果，turn_seq 指向这一轮的 user 事件。 */
 export interface AgentUndoEvent extends AgentEvent {

@@ -206,7 +206,8 @@ export interface AiSettings {
 
 /** 只传要改的项；密钥传空字符串表示清掉 */
 /** 对话的大脑：空 = 填的大模型；codex / claude = 本机的 Codex / Claude Code（aila-ai/app/brain.py） */
-export type ChatBrain = '' | 'codex' | 'claude' | 'antigravity' | 'codebuddy'
+export const CHAT_BRAINS = ['', 'codex', 'claude', 'antigravity', 'codebuddy'] as const
+export type ChatBrain = (typeof CHAT_BRAINS)[number]
 
 export interface AiSettingsUpdate {
   computerInventory?: boolean

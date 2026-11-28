@@ -73,7 +73,8 @@ class MergeReport:
         return {"type": "merge", **data}
 
 
-def open_branch(root: Path, work_dir: Path) -> BranchInfo:
+def open_branch(root: Path, work_dir: Path, *, base: str | None = None) -> BranchInfo:
+    """给任务拍当前工作区的快照，或从同组任务已冻结的提交开工作区。"""
     try:
         repo = repo_root(root)
     except FixError as err:
@@ -84,21 +85,22 @@ def open_branch(root: Path, work_dir: Path) -> BranchInfo:
     branch = f"aila/task-{bid}"
     wt = work_dir / f"task-{bid}"
     work_dir.mkdir(parents=True, exist_ok=True)
-    git(repo, "worktree", "add", "-q", "-b", branch, str(wt), "HEAD")
+    git(repo, "worktree", "add", "-q", "-b", branch, str(wt), base or "HEAD")
+    links: list[str] = []
     try:
-        copy_baseline(repo, wt)
-        git(wt, *AILA_GIT, "add", "-A")
-        git(wt, *AILA_GIT, "commit", "-q", "--no-verify", "--allow-empty", "-m", "艾拉：基线（你当时还没提交的改动）")
-    except FixError as err:
-        _remove(repo, wt, branch, [])
+        if base is None:
+            copy_baseline(repo, wt)
+            git(wt, *AILA_GIT, "add", "-A")
+            git(wt, *AILA_GIT, "commit", "-q", "--no-verify", "--allow-empty", "-m", "艾拉：基线（你当时还没提交的改动）")
+        for d in [repo, *(p for p in repo.iterdir() if p.is_dir() and p.name not in (".git", *DEP_DIRS))]:
+            for name in DEP_DIRS:
+                dst = wt / d.relative_to(repo) / name
+                if link_dir(d / name, dst):
+                    links.append(str(dst))
+        base = git(wt, "rev-parse", "HEAD").strip()
+    except (FixError, OSError) as err:
+        _remove(repo, wt, branch, links)
         raise BranchError(str(err)) from err
-    links = []
-    for d in [repo, *(p for p in repo.iterdir() if p.is_dir() and p.name not in (".git", *DEP_DIRS))]:
-        for name in DEP_DIRS:
-            dst = wt / d.relative_to(repo) / name
-            if link_dir(d / name, dst):
-                links.append(str(dst))
-    base = git(wt, "rev-parse", "HEAD").strip()
     sub = root.resolve().relative_to(repo).as_posix() if root.resolve() != repo else ""
     return BranchInfo(str(repo), str(wt), branch, base, "" if sub == "." else sub, links)
 

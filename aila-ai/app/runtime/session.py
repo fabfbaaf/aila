@@ -91,10 +91,12 @@ class Session:
             return None
         info = dict(info)
         for e in self.events:
-            if e["type"] == "merge" and e.get("merged"):
+            if e["type"] == "merge" and e.get("merged") and e.get("base"):
                 info["base"] = e["base"]
             elif e["type"] == "branch_closed":
                 return None
+            elif e["type"] == "handoff_out" and e.get("branch_moved"):
+                return None  # 换了别家的模型接着做：分支交给了新任务，这边不再合并、放弃、删
         return info
 
     @property
@@ -198,6 +200,11 @@ class Session:
             "engine": self.events[0].get("engine"),
             # 跨 Agent 派工：派出这个任务的主任务（dispatch.py）；自己开的没有
             "parent": self.events[0].get("parent"),
+            # 换了别家的模型接着做：从哪个任务接过来的、交给了哪个任务（runner.handoff）
+            "handed_from": next((e.get("from") for e in self.events if e["type"] == "handoff_in"), None),
+            "handed_to": next((e.get("to") for e in reversed(self.events) if e["type"] == "handoff_out"), None),
+            **({"pair": True} if self.events[0].get("pair") else {}),
+            **({"collaborators": self.events[0]["collaborators"]} if self.events[0].get("collaborators") else {}),
             "created": self.events[0].get("created"),
             "updated": self.events[-1].get("t"),
             "events": len(self.events),
@@ -329,6 +336,8 @@ def derive_messages(system: str, events: list[Event]) -> list[Message]:
             continue
         if kind == "user":
             text = e["text"]
+            if e.get("collaboration_prompt"):
+                text = f"{e['collaboration_prompt']}\n\n{text}"
             if pending_undo:
                 text = "\n\n".join([*pending_undo, text])
                 pending_undo.clear()

@@ -71,7 +71,8 @@ import { AI_SERVICE_URL, answerConfirm, cleanLive, streamChat, type ChatMessage,
 import { cleanMemoryEdit, type AuthForm, type MemoryOp, type StoredMessage } from '../shared/cloud'
 import type { AiResult, AiSettingsUpdate, CharacterEvent, SettingsSection, VoicePrefs } from '../shared/settings'
 import type { PendingFix, WorkbenchFocus } from '../shared/workbench'
-import type { AgentMode } from '../shared/agent'
+import { isAgentEngine, type AgentMode, type PairAction } from '../shared/agent'
+import { agentInstallUrl } from '../shared/agentInstall'
 import { cleanRoute, routeForSection, toHash, type ShellRoute } from '../shared/shell'
 import { TRAY_16, TRAY_32 } from './trayImage'
 import { DesktopKeeper, type BriefingState } from './desktopKeeper'
@@ -80,6 +81,7 @@ import { DISCOVERY_SOURCES, isDiscoveryId, isDiscoverySource } from '../shared/d
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
+import { openLoginWindow } from './login'
 import { lockDown } from './navigation'
 import { validMcpName } from '../shared/mcp'
 import { cleanSources, cleanUpdate, findAvatar, validExtensionId, validMotionName, validPageName, validStageToken } from '../shared/extensions'
@@ -132,6 +134,7 @@ let servicePhase = ''
 const serviceKeeper = createServiceKeeper({
   locate: locateAi,
   url: AI_URL,
+  packaged: app.isPackaged,
   changed: (state) => {
     broadcast('service:state', state)
     const up = state.phase === 'ready' || state.phase === 'external'
@@ -1272,6 +1275,39 @@ function registerIpc(): void {
     fromAgent(e) && typeof linked === 'boolean' ? agentRelay.linkCursorQuota(linked) : notAllowed
   ))
   ipcMain.handle('agent:local:install', (e) => (fromAgent(e) ? agentRelay.installAdapters() : notAllowed))
+  ipcMain.handle('agent:local:login', async (e, engine: unknown) => {
+    if (!fromAgent(e) || !isAgentEngine(engine)) return notAllowed
+    const result = await agentRelay.loginCommand(engine)
+    return result.ok ? openLoginWindow(result.data?.command, undefined, undefined, result.data?.profile) : result
+  })
+  ipcMain.handle('agent:local:open-install', async (e, id: unknown) => {
+    if (!fromAgent(e)) return notAllowed
+    const url = agentInstallUrl(id)
+    if (!url) return { ok: false, error: tm('不认识的 Agent。') }
+    try {
+      await shell.openExternal(url)
+      return { ok: true }
+    } catch {
+      return { ok: false, error: tm('没打开官方安装页。') }
+    }
+  })
+  ipcMain.handle('agent:models', (e, use: unknown, refresh: unknown) =>
+    fromAgent(e) && (use === 'chat' || use === 'task') ? agentRelay.models(use, refresh === true) : notAllowed)
+  ipcMain.handle('agent:handoff', (e, sid: unknown, engine: unknown, model: unknown, label: unknown) =>
+    fromAgent(e) && sidOk(sid) && (engine === null || isAgentEngine(engine)) && typeof model === 'string' && model.length <= 200
+      && typeof label === 'string' && label.length <= 120 ? agentRelay.handoff(sid, engine, model, label) : notAllowed)
+  ipcMain.handle('agent:pair', (e, sid: unknown, payload: Partial<PairAction> | null) => {
+    if (!fromAgent(e) || !sidOk(sid) || !payload || typeof payload !== 'object') return notAllowed
+    if (payload.action === 'validate') return agentRelay.pair(sid, { action: 'validate' })
+    if (payload.action === 'close') return agentRelay.pair(sid, { action: 'close' })
+    if (!('proposal_id' in payload) || typeof payload.proposal_id !== 'string' ||
+      !/^[\w-]{1,64}$/.test(payload.proposal_id)) return notAllowed
+    if (payload.action === 'reject') return agentRelay.pair(sid, { action: 'reject', proposal_id: payload.proposal_id })
+    if (payload.action !== 'approve' || !Array.isArray(payload.picks) || payload.picks.length !== 2) return notAllowed
+    if (payload.picks.some((pick) => !pick || !isAgentEngine(pick.agent) || typeof pick.model !== 'string' || pick.model.length > 200)) return notAllowed
+    const picks = payload.picks.map(({ agent, model }) => ({ agent, model }))
+    return agentRelay.pair(sid, { action: 'approve', proposal_id: payload.proposal_id, picks })
+  })
   // 本机 Agent 任务的模型、思考深度：只认主窗口，名字和值的长度先挡一下，合不合法 AI 服务按它给的选项再查
   const optionText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
   ipcMain.handle('agent:options', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.engineOptions(sid) : notAllowed))

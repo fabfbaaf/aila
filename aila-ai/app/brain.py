@@ -29,7 +29,7 @@ from acp import schema
 
 from .llm import Message, ToolCall
 from .runtime.external import _deferred, _options_of
-from .runtime.localagents import ENGINES, launch
+from .runtime.localagents import ENGINES, AdapterMissing, install_adapters, launch
 
 log = logging.getLogger("aila.brain")
 
@@ -206,7 +206,11 @@ class AgentBrain:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             persona.write_text(system, encoding="utf-8")
         if self._conn is None:
-            node, args, env = self._launch(self.engine.id, self.data_dir)
+            try:
+                node, args, env = await asyncio.to_thread(self._launch, self.engine.id, self.data_dir)
+            except AdapterMissing:  # 第一次用：先装上适配器（Claude Code 的不在安装包里）
+                await install_adapters(self.data_dir, engines=[self.engine.id])
+                node, args, env = await asyncio.to_thread(self._launch, self.engine.id, self.data_dir)
             args = [*args, *self.engine.brain_args]
             if self.engine.prompt_file_flag:
                 args += [self.engine.prompt_file_flag, str(persona)]

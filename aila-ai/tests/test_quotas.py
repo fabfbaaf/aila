@@ -109,6 +109,22 @@ def test_board_uses_real_capture_time_and_only_confirmed_shared_windows(monkeypa
     assert next(p for p in QuotaBoard(path, lambda: now + 4000).view() if p["id"] == "cursor")["windows"][0]["stale"]
 
 
+def test_second_codex_quota_has_its_own_history(monkeypatch, tmp_path):
+    async def collect(key, _path):
+        amount = {"codex": 81, "codex-alt": 31}.get(key)
+        return ("ready", [vendor.Window("usage", "Codex", amount, 100, "%", END)]) if amount else ("unavailable", [])
+
+    monkeypatch.setattr(vendor, "collect", collect)
+    path = tmp_path / "provider-quotas"
+    board = QuotaBoard(path, lambda: NOW)
+    assert "codex-alt" not in {p["id"] for p in board.view()}
+    asyncio.run(board.refresh())
+    (tmp_path / "agent-accounts" / "codex-alt").mkdir(parents=True)
+    asyncio.run(board.refresh())
+    readings = {p["id"]: p["windows"][0]["remaining"] for p in QuotaBoard(path, lambda: NOW).view() if p["windows"]}
+    assert readings == {"codex": 81, "codex-alt": 31}
+
+
 def test_manual_credit_records_are_editable_persistent_and_independent(tmp_path):
     now = NOW
     board = QuotaBoard(tmp_path, lambda: now)
