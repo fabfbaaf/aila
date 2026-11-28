@@ -128,4 +128,7 @@ EN4: dict[str, str] = {
     "没能加载原会话。": "Could not load the original session.",
     "填好共享接口和联调验收条件。": "Enter the shared interface and integration acceptance criteria.",
     "服务在开工时退出了，可以打开任务检查进展。": "The service stopped during dispatch. Open the task to see its progress.",
+    "这一阶段还没开始，直接接着做就行。": "This stage hasn't started yet. Just continue.",
+    "{0} 改的文件艾拉没存底片，退回不了：用 git 看改动、还原。": "Aila has no snapshots of files {0} changed, so they can't be rolled back. Use git to review and restore them.",
+    "这个会话没有启用文件底片，退回不了。": "File snapshots are off for this session, so nothing can be rolled back.",
 }

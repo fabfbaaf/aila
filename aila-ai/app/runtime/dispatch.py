@@ -9,6 +9,9 @@
   合并前跑项目自带的测试，有冲突不合并（主 Agent 同时在原地改了同一个文件就算冲突）。问你的时候不卡住主 Agent：
   先告诉它「在等用户同意」，同意以后在后台合并，结果用 work_status 看
 - 工具调用有超时（Codex 默认一分钟），所以「等它做完」一次最多等 50 秒，没做完就说还在做
+- 交回：它一轮结束（做完、出错、卡住），主任务闲着就开一轮，把代码整理的交回报告交给主模型汇总（handback.py）；
+  主任务正在做就等它这一轮结束再叫，这一轮里已经用 work_status / wait_work 看过的不再叫。你打断的不叫
+- 服务重启：派出去的活做到一半进程没了，打开主任务时说一声是哪几个，可以去它的任务里接着说或者重新派
 
 为什么是 MCP 而不是让主 Agent 自己跑命令：派活、开工作区、合并都由艾拉的代码做，权限、日志、界面都是现成的；
 主 Agent 只是说「派谁、做什么」。
@@ -28,8 +31,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..code.fix import FixError, repo_root
+from . import acceptance
 from .branch import BranchError, BranchInfo, MergeReport, changes, discard, open_branch
 from .collaboration import CollaborationError, PairPlan, apply_candidate, check_candidate, prepare_candidate, tree
+from .handback import Handback, report_text, report_title, should_wake
 from .localagents import ENGINES
 from .tools import CodingTool, Outcome
 
@@ -144,6 +149,9 @@ class Dispatch:
         self._merging: dict[str, str] = {}  # 正在等同意或正在合并的助手会话 → 现在的情况
         self._pair_jobs: dict[str, asyncio.Task[None]] = {}
         self._pair_committing: set[str] = set()
+        # 交回：主任务 → 结束了、还没交给主模型看的子任务（按结束先后）
+        self._unreported: dict[str, dict[str, None]] = {}
+        self._wakers: set[asyncio.Task[None]] = set()
         runtime.watchers.append(self._mirror)
 
     # ---------- 给主 Agent 挂的 MCP 服务 ----------
@@ -221,6 +229,8 @@ class Dispatch:
                 raise DispatchError("这个任务已经选好了协作者，用 delegate_pair 提交分工。")
             return await self.delegate(parent_sid, str(args.get("agent", "")), str(args.get("title", "")), str(args.get("task", "")))
         child = self._child(parent_sid, str(args.get("id", "")))
+        if not self.rt.running(child.id):
+            self._seen(parent_sid, child.id)  # 主模型自己看过、在收了：结束时不用再叫它
         if name == "work_status":
             return self.status(child)
         if name == "wait_work":
@@ -228,6 +238,8 @@ class Dispatch:
             deadline = time.monotonic() + seconds
             while self.rt.running(child.id) and time.monotonic() < deadline and not child.waiting():
                 await asyncio.sleep(0.5)
+            if not self.rt.running(child.id):
+                self._seen(parent_sid, child.id)
             return self.status(child)
         if name == "merge_work":
             if child.events[0].get("pair"):
@@ -505,6 +517,8 @@ class Dispatch:
                 self.rt.close_idle_streams(parent.id)
 
     async def shutdown(self) -> None:
+        for waker in list(self._wakers):
+            waker.cancel()
         jobs = list(self._pair_jobs.items())
         for sid, job in jobs:
             if sid not in self._pair_committing:
@@ -533,7 +547,8 @@ class Dispatch:
                     child.append({"type": "engine_config", "id": e["id"], "value": e["value"]})
         self.rt.start(child.id, task)
         branch = (child.branch or {}).get("branch", "")
-        self._note(parent_sid, f"派给 {ENGINES[agent].title}：「{title}」，在分支 {branch} 的独立工作区里做")
+        self._append(parent_sid, {"type": "note", "text": f"派给 {ENGINES[agent].title}：「{title}」，在分支 {branch} 的独立工作区里做",
+                                  "dispatched": child.id})
         return json.dumps({
             "id": child.id, "agent": agent, "branch": branch,
             "next": "用 wait_work 等它做完；它要用户同意的操作会出现在用户的任务页里。做完用 merge_work 合并回来。",
@@ -654,6 +669,8 @@ class Dispatch:
         kind = event.get("type")
         if kind not in ("confirm", "confirm_end", "turn_end"):
             return
+        if kind in ("turn_end", "confirm_end") and self._unreported.get(sid):
+            self._schedule(sid, sid)  # 主任务这一轮做完、你点完确认：攒着的交回报告现在交给它
         session = self.rt.store.get(sid)
         parent_sid = session.events[0].get("parent") if session else None
         if not parent_sid or self.rt.store.get(parent_sid) is None:
@@ -670,9 +687,94 @@ class Dispatch:
             self._append(parent_sid, {k: v for k, v in event.items() if k not in ("seq", "t")})
         else:
             reason = str(event.get("reason"))
-            text = {"done": "做完了，等主 Agent 收回", "error": f"出错了：{event.get('error', '')}", "interrupted": "被打断了",
+            text = {"done": "做完了，交回主任务", "error": f"出错了：{event.get('error', '')}", "interrupted": "被打断了",
                     "rejected": "你没同意它要做的操作，停下了", "denied": "被权限挡下，停下了"}.get(reason, f"停下了（{reason}）")
             self._note(parent_sid, f"{name}{text}")
+            if should_wake(reason):
+                self._unreported.setdefault(parent_sid, {})[sid] = None
+                self._schedule(parent_sid, sid)
+
+    # ---------- 交回主任务（handback.py） ----------
+
+    def _seen(self, parent_sid: str, child_sid: str) -> None:
+        pending = self._unreported.get(parent_sid)
+        if pending is not None:
+            pending.pop(child_sid, None)
+
+    def _schedule(self, parent_sid: str, origin: str) -> None:
+        """origin 这一轮推完（_mirror 是在那一轮里调的）再看要不要叫醒主任务"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._wake_after(parent_sid, origin))
+        self._wakers.add(task)
+        task.add_done_callback(self._wakers.discard)
+
+    async def _wake_after(self, parent_sid: str, origin: str) -> None:
+        running = self.rt._tasks.get(origin)
+        if running is not None and not running.done() and running is not asyncio.current_task():
+            await asyncio.wait({running})
+        try:
+            await self._wake(parent_sid)
+        except Exception:  # 叫不醒不能拖垮别的任务
+            log.exception("交回主任务 %s 出错", parent_sid)
+
+    async def _wake(self, parent_sid: str) -> None:
+        pending = self._unreported.get(parent_sid)
+        parent = self.rt.store.get(parent_sid)
+        if not pending or parent is None:
+            return
+        if (self.rt.running(parent_sid) or parent_sid in self.rt._operations or parent_sid in self._pair_jobs
+                or parent.pending_confirm() is not None):
+            return  # 主任务在忙：等它这一轮结束（_mirror 会再叫）
+        ready = [c for c in (self.rt.store.get(i) for i in list(pending)) if c is not None and not self.rt.running(c.id)]
+        pair = self._pair(parent)
+        members = {str(m.get("id")) for m in pair.get("members", [])} if pair else set()
+        if any(self.rt.running(i) for i in members):
+            # 一起派的活等都结束了再一起交回（联合验收要两边都在）
+            ready = [c for c in ready if c.id not in members]
+        if not ready:
+            return
+        for child in ready:
+            pending.pop(child.id, None)
+        items = [await asyncio.to_thread(self._handback, child, child.id in members) for child in ready]
+        text = report_text(items)
+        try:
+            agent, request, extra = self.rt._ready(parent_sid, text)
+        except Exception as err:  # 分支放弃了、花到上限、同时在做的任务太多……
+            self._note(parent_sid, f"没把结果交回主任务：{err}")
+            return
+        self.rt._begin(parent_sid, agent, request, {**extra, "handback": [c.id for c in ready], "title": report_title(items)})
+
+    def _handback(self, child: "Session", pair: bool) -> Handback:
+        end = next((e for e in reversed(child.events) if e["type"] == "turn_end"), {})
+        engine = ENGINES.get(str(child.events[0].get("engine")))
+        files: list[tuple[str, int | None, int | None]] = []
+        if child.branch and not child.branch_closed:
+            root = child.workdir if child.workdir.is_dir() else child.cwd
+            try:
+                found = acceptance.changes(root, child.events, child.branch)["files"]
+                files = [(f["path"], f["added"], f["deleted"]) for f in found]
+            except Exception as err:  # 工作区没了
+                log.warning("看子任务 %s 的改动失败：%s", child.id, err)
+        said = next((str(e.get("text", "")) for e in reversed(child.events) if e["type"] == "assistant" and e.get("text")), "")
+        branch = (child.branch or {}).get("branch", "") if not child.branch_closed else ""
+        return Handback(child.id, self._title(child), engine.title if engine else "艾拉", str(end.get("reason", "")),
+                        str(end.get("error", "")), branch, files, acceptance.last_tests(child.events), said, pair)
+
+    def after_restart(self, parent: "Session") -> None:
+        """打开主任务时：派出去的活里有做到一半服务就停了的，说一声（不自己重新开工）"""
+        ids = [str(e["dispatched"]) for e in parent.events if e["type"] == "note" and e.get("dispatched")]
+        ids += [str(m.get("id")) for e in parent.events if e["type"] == "pair_plan" for m in e.get("members", [])]
+        cut = []
+        for sid in dict.fromkeys(ids):
+            child = self.rt.store.get(sid) if not self.rt.running(sid) else None
+            if child is not None and child.events[0].get("parent") == parent.id and not child.branch_closed and _cut(child):
+                cut.append(self._title(child))
+        if cut:
+            names = "、".join(f"「{t}」" for t in cut[:5]) + (" 等" if len(cut) > 5 else "")
+            self._note(parent.id, f"服务重启前 {names}还没做完：可以打开它接着说，或者让主任务重新派")
 
     def _note(self, parent_sid: str, text: str) -> None:
         self._append(parent_sid, {"type": "note", "text": text})
@@ -682,6 +784,13 @@ class Dispatch:
         if session is None:
             return
         self.rt._publish(parent_sid, session.append(event))
+
+
+def _cut(session: "Session") -> bool:
+    """最后一句话之后没有 turn_end：这一轮没做完进程就没了（和 runner._unfinished 一样）"""
+    last_user = max((i for i, e in enumerate(session.events) if e["type"] == "user" and not e.get("imported")), default=-1)
+    last_end = max((i for i, e in enumerate(session.events) if e["type"] == "turn_end"), default=-1)
+    return last_user > last_end
 
 
 def _diff(info: BranchInfo, files: list[tuple[str, str]]) -> str:

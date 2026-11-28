@@ -71,6 +71,20 @@ describe('工作窗口：事件折叠', () => {
     ])
   })
 
+  it('派出去的活交回来那一轮显示标题，报告可以展开看；重做阶段是一行说明', () => {
+    const t = new Transcript()
+    t.apply(ev('start', { seq: 0, mode: 'ask' }))
+    t.apply(ev('user', { seq: 1, t: 1, text: '派出去的活有结果了……', handback: ['c1'], title: '「后端」交回来了' }))
+    t.apply(ev('stage_reset', { seq: 2, stage: 1, restored: ['a.py', 'b.py'], skipped: { 'c.py': '之后被改过' }, commands: true }))
+    t.apply(ev('stage_reset', { seq: 3, stage: 0, restored: [], skipped: {}, commands: false }))
+    const rows = t.items.map((i) => (i.kind === 'user' ? `${i.tag}:${i.text}:${i.detail}` : i.kind === 'note' ? i.text : i.kind))
+    expect(rows).toEqual([
+      'command:「后端」交回来了:派出去的活有结果了……',
+      '重做第 2 阶段：退回了这一阶段改的 2 个文件；没退回：c.py（跑过的命令退不回去）',
+      '重做第 1 阶段'
+    ])
+  })
+
   it('回放预算变更和每轮费用，未知价格和旧事件不伪装成零费用', () => {
     const t = new Transcript()
     t.apply(ev('start', { seq: 0, budget: 0 }))

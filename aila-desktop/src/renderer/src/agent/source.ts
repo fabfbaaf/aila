@@ -54,7 +54,8 @@ export interface AgentSource {
   /** review：/review，只读地审没提交的改动；plan：先出方案（这一轮只读，text 是目标） */
   send(sid: string, text: string, review?: boolean, plan?: boolean): void
   /** 长任务：批准计划并开始做（事件从 onEvent 来）、停下以后接着做、不要这份计划 */
-  plan(sid: string, action: 'approve' | 'continue' | 'reject', pauseEach?: boolean): Promise<void>
+  /** redo：重做当前阶段（先把它改过的文件退回到上一阶段做完时） */
+  plan(sid: string, action: 'approve' | 'continue' | 'redo' | 'reject', pauseEach?: boolean): Promise<void>
   watch(sid: string, after: number): void
   interrupt(sid: string): Promise<void>
   setMode(sid: string, mode: AgentMode): Promise<void>
@@ -215,8 +216,9 @@ function web(): AgentSource {
       }),
     plan: async (sid, action, pauseEach = false) => {
       if (action === 'reject') return void (await call('POST', `/agent/sessions/${encodeURIComponent(sid)}/plan/reject`))
-      const body = action === 'approve' ? JSON.stringify({ pause_each: pauseEach }) : '{}'
-      void stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/${action}`, { method: 'POST', body })
+      const body = action === 'approve' ? JSON.stringify({ pause_each: pauseEach }) : action === 'redo' ? JSON.stringify({ redo: true }) : '{}'
+      const path = action === 'redo' ? 'continue' : action
+      void stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/${path}`, { method: 'POST', body })
     },
     watch: (sid, after) => void stream(sid, `/agent/sessions/${sid}/events?after=${after}`, { method: 'GET' }),
     interrupt: async (sid) => void (await call('POST', `/agent/sessions/${sid}/interrupt`)),

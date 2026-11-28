@@ -1246,6 +1246,7 @@ function registerIpc(): void {
     if (!fromAgent(e) || !sidOk(sid)) return notAllowed
     if (action === 'approve') agentRelay.planApprove(sid, pauseEach === true)
     else if (action === 'continue') agentRelay.planContinue(sid)
+    else if (action === 'redo') agentRelay.planContinue(sid, true)
     else if (action === 'reject') return agentRelay.planReject(sid)
     else return notAllowed
     return { ok: true }

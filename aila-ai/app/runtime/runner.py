@@ -40,7 +40,8 @@ from .memory import ProjectMemory, project_key, remember_tool
 from ..memory.episodes import coding_context, task_episode
 from ..memory.store import MemoryStore
 from ..tools.search import SearchProvider
-from .planning import MAX_CONTINUES, PLAN_PROMPT, plan_state, plan_title, plan_tools, stage_message
+from .planning import (MAX_CONTINUES, PLAN_PROMPT, REDO_NOTE, RESTART_WHY, cut_off, plan_state, plan_title, plan_tools,
+                       restart_text, resumed_after_restart, stage_edits, stage_message)
 from .loop import Agent, AgentConfig, Hooks
 from .permissions import MODES, ComputerPolicy, Mode, Policy, Rules
 from .pricing import validate_budget
@@ -336,6 +337,7 @@ class Runtime:
                                      self.confirms, self.data_dir, servers=lambda: self.dispatch.servers(sid))
             if _unfinished(session):
                 external.repair()
+            self.dispatch.after_restart(session)
             self._agents[sid] = external  # type: ignore[assignment]
             return external  # type: ignore[return-value]
         # 在新分支上做时，她在临时目录里干活；代码库索引、记住的命令还是按你原来的项目
@@ -380,6 +382,12 @@ class Runtime:
         if _unfinished(session):
             # 上次做到一半服务就停了（被强制关掉、电脑重启）：补完整，记成被打断，接着说就能接着做
             agent.repair()
+        if cut_off(session.events):
+            # 按计划做到一半服务停了：停在那个阶段等你（接着做，或者退回这一阶段的改动重做）
+            state = plan_state(session.events)
+            if state is not None and state.current is not None:
+                session.append({"type": "plan_pause", "reason": "restart", "text": restart_text(state), "stage": state.current})
+        self.dispatch.after_restart(session)
         self._agents[sid] = agent
         return agent
 
@@ -603,16 +611,7 @@ class Runtime:
         with self._maintenance(sid):
             if session.branch_closed:
                 raise RuntimeError_("这个会话的分支已经放弃，不能撤销。")
-            workdir = session.workdir.resolve()
-            expected = session.cwd
-            if branch := session.branch:
-                # 原 worktree 丢失或被链接替换时，不能退回原项目或别的会话的 worktree。
-                tree = self.work_dir.resolve() / Path(branch["worktree"]).name
-                expected = tree / branch.get("sub", "")
-                if not workdir.is_relative_to(tree):
-                    raise RuntimeError_("会话的临时工作目录已经不在原处，不能撤销。")
-            if workdir != expected or not workdir.is_dir() or workdir != agent.tools.ws.root:
-                raise RuntimeError_("会话的工作目录已经不在原处，不能撤销。")
+            self._check_workdir(agent)
 
             turn = latest_turn(session.events)
             if not turn:
@@ -635,6 +634,20 @@ class Runtime:
                                     "skipped": skipped, "commands": commands})
             self._publish(sid, event)
             return event
+
+    def _check_workdir(self, agent: Agent) -> None:
+        """按底片退回文件之前：会话的工作目录还在原处（撤销、重做阶段共用）"""
+        session = agent.session
+        workdir = session.workdir.resolve()
+        expected = session.cwd
+        if branch := session.branch:
+            # 原 worktree 丢失或被链接替换时，不能退回原项目或别的会话的 worktree。
+            tree = self.work_dir.resolve() / Path(branch["worktree"]).name
+            expected = tree / branch.get("sub", "")
+            if not workdir.is_relative_to(tree):
+                raise RuntimeError_("会话的临时工作目录已经不在原处，不能撤销。")
+        if workdir != expected or not workdir.is_dir() or workdir != agent.tools.ws.root:
+            raise RuntimeError_("会话的工作目录已经不在原处，不能撤销。")
 
     # ---------- 在新分支上做 ----------
 
@@ -718,9 +731,10 @@ class Runtime:
         self._publish(sid, event)
         return event
 
-    def drive_plan(self, sid: str, after: int | None = None) -> AsyncIterator[Event]:
+    def drive_plan(self, sid: str, after: int | None = None, redo: bool = False) -> AsyncIterator[Event]:
         """按批准过的计划往下做（批准以后、停下以后接着做都用它）；返回一直到停下的事件流。
-        after：从日志第几条之后开始推（批准时从批准那条开始，订阅的人也能看到这个决定）"""
+        after：从日志第几条之后开始推（批准时从批准那条开始，订阅的人也能看到这个决定）
+        redo：先把当前阶段改过的文件退回到上一阶段做完时，再从头做这一阶段（重启、卡住以后用）"""
         agent = self.agent(sid)
         if self.running(sid):
             raise RuntimeError_("她还在做事：等她做完，或者先打断。")
@@ -734,14 +748,38 @@ class Runtime:
         if state.finished:
             raise RuntimeError_("计划已经全部做完了。")
         self._check_task_capacity(agent.session)
-        stream = self.subscribe(sid, len(agent.session.events) - 1 if after is None else after)
-        self._tasks[sid] = asyncio.create_task(self._plan_loop(sid, agent))
+        start = len(agent.session.events) - 1 if after is None else after
+        note = self._reset_stage(sid, agent, state.current) if redo else ""
+        stream = self.subscribe(sid, start)
+        self._tasks[sid] = asyncio.create_task(self._plan_loop(sid, agent, note))
         return stream
 
-    async def _plan_loop(self, sid: str, agent: Agent) -> None:
-        """一阶段一阶段地开新的一轮，直到做完或者该停下；停下的原因记成 plan_pause / plan_end 事件"""
+    def _reset_stage(self, sid: str, agent: Agent, n: int | None) -> str:
+        """重做第 n 阶段之前：这一阶段改过的文件按底片退回去，记一条 stage_reset；返回要加在这一阶段开头那句话后面的说明"""
+        state = plan_state(agent.session.events)
+        if n is None or state is None or state.stages[n].status not in ("running", "blocked"):
+            raise RuntimeError_("这一阶段还没开始，直接接着做就行。")
+        if isinstance(agent, ExternalAgent):
+            raise RuntimeError_(f"{agent.engine.title} 改的文件艾拉没存底片，退回不了：用 git 看改动、还原。")
+        edits, commands = stage_edits(agent.session.events, n)
+        with self._maintenance(sid):
+            self._check_workdir(agent)
+            snapshots = agent.tools.snapshots
+            if edits and snapshots is None:
+                raise RuntimeError_("这个会话没有启用文件底片，退回不了。")
+            restored, skipped = snapshots.restore(agent.tools.ws, edits) if edits and snapshots else ([], {})
+            event = agent.session.append({"type": "stage_reset", "stage": n, "restored": restored, "skipped": skipped,
+                                          "commands": commands})
+            self._publish(sid, event)
+        left = f"，这几个没退回（之后又被改过或者找不到了）：{'、'.join(skipped)}" if skipped else ""
+        return REDO_NOTE.format(skipped=left) if (edits or commands) else ""
+
+    async def _plan_loop(self, sid: str, agent: Agent, note: str = "") -> None:
+        """一阶段一阶段地开新的一轮，直到做完或者该停下；停下的原因记成 plan_pause / plan_end 事件。
+        note：重做时加在这一阶段开头那句话后面（哪些文件退回去了）"""
         session = agent.session
         first = True
+        restarted = resumed_after_restart(session.events)
         try:
             while True:
                 state = plan_state(session.events)
@@ -766,11 +804,13 @@ class Runtime:
                         self._publish(sid, session.append({"type": "plan_pause", "reason": pause[0], "text": pause[1], "stage": n}))
                         return
                 if stage.status == "running":
-                    why = ("上一轮走到步数上限停了" if last == "max_steps"
+                    why = (RESTART_WHY if first and restarted else "上一轮走到步数上限停了" if last == "max_steps"
                            else "上一轮结束时还没调用 stage_done" if last == "done" else "上次停下了")
                     text, extra = stage_message(state, n, continuing=why)
                 else:
                     text, extra = stage_message(state, n)
+                    if first and note:
+                        text += note
                 first = False
                 agent.model = self.model_factory()
                 await self._drive(sid, self._with_mcp(agent, agent.turn(text, extra)), close=False)
