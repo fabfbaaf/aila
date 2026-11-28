@@ -64,13 +64,16 @@ POLICY_KINDS = {"read": "read", "search": "read", "fetch": "web", "edit": "edit"
 class _Bridge:
     """ACP 客户端的回调：它说的话、做的事交给 ExternalAgent"""
 
-    def __init__(self, agent: "ExternalAgent") -> None:
+    def __init__(self, agent: "ExternalAgent | None") -> None:
         self.agent = agent
 
     async def session_update(self, session_id: str, update: Any, **kw: Any) -> None:
-        self.agent.on_update(update)
+        if self.agent is not None:
+            self.agent.on_update(update)
 
     async def request_permission(self, session_id: str, tool_call: Any, options: list[Any], **kw: Any) -> Any:
+        if self.agent is None or self.agent._loading:
+            return schema.RequestPermissionResponse(outcome=schema.DeniedOutcome(outcome="cancelled"))
         return await self.agent.on_permission(tool_call, options)
 
     # 不提供读写文件、终端：它用自己的工具（我们没在 initialize 里声明这些能力）
@@ -116,6 +119,7 @@ class ExternalAgent:
         self._sid = ""
         self._fresh = False  # 新开的 ACP 会话：第一句话前面加说明
         self._loading = False
+        self._replay: list[tuple[str, str]] | None = None
         self._queue: asyncio.Queue[Event] | None = None
         self._text = ""
         self._tools: dict[str, dict[str, Any]] = {}
@@ -138,12 +142,15 @@ class ExternalAgent:
         self._old.update(self._tools)  # 上一轮（可能被打断）的工具晚到的消息不算这一轮的
         self._text, self._tools, self._rejected = "", {}, ""
         self._said, self._system_error = "", False
-        reason, error = "done", ""
+        reason, error, error_code = "done", "", ""
         task: asyncio.Future[Any] | None = None
         try:
             await self._ensure()
             await self._apply_wanted()  # 上一轮做着的时候你换了模型：这一轮开始前换上
             self._busy = True
+            model = next((o["current"] for o in self.options if o["category"] == "model"), "")
+            if model:
+                yield self.session.append({"type": "task_model", "model": model})
             coordination = str((extra or {}).get("collaboration_prompt", ""))
             prefix = (ASK_NOTE if self._fresh and self.engine.ask_note and not coordination else "") + self._handoff_note()
             prompt = prefix + (coordination + "\n\n" if coordination else "") + text
@@ -156,6 +163,7 @@ class ExternalAgent:
             reason = STOP.get(str(result.stop_reason), "done")
             if self._system_error:
                 reason, error = "error", _error_text(self.engine.title, self._said)
+                error_code = _quota_code(self._said)
             elif "verification required" in self._said.lower() and len(self._said.strip()) < 80:
                 # Antigravity：Google 账号要先验证（服务端 403「Verify your account to continue」），它只回这一句就结束
                 reason, error = "error", (f"{self.engine.title} 说要先验证你的账号：在浏览器里打开 "
@@ -174,11 +182,12 @@ class ExternalAgent:
             # 它常常先把真正的原因说出来（额度用完了、模型不能用），再报一个笼统的「Internal error」：用它说的
             reason, error = "error", (_error_text(self.engine.title, self._said) if self._said.strip()
                                       else _friendly(self.engine.title, str(err)))
+            error_code = _quota_code(self._said) or _quota_code(str(err))
             await self.close()
         except (OSError, EOFError, ConnectionError, TimeoutError) as err:
             reason, error = "error", f"{self.engine.title} 的适配器断开了：{err}"
             await self.close()
-        for event in self._close(reason, error):
+        for event in self._close(reason, error, error_code):
             yield event
 
     def _handoff_note(self) -> str:
@@ -209,7 +218,7 @@ class ExternalAgent:
         except BaseException:
             task.cancel()
 
-    def _close(self, reason: str, error: str = "") -> list[Event]:
+    def _close(self, reason: str, error: str = "", error_code: str = "") -> list[Event]:
         """一轮结束：把没说完的话、没结束的工具卡片补上，记一行结束"""
         self._busy = False
         events = []
@@ -223,7 +232,7 @@ class ExternalAgent:
                 events.append(self.session.append({"type": "tool", "id": call_id, "name": info["name"],
                                                    "status": status, "content": "没做完就停了。"}))
         events.append(self.session.append({"type": "turn_end", "reason": reason, **({"error": error} if error else {}),
-                                           "cost": None}))
+                                           "cost": None, **({"error_code": error_code} if reason == "error" and error_code else {})}))
         return events
 
     def repair(self) -> list[Event]:
@@ -323,10 +332,25 @@ class ExternalAgent:
                                           INIT_TIMEOUT)
             stored = next((e.get("id") for e in reversed(self.session.events) if e["type"] == "engine_session"), None)
             can_load = bool(getattr(getattr(init, "agent_capabilities", None), "load_session", False))
+            imported = any(e["type"] == "native_import" for e in self.session.events)
+            session_caps = getattr(getattr(init, "agent_capabilities", None), "session_capabilities", None)
+            can_resume = getattr(session_caps, "resume", None) is not None
+            if imported and not (stored and (can_load or can_resume)):
+                raise LocalAgentError(f"{self.engine.title} 的适配器不支持接着原会话做。")
             if stored and can_load:
-                self._loading = True  # 加载时它会把以前的对话重放一遍：不再记
+                if imported and not any(e["type"] == "native_history" for e in self.session.events):
+                    self._replay = []
+                self._loading = True
                 try:
                     res = await asyncio.wait_for(conn.load_session(cwd=str(self.root), session_id=stored, mcp_servers=self._mcp()),
+                                                 SESSION_TIMEOUT)
+                finally:
+                    self._loading = False
+                self._sid = stored
+            elif stored and imported and can_resume:
+                self._loading = True
+                try:
+                    res = await asyncio.wait_for(conn.resume_session(cwd=str(self.root), session_id=stored, mcp_servers=self._mcp()),
                                                  SESSION_TIMEOUT)
                 finally:
                     self._loading = False
@@ -339,12 +363,18 @@ class ExternalAgent:
             self._conn = conn  # _configure 里要用
             self._record_options(getattr(res, "config_options", None))
             await self._configure(conn, fresh=self._fresh)
+            if self._replay is not None:
+                for role, text in self._replay:
+                    self.session.append({"type": role, "text": text, "imported": True,
+                                         **({"tool_calls": []} if role == "assistant" else {})})
+                self.session.append({"type": "native_history", "messages": len(self._replay)})
+                self._replay = None
         except acp.RequestError as err:
-            self._conn = None
+            self._conn, self._replay = None, None
             await stack.aclose()
             raise LocalAgentError(_friendly(self.engine.title, str(err))) from err
         except BaseException:
-            self._conn = None
+            self._conn, self._replay = None, None
             await stack.aclose()
             raise
         self._stack = stack
@@ -388,7 +418,18 @@ class ExternalAgent:
         if kind == "config_option_update":  # 它的设置变了（换了模型）：不管在不在一轮里都记
             self._record_options(getattr(update, "config_options", None))
             return
-        if self._loading or self._queue is None or not self._busy:
+        if self._loading:
+            if self._replay is not None and kind in ("user_message_chunk", "agent_message_chunk"):
+                text = getattr(getattr(update, "content", None), "text", None)
+                if text:
+                    role = "user" if kind == "user_message_chunk" else "assistant"
+                    if self._replay and self._replay[-1][0] == role:
+                        self._replay[-1] = role, (self._replay[-1][1] + text)[-12000:]
+                    else:
+                        self._replay.append((role, text[-12000:]))
+                        del self._replay[:-60]
+            return
+        if self._queue is None or not self._busy:
             return
         if kind == "agent_message_chunk":
             text = getattr(getattr(update, "content", None), "text", None)
@@ -784,6 +825,40 @@ def codex_model(home: Path | None = None) -> str:
     except OSError:
         pass
     return ""
+
+
+def _quota_code(detail: str) -> str:
+    """只认适配器报出的额度错误，网络、登录和普通限流交给用户判断。"""
+    detail = detail.casefold()
+    markers = ("usage limit", "usage_limit_reached", "insufficient_quota", "credit balance is too low",
+               "hit your limit", "quota_exceeded", "monthly limit reached")
+    return "quota" if any(marker in detail for marker in markers) else ""
+
+
+async def list_native(engine: str, data_dir: Path, cwd: Path, cursor: str | None = None) -> dict:
+    """只查当前账号在这个目录的会话，不打开会话、不发送提示词。"""
+    try:
+        node, args, env = await asyncio.to_thread(launch, engine, data_dir)
+    except AdapterMissing:
+        await install_adapters(data_dir, engines=[engine])
+        node, args, env = await asyncio.to_thread(launch, engine, data_dir)
+    title = ENGINES[engine].title
+    try:
+        async with acp.spawn_agent_process(lambda _: _Bridge(None), node, *args, env=env, cwd=str(cwd)) as (conn, _):
+            init = await asyncio.wait_for(conn.initialize(protocol_version=acp.PROTOCOL_VERSION,
+                                                          client_capabilities=schema.ClientCapabilities()), INIT_TIMEOUT)
+            capabilities = getattr(init, "agent_capabilities", None)
+            session_caps = getattr(capabilities, "session_capabilities", None)
+            if not getattr(capabilities, "load_session", False) and getattr(session_caps, "resume", None) is None:
+                raise LocalAgentError(f"{title} 的适配器不支持接着原会话做。")
+            if getattr(session_caps, "list", None) is None:
+                return {"sessions": [], "next_cursor": None, "manual": True}
+            result = await asyncio.wait_for(conn.list_sessions(cwd=str(cwd), cursor=cursor), SESSION_TIMEOUT)
+            return {"sessions": [{"id": s.session_id, "title": s.title or s.session_id, "cwd": s.cwd,
+                                  "updated": s.updated_at} for s in result.sessions],
+                    "next_cursor": result.next_cursor, "manual": False}
+    except acp.RequestError as err:
+        raise LocalAgentError(_friendly(title, str(err))) from err
 
 
 def _error_text(title: str, said: str) -> str:

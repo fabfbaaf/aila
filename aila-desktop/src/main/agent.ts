@@ -33,6 +33,7 @@ import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
 import type { AcceptanceEvent, DeliveryCard, LineComment, Verdict } from '../shared/delivery'
 import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 import { tm } from './lang'
+import { taskWorkRoute, type TaskWorkRequest, type TaskWorkResponses } from '../shared/taskWork'
 
 export interface RelayHooks {
   /** 一个事件 → 工作窗口 */
@@ -101,6 +102,12 @@ export class AgentRelay {
   /** 所有能选的模型，按账号分组（本机 Agent 的模型在后台问，loading 时过一会儿再拿） */
   models(use: ModelUse, refresh = false): Promise<AiResult<ModelGroup[]>> {
     return this.call('GET', `/agent/models?use=${use}${refresh ? '&refresh=true' : ''}`, undefined, 60000)
+  }
+
+  taskWork<R extends TaskWorkRequest>(request: R): Promise<AiResult<TaskWorkResponses[R['action']]>> {
+    const route = taskWorkRoute(request)
+    if (!route) return Promise.resolve({ ok: false, error: tm('请求失败') })
+    return this.call(route.method, route.path, route.body, 120000)
   }
 
   /** 提交用户对分工的决定，或启动联合验收。 */

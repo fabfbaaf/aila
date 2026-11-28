@@ -35,6 +35,7 @@ import { deleteNotice, groupSessions, sessionLabel } from './sessions'
 import { canContinue, planState } from './plan'
 import PlanCard from './PlanCard.vue'
 import TaskBoard from './TaskBoard.vue'
+import TaskWorkspace from './TaskWorkspace.vue'
 
 const source = createAgentSource()
 /** 告诉主窗口外壳有几个会话在等你（图标栏的角标） */
@@ -477,6 +478,7 @@ async function updatePair(action: PairAction): Promise<void> {
 }
 
 async function open(sid: string): Promise<void> {
+  managing.value = false
   const request = ++openRequest
   openingSid = sid
   opening.value = true
@@ -898,6 +900,13 @@ source.onFocus((sid) => {
 // ---------- 看板：几个任务同时做 ----------
 
 const board = ref(false)
+const managing = ref(false)
+
+async function openFromWorkspace(sid: string, draft?: string): Promise<void> {
+  board.value = false
+  await open(sid)
+  if (draft && current.value?.id === sid) text.value = draft
+}
 const boardNow = ref(Date.now() / 1000)
 /** 侧栏「看板」按钮上的数字：在做和等你的任务一共几个 */
 const boardBusy = computed(() => sessions.value.filter((s) => s.running || s.waiting).length)
@@ -1113,16 +1122,20 @@ onBeforeUnmount(() => {
       <div class="side-head">
         <h2>{{ tr('任务') }}</h2>
         <div class="head-actions">
-          <button class="board-toggle" :class="{ on: board }" :title="board ? tr('回到当前任务') : tr('看板：几个任务同时做时一眼看全')" @click="board = !board">
+          <button class="board-toggle" :class="{ on: board }" :title="board ? tr('回到当前任务') : tr('看板：几个任务同时做时一眼看全')" @click="managing = false; board = !board">
             {{ tr('看板') }}<span v-if="boardBusy" class="dot">{{ boardBusy }}</span>
           </button>
           <button class="new" :title="tr('开一个新任务')" @click="picking = true"><Icon name="plus" :size="15" :stroke="2" />{{ tr('新任务') }}</button>
         </div>
       </div>
-      <label class="search">
-        <Icon name="search" :size="15" />
-        <input v-model="query" type="search" :placeholder="tr('找任务：标题或项目')" :aria-label="tr('找任务')" @keydown.stop @keydown.esc="query = ''" />
-      </label>
+      <div class="side-search">
+        <label class="search">
+          <Icon name="search" :size="15" />
+          <input v-model="query" type="search" :placeholder="tr('找任务：标题或项目')" :aria-label="tr('找任务')" @keydown.stop @keydown.esc="query = ''" />
+        </label>
+        <button type="button" class="board-toggle" :class="{ on: managing }" :aria-pressed="managing"
+          @click="board = false; managing = !managing">{{ tr('管理') }}</button>
+      </div>
       <div class="list">
         <template v-for="g in groups" :key="g.label">
           <div class="group">{{ g.label }}</div>
@@ -1173,8 +1186,11 @@ onBeforeUnmount(() => {
       <div class="side-foot">{{ tr('终端里也能用：') }}<code>aila</code></div>
     </aside>
 
+    <TaskWorkspace v-if="managing" class="main" :source="source" :sessions="sessions" :projects="choices"
+      :current="current" :models="modelGroups" :models-busy="modelsBusy"
+      @open="openFromWorkspace" @close="managing = false" @login="loginTo" @install="installFor" @models="loadModels" />
     <TaskBoard
-      v-if="board"
+      v-else-if="board"
       class="main"
       :sessions="sessions"
       :choices="choices"
@@ -1813,11 +1829,19 @@ code {
   text-align: center;
 }
 
+.side-search {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0 12px 8px;
+}
+
 .search {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 7px;
-  margin: 0 12px 8px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--ui-r);

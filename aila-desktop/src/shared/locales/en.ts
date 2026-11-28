@@ -16,5 +16,6 @@ import { EN11 } from './en11'
 import { EN12 } from './en12'
 import { EN13 } from './en13'
 import { EN14 } from './en14'
+import { EN15 } from './en15'
 
-export const EN: Record<string, string> = { ...EN1, ...EN2, ...EN3, ...EN4, ...EN5, ...EN6, ...EN7, ...EN8, ...EN9, ...EN10, ...EN11, ...EN12, ...EN13, ...EN14 }
+export const EN: Record<string, string> = { ...EN1, ...EN2, ...EN3, ...EN4, ...EN5, ...EN6, ...EN7, ...EN8, ...EN9, ...EN10, ...EN11, ...EN12, ...EN13, ...EN14, ...EN15 }

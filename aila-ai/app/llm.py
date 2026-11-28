@@ -306,10 +306,10 @@ def classify_error(err: Exception) -> tuple[str, str]:
     """把大模型调用的异常归成几类，桌面端按类别让艾拉说不同的话"""
     if isinstance(err, openai.AuthenticationError):
         return "auth", "大模型密钥无效"
+    if isinstance(err, openai.APIStatusError) and (err.status_code == 402 or err.code == "insufficient_quota"):
+        return "quota", "大模型账户余额不足"
     if isinstance(err, openai.RateLimitError):
         return "rate_limit", "请求太频繁"
-    if isinstance(err, openai.APIStatusError) and err.status_code == 402:
-        return "quota", "大模型账户余额不足"
     if isinstance(err, (openai.APIConnectionError, openai.APITimeoutError)):
         return "network", "连不上大模型服务"
     return "unknown", "大模型调用失败"

@@ -201,6 +201,9 @@ const api = {
   /** 换别家的模型接着做：开一个新任务，前情交给新的模型 */
   agentHandoff: (sid: string, engine: AgentEngine | null, model: string, label: string): Promise<AiResult<AgentSessionSummary>> =>
     ipcRenderer.invoke('agent:handoff', sid, engine, model, label),
+  agentTaskWork: <R extends import('../shared/taskWork').TaskWorkRequest>(request: R):
+    Promise<AiResult<import('../shared/taskWork').TaskWorkResponses[R['action']]>> =>
+    ipcRenderer.invoke('agent:taskwork', request),
   agentPair: (sid: string, action: import('../shared/agent').PairAction): Promise<AiResult<{ message: string }>> =>
     ipcRenderer.invoke('agent:pair', sid, action),
   /** 所有能选的模型，按账号分组（对话、编程任务输入框右下角用） */
