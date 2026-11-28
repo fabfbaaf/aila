@@ -51,6 +51,7 @@ from .snapshots import Snapshots
 from .subagent import Explorer
 from .webtools import WebAccess
 from .workers import Workers, open_workers
+from .taskwork import TaskWork, TaskWorkError
 from .tools import CodingTools
 from .workspace import ComputerWorkspace, Workspace
 
@@ -139,6 +140,7 @@ class Runtime:
         self._reviewing: dict[str, Mode] = {}
         # 跨 Agent 派工：本机 Agent 当主 Agent 时给它挂的派工工具（dispatch.py）；bridge_url 是艾拉自己的地址
         self.dispatch = Dispatch(self, bridge_url)
+        self.taskwork = TaskWork(self)
 
     # ---------- 会话 ----------
 
@@ -307,6 +309,8 @@ class Runtime:
                               collaborators=collaborators)  # type: ignore[arg-type]
         else:
             new = self.create(cwd, mode, engine=engine, branch=branch, collaborators=collaborators)
+        if brief := next((e["text"] for e in old.events if e["type"] == "task_group_brief"), ""):
+            new.append({"type": "task_group_brief", "text": brief})
         new.append({"type": "handoff_in", "from": sid, "from_title": old.title, "from_model": previous_label,
                     "model": model_label, "recap": note})
         if old.title and not any(e["type"] == "title" for e in new.events):
@@ -501,6 +505,7 @@ class Runtime:
             raise RuntimeError_("要做什么？")
         if agent.session.branch_closed:
             raise RuntimeError_("这个会话的分支已经放弃了。开一个新任务吧。")
+        self._check_task_capacity(agent.session)
         if not review and (coordination := self.dispatch.opening_prompt(agent.session)):
             return agent, text, {"collaboration_prompt": coordination}
         if isinstance(agent, ExternalAgent) and (plan or review):
@@ -539,6 +544,12 @@ class Runtime:
             raise RuntimeError_(str(err)) from err
         focus = text.strip()
         return agent, request, {"review": True, "title": review_title(focus), **({"focus": focus} if focus else {})}
+
+    def _check_task_capacity(self, session: Session) -> None:
+        try:
+            self.taskwork.check_capacity(session)
+        except TaskWorkError as err:
+            raise RuntimeError_(str(err)) from err
 
     def commands(self, cwd: str | Path | None, kind: str = "project") -> dict[str, Command]:
         """这个项目能用的自定义命令（每次现读：改了命令文件马上生效）。电脑任务只用自己的"""
@@ -630,6 +641,13 @@ class Runtime:
 
     def _begin(self, sid: str, agent: Agent, text: str, extra: dict | None = None) -> None:
         coordinating = bool(extra and extra.get("collaboration_prompt"))
+        if not ((extra or {}).get("command") or (extra or {}).get("review")) and not any(
+            e["type"] == "user" and not (e.get("imported") or e.get("command") or e.get("review"))
+            for e in agent.session.events
+        ):
+            brief = next((e["text"] for e in agent.session.events if e["type"] == "task_group_brief"), "")
+            if brief:
+                text = brief + "\n\n" + text
         if isinstance(agent, ExternalAgent):
             # 本机 Agent 用自己的模型、工具和 MCP，首次派工前只读查看项目。
             events = agent.turn(text.strip(), extra)
@@ -679,6 +697,7 @@ class Runtime:
             raise RuntimeError_("没有批准过的计划。")
         if state.finished:
             raise RuntimeError_("计划已经全部做完了。")
+        self._check_task_capacity(agent.session)
         stream = self.subscribe(sid, len(agent.session.events) - 1 if after is None else after)
         self._tasks[sid] = asyncio.create_task(self._plan_loop(sid, agent))
         return stream
@@ -904,6 +923,7 @@ class Runtime:
             self._listeners.get(sid, set()).discard(queue)
 
     async def shutdown(self) -> None:
+        await self.taskwork.stop()
         await self.dispatch.shutdown()
         for task in list(self._tasks.values()):
             task.cancel()
@@ -940,6 +960,6 @@ def _last_reason(session: Session) -> str | None:
 
 def _unfinished(session: Session) -> bool:
     """最后一句话之后没有 turn_end：这一轮没做完进程就没了"""
-    last_user = max((i for i, e in enumerate(session.events) if e["type"] == "user"), default=-1)
+    last_user = max((i for i, e in enumerate(session.events) if e["type"] == "user" and not e.get("imported")), default=-1)
     last_end = max((i for i, e in enumerate(session.events) if e["type"] == "turn_end"), default=-1)
     return last_user > last_end

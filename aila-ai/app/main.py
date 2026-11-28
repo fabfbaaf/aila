@@ -20,8 +20,9 @@ from .i18n import localize
 
 from . import deps
 from .deps import get_confirmations, get_ears, get_embedder, get_knowledge, get_model, get_registry, get_voice
-from .routes import agenda, agent, android, chat, schedules, code, computer, discoveries, extensions, knowledge, phone, quotas, screen, settings, studio, voice
+from .routes import agenda, agent, android, chat, schedules, code, computer, discoveries, extensions, knowledge, phone, quotas, screen, settings, studio, taskwork, voice
 from .routes.chat import ChatMessage, ChatRequest, build_messages
+from .runtime.taskwork import STATE_FILE
 from .security import LocalOnly
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -41,6 +42,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await deps.apply_phone()  # 打开过「允许手机连接」的话，局域网上的门跟着开
     deps.get_scheduler().start()  # 定时任务：每 30 秒看一眼，到点的跑
     deps.get_meetings().start()  # 会前 10 分钟提醒到手机
+    if (deps.settings.data_dir / STATE_FILE).is_file():
+        deps.get_runtime().taskwork.start()
     yield
     await deps.get_meetings().stop()
     await deps.get_scheduler().stop()
@@ -71,6 +74,7 @@ app.include_router(settings.router)
 app.include_router(screen.router)
 app.include_router(code.router)
 app.include_router(agent.router)
+app.include_router(taskwork.router)
 app.include_router(quotas.router)
 app.include_router(computer.router)
 app.include_router(studio.router)

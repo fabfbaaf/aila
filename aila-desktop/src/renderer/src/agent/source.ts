@@ -2,6 +2,7 @@
 import { SseParser } from '../../../shared/chat'
 import type { AgentBudgetEvent, AgentCommandList, AgentEngine, AgentEvent, AgentKind, AgentLedger, AgentMemoryNote, AgentMode, AgentSession, AgentSessionSummary, AgentUndoEvent, EngineOption, LocalAgentInfo, ModelGroup, ModelUse, PairPick } from '../../../shared/agent'
 import type { AiResult } from '../../../shared/settings'
+import { taskWorkRoute, type TaskWorkRequest, type TaskWorkResponses } from '../../../shared/taskWork'
 import { bridge } from '../platform/bridge'
 import { t } from '../i18n'
 
@@ -11,6 +12,7 @@ export interface ProjectChoice {
 }
 
 export interface AgentSource {
+  taskWork<R extends TaskWorkRequest>(request: R): Promise<TaskWorkResponses[R['action']]>
   /** q：按标题或项目路径找；空 = 最近的 */
   list(q?: string): Promise<AgentSessionSummary[]>
   rename(sid: string, title: string): Promise<AgentSessionSummary>
@@ -73,6 +75,7 @@ function unwrap<T>(r: AiResult<T>): T {
 
 function desktop(api: NonNullable<typeof bridge>): AgentSource {
   return {
+    taskWork: async (request) => unwrap(await api.agentTaskWork(request)),
     list: async (q = '') => unwrap(await api.agentList(q)),
     rename: async (sid, title) => unwrap(await api.agentRename(sid, title)),
     remove: async (sid) => void unwrap(await api.agentDelete(sid)),
@@ -166,6 +169,11 @@ function web(): AgentSource {
     }
   }
   return {
+    taskWork: (request) => {
+      const route = taskWorkRoute(request)
+      if (!route) return Promise.reject(new Error(t('请求失败')))
+      return call(route.method, route.path, route.body)
+    },
     list: (q = '') => call('GET', `/agent/sessions${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`),
     rename: (sid, title) => call('PATCH', `/agent/sessions/${encodeURIComponent(sid)}`, { title }),
     remove: async (sid) => void (await call('DELETE', `/agent/sessions/${encodeURIComponent(sid)}`)),

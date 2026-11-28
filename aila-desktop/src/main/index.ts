@@ -98,6 +98,7 @@ import { IntroDirector } from './intro'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
+import type { TaskWorkRequest } from '../shared/taskWork'
 import { registerUnderstandIpc } from './understandIpc'
 import type { VoiceMenuAction, VoiceMenuState } from '../shared/voice'
 import { Account, type SecretBox } from './cloud/account'
@@ -1185,6 +1186,9 @@ function registerIpc(): void {
   )
   ipcMain.handle('agent:get', (e, sid: unknown) => (fromAgent(e) && sidOk(sid) ? agentRelay.get(sid) : notAllowed))
   registerAgentCreateIpc(ipcMain, agentRelay, fromAgent)
+  ipcMain.handle('agent:taskwork', (e, request: TaskWorkRequest | null) =>
+    fromAgent(e) && request && typeof request === 'object' && typeof request.action === 'string'
+      && JSON.stringify(request).length <= 60000 ? agentRelay.taskWork(request) : notAllowed)
   // 看懂项目：整体架构、模块、链路、函数，AI 讲解（花钱，只认主窗口）
   registerUnderstandIpc(ipcMain, {
     area: (id, path, tests) => codeArea(AI_URL, id, path, tests),

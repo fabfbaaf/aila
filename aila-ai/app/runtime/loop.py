@@ -136,7 +136,7 @@ class Agent:
 
     async def turn(self, text: str, extra: dict[str, Any] | None = None) -> AsyncIterator[Event]:
         # extra：界面用的标记（比如 /review 的 review、focus），不进模型消息
-        yield self.session.append({"type": "user", "text": text, **(extra or {})})
+        yield self.session.append({"type": "user", "text": text, "model": self.model.name, **(extra or {})})
         await self.hooks.emit("turn_start", session=self.session, text=text)
         reason, error = "done", ""
         denied = 0  # 连着被权限挡下几次（中间有一次做成了就清零）
@@ -192,7 +192,7 @@ class Agent:
             code, message = classify_error(err)
             log.exception("编程 Agent 出错")
             reason, error = "error", message if code != "unknown" else f"{message}（{type(err).__name__}）"
-            for e in self._close("error", error):
+            for e in self._close("error", error, code):
                 yield e
             return
         end = self.session.append({"type": "turn_end", "reason": reason, "cost": self.session.turn_cost})
@@ -451,7 +451,7 @@ class Agent:
         """上次没做完就断了的一轮：补完整，记成被打断"""
         return self._close("interrupted")
 
-    def _close(self, reason: str, error: str = "") -> list[Event]:
+    def _close(self, reason: str, error: str = "", error_code: str = "") -> list[Event]:
         """出错或被打断：把日志补完整，下次请求的消息仍然合法（每个工具调用都有结果，用户的话后面有回复）"""
         first = len(self.session.events)
         if self._partial:
@@ -464,7 +464,8 @@ class Agent:
             note = "（这一轮被打断了，没有回复）" if reason == "interrupted" else f"（出错了，没有回复：{error}）"
             self.session.append({"type": "assistant", "text": note, "tool_calls": []})
         self.session.append({"type": "turn_end", "reason": reason, "cost": self.session.turn_cost,
-                             **({"error": error} if error else {})})
+                             **({"error": error} if error else {}),
+                             **({"error_code": error_code} if error_code else {})})
         return self.session.events[first:]
 
 
