@@ -5,6 +5,7 @@
 import type { AgentSessionSummary } from '../shared/agent'
 import type { StoredMemory, StoredMessage } from '../shared/cloud'
 import type { Reminder } from '../shared/desktop'
+import type { Lang } from '../shared/i18n'
 import { weekOf } from '../shared/review'
 import { isStudioSession } from './briefing'
 
@@ -26,30 +27,34 @@ export function reviewBody(input: {
   reminders: Reminder[]
   memories: StoredMemory[]
   now: Date
+  lang?: Lang
 }): ReviewBody {
-  const w = weekOf(input.now)
-  const inWeek = (d: Date): boolean => weekOf(d).week === w.week
+  const now = input.now
+  const w = weekOf(now)
+  const nextWeek = weekOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7)).week
+  const isWeek = (date: Date, week: string): boolean => Number.isFinite(date.getTime()) && weekOf(date).week === week
   const tasks = input.sessions
-    .filter((s) => !isStudioSession(s) && s.kind !== 'computer' && s.updated !== undefined && inWeek(new Date(s.updated * 1000)))
+    .filter((s) => !isStudioSession(s) && s.kind !== 'computer' && s.updated !== undefined && isWeek(new Date(s.updated * 1000), w.week))
     .map((s) => ({
       title: s.title.slice(0, 200),
       project: s.cwd,
       // 做完：上一轮正常结束、没在等你、计划（有的话）都做完了
       done: s.outcome === 'done' && !s.waiting && !s.running && (!s.plan || s.plan.finished)
     }))
-  const chats = input.messages.filter((m) => !m.deleted && m.role === 'user' && inWeek(new Date(m.createdAt))).length
-  const soon = input.now.getTime() + 7 * 86_400_000
-  const when = (d: Date): string => `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const chats = input.messages.filter((m) => !m.deleted && m.role === 'user' && isWeek(new Date(m.createdAt), w.week)).length
+  const english = input.lang === 'en'
+  const when = (date: Date): string => {
+    const day = english
+      ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date)
+      : `${date.getMonth() + 1} 月 ${date.getDate()} 日`
+    return `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  }
   const upcoming = [
     ...input.reminders
-      .filter((r) => {
-        const t = new Date(r.at).getTime()
-        return t > input.now.getTime() && t <= soon
-      })
-      .map((r) => `${when(new Date(r.at))} 提醒：${r.text}`),
+      .filter((r) => isWeek(new Date(r.at), nextWeek))
+      .map((r) => `${when(new Date(r.at))} ${english ? 'Reminder: ' : '提醒：'}${r.text}`),
     ...input.memories
-      .filter((m) => !m.deleted && m.kind === 'event' && m.expiresAt && new Date(m.expiresAt).getTime() > input.now.getTime())
-      .filter((m) => new Date(m.expiresAt as string).getTime() <= soon + 86_400_000)
+      .filter((m) => !m.deleted && m.kind === 'event' && m.expiresAt && isWeek(new Date(m.expiresAt), nextWeek))
       .map((m) => m.content)
   ].slice(0, 30)
   return { ...w, tasks: tasks.slice(0, 100), chats, upcoming }

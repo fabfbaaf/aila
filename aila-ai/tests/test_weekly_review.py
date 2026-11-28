@@ -1,5 +1,6 @@
 """每周回顾：材料（记忆库里的经历 + 桌面端送来的）、有没有大模型时怎么写、一周一份可以重写、接口"""
 
+import asyncio
 import json
 import time
 from datetime import datetime
@@ -22,8 +23,10 @@ class JsonModel:
     def __init__(self, reply: str) -> None:
         self.reply = reply
         self.seen = ""
+        self.calls = 0
 
     async def complete(self, messages: list[dict[str, Any]]) -> str:
+        self.calls += 1
         self.seen = messages[-1]["content"]
         return self.reply
 
@@ -64,7 +67,8 @@ async def test_model_writes_once_a_week_and_can_rewrite(tmp_path: Path) -> None:
     model = JsonModel(json.dumps({"markdown": good}, ensure_ascii=False))
     r = Reviews(tmp_path, lambda: model, lambda: store)
     m = week(store)
-    first = await r.write(m)
+    first, second = await asyncio.gather(r.write(m), r.write(m))
+    assert first == second and model.calls == 1
     assert first["markdown"] == good and first["week"] == "2026-W48"
     assert "<这一周" in model.seen and "加运费" in model.seen
     model.reply = json.dumps({"markdown": good.replace("运费", "包邮")}, ensure_ascii=False)
@@ -85,6 +89,7 @@ def test_routes(tmp_path: Path) -> None:
             assert res.status_code == 201 and "加运费" in res.json()["markdown"]
             assert [e["week"] for e in client.get("/studio/reviews").json()] == ["2026-W48"]
             assert client.post("/studio/reviews", json={**body, "week": "下周"}).status_code == 409
+            assert client.post("/studio/reviews", json={**body, "end": "2026-02-30"}).status_code == 409
             assert (deps.settings.data_dir / "reviews" / "2026-W48.json").exists()
     finally:
         app.dependency_overrides.clear()
@@ -94,3 +99,13 @@ def test_routes(tmp_path: Path) -> None:
 def test_english_review() -> None:
     text = plain_review(["- 下周约好的：Mon standup"], english=True)
     assert text.startswith("## Done this week") and "## Next week" in text and "- Mon standup" in text
+
+
+@pytest.mark.anyio
+async def test_english_fallback_localizes_material(tmp_path: Path) -> None:
+    r = Reviews(tmp_path, lambda: JsonModel(""), lambda: None, language=lambda: "en")
+    m = WeekMaterial("2026-W48", "2026-11-23", "2026-11-29",
+                     [{"title": "Fix login", "done": False}], chats=3)
+    text = (await r.write(m))["markdown"]
+    assert "## Not finished\n- Coding task: Fix login, unfinished" in text
+    assert "- Messages this week: 3" in text

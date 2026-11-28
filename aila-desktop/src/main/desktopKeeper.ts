@@ -30,7 +30,7 @@ import { decidePresence, FocusWatch } from './presence'
 import { ReminderBook, SitTimer } from './reminders'
 import { reviewDue, type ReviewEntry } from '../shared/review'
 import { reviewBody, type ReviewBody } from './weekReview'
-import { tm } from './lang'
+import { mainLang, tm } from './lang'
 
 /** 最长隔多久重新排一次闹钟（电脑睡眠后 setTimeout 会不准） */
 const MAX_TIMER_MS = 60 * 60 * 1000
@@ -440,7 +440,8 @@ export class DesktopKeeper {
     if (!l) return { ok: false, error: tm('还没准备好') }
     const got = await this.o.gather()
     if (!got) return { ok: false, error: tm('AI 服务没开，过会儿再试。') }
-    const body = reviewBody({ sessions: got.sessions, messages: got.messages, memories: got.memories, reminders: this.book.list(), now: new Date() })
+    const body = reviewBody({ sessions: got.sessions, messages: got.messages, memories: got.memories,
+      reminders: this.book.list(), now: new Date(), lang: mainLang() })
     return l.writeReview({ ...body, force })
   }
 

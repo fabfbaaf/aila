@@ -53,4 +53,14 @@ describe('回顾的材料', () => {
     expect(body.chats).toBe(1)
     expect(body.upcoming).toEqual(['11 月 30 日 10:00 提醒：和产品对需求', '用户下周二面试'])
   })
+
+  it('按日历下周收集提醒，用界面语言显示日期', () => {
+    const reminder = (id: string, month: number, day: number) =>
+      ({ id, at: new Date(2026, month, day, 10).toISOString(), text: id, createdAt: '' })
+    const body = reviewBody({
+      now, lang: 'en', sessions: [], messages: [], memories: [],
+      reminders: [reminder('this week', 10, 29), reminder('next Sunday', 11, 6), reminder('week after', 11, 7)]
+    })
+    expect(body.upcoming).toEqual(['Dec 6 10:00 Reminder: next Sunday'])
+  })
 })

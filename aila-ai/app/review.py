@@ -15,7 +15,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +78,7 @@ class Reviews:
         self._store = store
         self._persona = persona
         self._language = language  # 界面语言：en 时整份用英文写
+        self._write_lock = asyncio.Lock()
 
     def entries(self, limit: int = 30) -> list[dict[str, Any]]:
         out = []
@@ -91,19 +92,28 @@ class Reviews:
     async def write(self, m: WeekMaterial, force: bool = False) -> dict[str, Any]:
         if not WEEK.fullmatch(m.week) or not DAY.fullmatch(m.start) or not DAY.fullmatch(m.end):
             raise ReviewError("哪一周没说对。")
+        try:
+            start, end = date.fromisoformat(m.start), date.fromisoformat(m.end)
+            if start > end or end == date.max:
+                raise ValueError
+        except ValueError as err:
+            raise ReviewError("哪一周没说对。") from err
         path = self.root / f"{m.week}.json"
-        if path.exists() and not force:
-            return json.loads(path.read_text(encoding="utf-8"))
-        material = await asyncio.to_thread(self.material, m)
-        text = await self._compose(m, material)
-        entry = {"week": m.week, "start": m.start, "end": m.end, "markdown": text,
-                 "written": datetime.now().astimezone().isoformat(timespec="seconds")}
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(path)
-        return entry
+        # 手动和定时生成可能同时到达，拿锁后再检查同一周的回顾。
+        async with self._write_lock:
+            if path.exists() and not force:
+                return json.loads(path.read_text(encoding="utf-8"))
+            english = self._language() == "en"
+            material = await asyncio.to_thread(self.material, m, english)
+            text = await self._compose(m, material, english)
+            entry = {"week": m.week, "start": m.start, "end": m.end, "markdown": text,
+                     "written": datetime.now().astimezone().isoformat(timespec="seconds")}
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)
+            return entry
 
-    def material(self, m: WeekMaterial) -> list[str]:
+    def material(self, m: WeekMaterial, english: bool = False) -> list[str]:
         """拼给大模型看的材料（也是没有大模型时的底稿）"""
         lines: list[str] = []
         for t in m.tasks[:MAX_ITEMS]:
@@ -111,19 +121,23 @@ class Reviews:
             if not title:
                 continue
             project = Path(str(t.get("project", ""))).name
-            state = "做完了" if t.get("done") else "还没做完"
-            lines.append(f"- 编程任务{f'（{project}）' if project else ''}：{title}，{state}")
+            if english:
+                state = "done" if t.get("done") else "unfinished"
+                lines.append(f"- Coding task{f' ({project})' if project else ''}: {title}, {state}")
+            else:
+                state = "做完了" if t.get("done") else "还没做完"
+                lines.append(f"- 编程任务{f'（{project}）' if project else ''}：{title}，{state}")
         for e in self._episodes(m):
             where = Path(e.scope).name if e.scope else ""
             if e.meta.get("source") == "task":
-                lines.append(f"- 任务里的一轮{f'（{where}）' if where else ''}：{e.content[:160]}")
+                label = f"Task update{f' ({where})' if where else ''}: " if english else f"任务里的一轮{f'（{where}）' if where else ''}："
             else:
-                lines.append(f"- 聊过的：{e.content[:160]}")
+                label = "Conversation: " if english else "聊过的："
+            lines.append(f"- {label}{e.content[:160]}")
         if m.chats:
-            lines.append(f"- 这周聊了 {m.chats} 句")
-        for u in m.upcoming[:20]:
-            if u.strip():
-                lines.append(f"- 下周约好的：{u.strip()[:80]}")
+            lines.append(f"- Messages this week: {m.chats}" if english else f"- 这周聊了 {m.chats} 句")
+        prefix = "Scheduled next week: " if english else "下周约好的："
+        lines.extend(f"- {prefix}{u.strip()[:80]}" for u in m.upcoming[:20] if u.strip())
         return lines
 
     def _episodes(self, m: WeekMaterial) -> list[Any]:
@@ -131,12 +145,12 @@ class Reviews:
         if store is None:
             return []
         start = datetime.fromisoformat(f"{m.start}T00:00:00").astimezone().timestamp()
-        end = datetime.fromisoformat(f"{m.end}T23:59:59").astimezone().timestamp()
-        got = [e for e in store.recent(EPISODE, None, 300) if start <= e.updated_at <= end]
+        next_day = date.fromisoformat(m.end) + timedelta(days=1)
+        end = datetime.fromisoformat(f"{next_day}T00:00:00").astimezone().timestamp()
+        got = [e for e in store.recent(EPISODE, None, 300) if start <= e.updated_at < end]
         return list(reversed(got))[:MAX_ITEMS]
 
-    async def _compose(self, m: WeekMaterial, material: list[str]) -> str:
-        english = self._language() == "en"
+    async def _compose(self, m: WeekMaterial, material: list[str], english: bool) -> str:
         complete = getattr(self._model(), "complete", None)
         if complete is not None and material:
             try:
@@ -153,11 +167,14 @@ class Reviews:
 
 
 def plain_review(material: list[str], english: bool = False) -> str:
-    """没有大模型时：把材料分成三段列出来（材料本身是中文拼的，英文时只换标题和套话）"""
-    done = [x for x in material if ("编程任务" in x and "做完了" in x) or x.startswith("- 任务里的一轮") or x.startswith("- 聊过的")]
-    todo = [x for x in material if "还没做完" in x]
-    later = [x.replace("- 下周约好的：", "- ") for x in material if x.startswith("- 下周约好的")]
-    chats = [x for x in material if x.startswith("- 这周聊了")]
+    """没有大模型时按实际任务状态列出材料。"""
+    task = ("- 编程任务", "- Coding task")
+    notes = ("- 任务里的一轮", "- 聊过的", "- Task update", "- Conversation")
+    upcoming = ("- 下周约好的：", "- Scheduled next week: ")
+    done = [x for x in material if x.startswith(notes) or (x.startswith(task) and x.endswith(("，做完了", ", done")))]
+    todo = [x for x in material if x.startswith(task) and x.endswith(("，还没做完", ", unfinished"))]
+    later = [f"- {x[len(prefix):]}" for x in material for prefix in upcoming if x.startswith(prefix)]
+    chats = [x for x in material if x.startswith(("- 这周聊了", "- Messages this week"))]
     if english:
         parts = ["## Done this week", *(done + chats or ["- Not much this week"]),
                  "", "## Not finished", *(todo or ["- All done"]),
