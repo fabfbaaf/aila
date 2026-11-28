@@ -97,8 +97,12 @@ onMounted(check)
             {{ [a.problem, ...a.hints].filter(Boolean).join(' · ') }}
           </span>
         </div>
-        <button v-if="a.can_login && a.logged_in !== true" class="btn" type="button"
+        <button v-if="a.can_login && a.logged_in === false" class="btn" type="button"
           :aria-label="t('登录 {name}', { name: a.title })" @click="login(a.id)">{{ a.id.endsWith('-alt') ? t('登录第二个账号') : t('登录') }}</button>
+        <!-- 问不出登没登录的（Antigravity、CodeBuddy）：不说「登录」免得以为要先登录，给一个不显眼的「换账号」（没登录过也从这里登） -->
+        <button v-else-if="a.can_login && a.logged_in === null" class="btn quiet" type="button"
+          :title="t('问不出它登没登录：能用就不用管；要换账号、或者用的时候说没登录，点这里')"
+          :aria-label="t('换 {name} 的账号', { name: a.title })" @click="login(a.id)">{{ t('换账号') }}</button>
         <span v-if="a.path" class="tag" :class="a.ready ? 'good' : 'warn'">{{ a.ready ? t('能用') : t('还不能用') }}</span>
         <a v-else-if="agentInstallUrl(a.id)"
           class="btn install-link"
@@ -122,6 +126,12 @@ onMounted(check)
 </template>
 
 <style scoped>
+/* 「换账号」比「登录」不显眼：它能用，只是问不出登没登录 */
+.btn.quiet {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
 .list {
   margin: 8px 0;
   padding: 0;
