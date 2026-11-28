@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../../shared/agent'
-import { canContinue, planState } from './plan'
+import { canContinue, canRedo, planState } from './plan'
 
 const ev = (type: string, extra: Record<string, unknown> = {}): AgentEvent => ({ type, ...extra })
 const PLAN = { goal: '加打折', stages: [{ title: '写函数', goal: 'g1', verify: 'v1' }, { title: '接结算', goal: 'g2', verify: 'v2' }] }
@@ -53,5 +53,28 @@ describe('planState', () => {
     expect(p.toolId).toBe('b')
     expect(p.stages[0].status).toBe('pending')
     expect(planState([ev('tool', { id: 'a', name: 'propose_plan', plan: PLAN }), ev('plan_decision', { approved: false })])!.decision).toBe('rejected')
+  })
+
+  it('服务重启停在做到一半的阶段：能接着做，也能重做；你的验收记在刚做完的阶段上', () => {
+    const events = [
+      ev('tool', { id: 'c1', name: 'propose_plan', status: 'ok', plan: PLAN }),
+      ev('plan_decision', { approved: true, pause_each: true }),
+      ev('user', { plan_stage: 0 }),
+      ev('tool', { name: 'stage_done', stage: 0, summary: '好了' }),
+      ev('acceptance', { verdict: 'accepted' }),
+      ev('user', { plan_stage: 1 }),
+      ev('acceptance', { verdict: 'rejected' }), // 阶段做到一半时的验收不算在哪个阶段上
+      ev('plan_pause', { reason: 'restart', text: '服务重启了，第 2 阶段做到一半停了', stage: 1 })
+    ]
+    let p = planState(events)!
+    expect(p.stages.map((s) => s.accepted)).toEqual([true, null])
+    expect(p.paused?.reason).toBe('restart')
+    expect(canContinue(p, false) && canRedo(p, false)).toBe(true)
+    expect(canRedo(p, true)).toBe(false)
+    p = planState([...events, ev('stage_reset', { stage: 1, restored: ['cart.py'] })])!
+    expect(p.stages[1].status).toBe('pending')
+    expect(p.current).toBe(1)
+    expect(p.paused).toBeNull()
+    expect(canRedo(p, false)).toBe(false) // 还没开始，不用重做
   })
 })

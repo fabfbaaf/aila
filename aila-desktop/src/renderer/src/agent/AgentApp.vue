@@ -32,7 +32,7 @@ import { AILA, engineOf, modelName, pickLabel, stillLoading, switchKind, taskPic
 import { parseBudget, validBudget } from '../../../shared/budget'
 import Icon from '../theme/Icon.vue'
 import { deleteNotice, groupSessions, sessionLabel } from './sessions'
-import { canContinue, planState } from './plan'
+import { canContinue, canRedo, planState } from './plan'
 import PlanCard from './PlanCard.vue'
 import TaskBoard from './TaskBoard.vue'
 import TaskWorkspace from './TaskWorkspace.vue'
@@ -744,7 +744,7 @@ function proposePlan(goal: string): void {
 }
 
 /** 批准计划并开始做 / 停下以后接着做 / 不要这份计划 */
-async function planAction(action: 'approve' | 'continue' | 'reject', pauseEach = false): Promise<void> {
+async function planAction(action: 'approve' | 'continue' | 'redo' | 'reject', pauseEach = false): Promise<void> {
   const sid = current.value?.id
   if (!sid || planBusy.value) return
   if (action !== 'reject' && !canStart()) return
@@ -1434,6 +1434,7 @@ onBeforeUnmount(() => {
         <ol class="plan-steps">
           <li v-for="(s, i) in plan.stages" :key="i" :class="s.status" :title="s.summary || s.goal">
             <i aria-hidden="true"></i>{{ s.title }}
+            <b v-if="s.accepted !== null" class="stage-check" :class="{ bad: !s.accepted }">{{ s.accepted ? tr('你验收过') : tr('你退回过') }}</b>
           </li>
         </ol>
         <p v-if="plan.decision === 'proposed'" class="dim">{{ tr('等你在左边的计划卡片上决定') }}</p>
@@ -1446,6 +1447,15 @@ onBeforeUnmount(() => {
           @click="planAction('continue')"
         >
           <Icon name="play" :size="12" :stroke="2" />{{ tr('接着做第 {n} 阶段', { n: (plan.current ?? 0) + 1 }) }}
+        </button>
+        <button
+          v-if="canRedo(plan, running) && current.kind !== 'computer' && !current.engine"
+          class="ghost plan-continue"
+          :disabled="planBusy || undoBusy || opening"
+          :title="tr('把这一阶段改过的文件退回到上一阶段做完时，再从头做这一阶段（跑过的命令退不回去）')"
+          @click="planAction('redo')"
+        >
+          <Icon name="branch" :size="12" :stroke="2" />{{ tr('重做第 {n} 阶段', { n: (plan.current ?? 0) + 1 }) }}
         </button>
       </section>
       <DeliveryCard
@@ -2351,6 +2361,17 @@ code {
 
 .plan-steps .blocked i {
   border-color: var(--warn);
+}
+
+.stage-check {
+  margin-left: auto;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--ok);
+}
+
+.stage-check.bad {
+  color: var(--warn);
 }
 
 .plan-ok {

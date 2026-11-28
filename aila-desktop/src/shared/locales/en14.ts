@@ -1,4 +1,4 @@
-/** 英文词典第 14 份：任务页的交付卡（改了哪些文件、测试、PR 和 CI，在 diff 上点一行写意见，通过 / 退回修改） */
+/** 英文词典第 14 份：任务页的交付卡（改了哪些文件、测试、PR 和 CI，在 diff 上点一行写意见，通过 / 退回修改）；子任务交回、重做计划的某个阶段 */
 export const EN14: Record<string, string> = {
   "验收的内容不对。": "Invalid review.",
   "只能打开 GitHub 上的链接。": "Only GitHub links can be opened.",
@@ -38,5 +38,13 @@ export const EN14: Record<string, string> = {
   "退回修改": "Send back",
   "你验收通过了": "You accepted the work",
   "你退回了修改（{n} 条意见）": "You sent it back ({n} comments)",
-  "你退回了修改": "You sent it back"
+  "你退回了修改": "You sent it back",
+  "派出去的活交回来了": "Delegated work came back",
+  "重做第 {n} 阶段：退回了这一阶段改的 {count} 个文件": "Redoing stage {n}: rolled back {count} files it changed",
+  "重做第 {n} 阶段": "Redo stage {n}",
+  "；没退回：{files}": "; not rolled back: {files}",
+  "（跑过的命令退不回去）": " (commands that ran can't be undone)",
+  "你验收过": "You accepted",
+  "你退回过": "You sent back",
+  "把这一阶段改过的文件退回到上一阶段做完时，再从头做这一阶段（跑过的命令退不回去）": "Roll back the files this stage changed to where the last stage ended, then start this stage over (commands that ran can't be undone)"
 }

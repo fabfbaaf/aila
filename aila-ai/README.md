@@ -422,6 +422,8 @@ data: {"type": "done"}
   - 出方案那一轮只读（复用 /review 的只读把关），请求由代码生成（`PLAN_PROMPT`）；她用 `propose_plan` 交 2～8 个阶段，每阶段写目标和怎么验收，交完就停，等你决定
   - 你批准（`/plan go`，或卡片上「照这个做」；可以勾「每个阶段做完停一下」）后，`Runtime.drive_plan` 一阶段一阶段地开新的一轮：开始的那句话由代码生成（`STAGE_PROMPT`），她做完调用 `stage_done`（说做了什么、验收结果），卡住调用 `stage_blocked`。一轮走满步数还没做完就自动「接着做」同一阶段，最多 5 次
   - 停下来的情况：你打断、花到上限、出错、你没同意某个操作、她说卡住了、接着做了 5 次还没完、你要求每阶段停一下——都记一条 `plan_pause`（带原因）；全部做完记 `plan_end`。停下以后 `/plan continue`（或任务页右边「接着做」）从停的地方接着做；服务重启后也一样，**不会自己偷偷接着跑**
+  - 服务重启（被强制关掉、电脑重启）：打开会话时发现最后一个阶段开了头、后面没有停下 / 做完的记录（`cut_off`），补一条 `plan_pause`（reason=restart，「服务重启了，第 2 阶段做到一半停了，前面 1 个阶段做完了」）。可以「接着做」（这一轮开头告诉她是重启前做到一半），也可以「重做这一阶段」（`/plan/continue {"redo": true}`）：这一阶段改过的文件按底片退回到上一阶段做完时（`stage_edits`，撤销过的那几轮不算；之后被你改过的不退，记在 `skipped`），记一条 `stage_reset`，再从头发这一阶段，开头说明哪些退回了、命令的效果退不回去。之前做完的阶段不动。本机 Agent 做的任务没有底片，不能重做
+  - 阶段上的验收：阶段刚做完、下一阶段还没开始时你在交付卡上点的通过 / 退回修改（`acceptance` 事件）记在那个阶段上（`Stage.accepted`），右边计划栏显示「你验收过」
   - 状态全从只追加的日志推出来（`plan_state`）：计划在 `propose_plan` 的 tool 事件里，决定是 `plan_decision`，每阶段开始是带 `plan_stage` 的 user 事件。这些都只追加在历史末尾，前缀缓存照样命中；三个新工具是 meta，不用问
   - 接口：`POST /agent/sessions/{id}/messages` 带 `{"plan": true}`（text 是目标）；`POST /agent/sessions/{id}/plan/approve {pause_each}`、`/plan/continue`（都返回一直到计划停下的事件流）、`/plan/reject`。会话列表的 `plan` 字段是进度
   - 没填密钥时的假模型也能演示：出方案交两个阶段，每阶段读一下 README 就标完成
@@ -532,6 +534,9 @@ data: {"type": "done"}
 本机 Agent 当主 Agent 时，艾拉给它挂一个本机 MCP 服务（`POST /agent/bridge`，最小的 Streamable HTTP，只认开会话时给的令牌），工具：
 `delegate`（派给 codex / claude：开一个新的本机 Agent 会话，在独立 git 工作区里做，开头记着 `parent`）、`work_status`、`wait_work`（一次最多等 50 秒，Agent 的工具调用有超时）、`merge_work`（按主任务的权限模式问你，给你看的 diff 由这边生成；问你时不卡住主 Agent，同意后在后台跑测试、合并，主任务里有合并卡片）、`discard_work`。
 助手要你同意的操作原样转到主任务（在主任务里点就行），做完、出错在主任务里说一声；主 Agent 调这几个工具本身不用问。
+
+**交回主任务**（`runtime/handback.py`）：助手一轮结束（做完、出错、步数到头、被权限挡下……；你打断的不算），主任务闲着就开一轮，开头那句话是代码整理的交回报告：每个助手改了哪些文件（和分支开出来的地方比，带加删行数）、最后一次测试和结果、怎么结束的，它最后说的话单独一段、标明只当参考；最后告诉主模型用 `merge_work` / `discard_work` / `validate_pair` 收尾，再跟你汇报。主任务正在做就等它这一轮结束（或你点完确认）再交；这一轮里它已经用 `work_status` / `wait_work` 看过的不再交。一起派的活（`delegate_pair`）等都结束了一起交。开不了新一轮（花到上限、同时在做的太多）就在主任务里记一行。用户消息事件带 `handback`（助手编号）和 `title`，任务页显示成「「后端」交回来了」，能展开看全文。
+服务重启：打开主任务时，派出去的活里有做到一半就停了的（`note` 事件的 `dispatched` 和 `pair_plan` 里记着编号），说一声是哪几个，不自己重新开工。
 
 ### 对话的大脑换成本机 Agent（`app/brain.py`）
 

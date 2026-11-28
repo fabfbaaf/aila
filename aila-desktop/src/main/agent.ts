@@ -346,8 +346,9 @@ export class AgentRelay {
     void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/approve`, { method: 'POST', body: JSON.stringify({ pause_each: pauseEach }) })
   }
 
-  planContinue(sid: string): void {
-    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/continue`, { method: 'POST', body: '{}' })
+  /** redo：先把这一阶段改过的文件退回到上一阶段做完时，再从头做 */
+  planContinue(sid: string, redo = false): void {
+    void this.stream(sid, `/agent/sessions/${encodeURIComponent(sid)}/plan/continue`, { method: 'POST', body: JSON.stringify(redo ? { redo: true } : {}) })
   }
 
   planReject(sid: string): Promise<AiResult<AgentEvent>> {

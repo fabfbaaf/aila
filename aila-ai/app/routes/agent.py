@@ -13,7 +13,7 @@
   GET    /agent/sessions/{id}/events       订阅：补发 after 之后的事件，正在做的话接着推实时事件（SSE）
   POST   /agent/sessions/{id}/interrupt    打断
   POST   /agent/sessions/{id}/plan/approve 批准她交的计划并开始按阶段做 {pause_each}；返回一直到计划停下的事件流（SSE）
-  POST   /agent/sessions/{id}/plan/continue 计划停下以后接着做（SSE）
+  POST   /agent/sessions/{id}/plan/continue 计划停下以后接着做（SSE）；{redo: true} 先把这一阶段改的文件退回去再从头做
   POST   /agent/sessions/{id}/plan/reject  不要这份计划
   PUT    /agent/sessions/{id}/mode         换权限模式 {mode}
   POST   /agent/sessions/{id}/compact      手动压缩上下文
@@ -121,6 +121,10 @@ class Say(BaseModel):
 
 class PlanApprove(BaseModel):
     pause_each: bool = False  # 每个阶段做完停一下，等你看过再接着做
+
+
+class PlanContinue(BaseModel):
+    redo: bool = False  # 重做这一阶段：先按底片把这一阶段改过的文件退回到上一阶段做完时
 
 
 class SetMode(BaseModel):
@@ -631,10 +635,10 @@ async def plan_approve(sid: str, req: PlanApprove, rt: Runtime = Depends(get_run
 
 
 @router.post("/sessions/{sid}/plan/continue")
-async def plan_continue(sid: str, rt: Runtime = Depends(get_runtime)) -> StreamingResponse:
+async def plan_continue(sid: str, req: PlanContinue | None = None, rt: Runtime = Depends(get_runtime)) -> StreamingResponse:
     _session_or_404(rt, sid)
     try:
-        stream = rt.drive_plan(sid)
+        stream = rt.drive_plan(sid, redo=bool(req and req.redo))
     except RuntimeError_ as err:
         raise HTTPException(409, str(err)) from err
     return _sse(stream)

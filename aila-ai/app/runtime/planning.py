@@ -10,6 +10,12 @@
 - 一轮走满步数还没做完就自动接着做同一阶段，最多续 MAX_CONTINUES 次，还不行就停下等你；
   被打断、花到上限、出错、你没同意某个操作、她说卡住了，都停下，不自己硬做
 - 这几个工具不用问（kind 是 meta），它们只是往日志里记一笔
+- 服务重启（被强制关掉、电脑重启）：日志里最后一个阶段开了头、后面没有 plan_pause / plan_end，
+  就是做到一半进程没了（cut_off）。打开会话时补一条 plan_pause（reason=restart），停在那个阶段等你：
+  可以「接着做」，也可以「重做这一阶段」：把这一阶段改过的文件按底片退回到上一阶段做完时（stage_edits），
+  记一条 stage_reset，再从头发这一阶段。之前做完、验收过的阶段不动
+- 阶段的验收：她做完调 stage_done 是她自己验过；你在交付卡上点「通过 / 退回修改」（acceptance 事件，
+  见 acceptance.py）记在刚做完的那个阶段上，界面上能看出哪几个阶段你看过
 """
 
 from dataclasses import dataclass
@@ -39,6 +45,9 @@ STAGE_PROMPT = """开始第 {n}/{total} 阶段：{title}
 CONTINUE_PROMPT = """第 {n}/{total} 阶段「{title}」还没做完（{why}），接着做。
 做完并验收过以后调用 stage_done；做不下去就调用 stage_blocked 说明原因。"""
 
+RESTART_WHY = "服务重启前做到一半停了，先看看已经改了哪些、测试现在过不过"
+REDO_NOTE = "\n（这一阶段之前做到一半，改过的文件已经退回到上一阶段做完时{skipped}；跑过的命令退不回去，留下的东西要自己看一眼。）"
+
 
 @dataclass
 class Stage:
@@ -47,6 +56,8 @@ class Stage:
     verify: str
     status: str = "pending"  # pending / running / done / blocked
     summary: str = ""
+    # 你在交付卡上对这一阶段的验收：做完以后、下一阶段开始前点的「通过」是 True，「退回修改」是 False，没点是 None
+    accepted: bool | None = None
 
 
 @dataclass
@@ -66,8 +77,8 @@ class PlanState:
             "pauseEach": self.pause_each,
             "current": self.current,
             "finished": self.finished,
-            "stages": [{"title": s.title, "goal": s.goal, "verify": s.verify, "status": s.status, "summary": s.summary}
-                       for s in self.stages],
+            "stages": [{"title": s.title, "goal": s.goal, "verify": s.verify, "status": s.status, "summary": s.summary,
+                        "accepted": s.accepted} for s in self.stages],
         }
 
 
@@ -97,6 +108,7 @@ def parse_plan(args: dict[str, Any]) -> dict[str, Any]:
 def plan_state(events: list[Event]) -> PlanState | None:
     """从日志推出最新那份计划现在做到哪了；没有计划就是 None"""
     state: PlanState | None = None
+    last_done: int | None = None  # 刚做完、下一阶段还没开始的那个阶段：你这时候的验收算在它上面
     for e in events:
         kind = e.get("type")
         if kind == "tool" and e.get("name") == "propose_plan" and isinstance(e.get("plan"), dict):
@@ -114,6 +126,7 @@ def plan_state(events: list[Event]) -> PlanState | None:
             if 0 <= n < len(state.stages):
                 state.continues = state.continues + 1 if (state.current == n and state.stages[n].status == "running") else 0
                 state.current = n
+                last_done = None
                 if state.stages[n].status != "done":
                     state.stages[n].status = "running"
         elif kind == "tool" and e.get("name") in ("stage_done", "stage_blocked") and isinstance(e.get("stage"), int):
@@ -124,6 +137,14 @@ def plan_state(events: list[Event]) -> PlanState | None:
                 if e["name"] == "stage_done":
                     state.current = _next(state)
                     state.continues = 0
+                    last_done = n
+        elif kind == "stage_reset" and isinstance(e.get("stage"), int) and state.decision == "approved":
+            n = e["stage"]
+            if 0 <= n < len(state.stages):
+                state.stages[n].status, state.stages[n].summary, state.stages[n].accepted = "pending", "", None
+                state.current, state.continues, last_done = n, 0, None
+        elif kind == "acceptance" and last_done is not None:
+            state.stages[last_done].accepted = e.get("verdict") == "accepted"
     if state and state.decision == "approved":
         state.finished = all(s.status == "done" for s in state.stages)
         if state.finished:
@@ -133,6 +154,66 @@ def plan_state(events: list[Event]) -> PlanState | None:
 
 def _next(state: PlanState) -> int | None:
     return next((i for i, s in enumerate(state.stages) if s.status != "done"), None)
+
+
+_PLAN_MARKS = ("plan_decision", "plan_pause", "plan_end", "stage_reset")
+
+
+def cut_off(events: list[Event]) -> bool:
+    """按计划做到一半进程没了：最后一个阶段开了头，后面没有停下（plan_pause）、做完（plan_end）的记录。
+    只在会话刚加载、肯定没在做的时候用（在做的时候日志也是这个样子）"""
+    state = plan_state(events)
+    if state is None or state.decision != "approved" or state.finished or state.current is None:
+        return False
+    for e in reversed(events):
+        if e.get("type") in _PLAN_MARKS:
+            return False
+        if e.get("type") == "user" and isinstance(e.get("plan_stage"), int):
+            return True
+    return False
+
+
+def restart_text(state: PlanState) -> str:
+    n = state.current or 0
+    done = [i for i, s in enumerate(state.stages) if s.status == "done"]
+    after = f"，前面 {len(done)} 个阶段做完了" if done else ""
+    if state.stages[n].status == "running":
+        return f"服务重启了，第 {n + 1} 阶段做到一半停了{after}"
+    return f"服务重启了，停在第 {n + 1} 阶段开始之前{after}"
+
+
+def resumed_after_restart(events: list[Event]) -> bool:
+    """最近一次停下是因为服务重启（还没接着做）"""
+    last = next((e for e in reversed(events) if e.get("type") in _PLAN_MARKS), None)
+    return bool(last and last.get("type") == "plan_pause" and last.get("reason") == "restart")
+
+
+def stage_edits(events: list[Event], n: int) -> tuple[list[Event], bool]:
+    """第 n 阶段这一次（上一阶段做完、上次重做之后）改过的文件记录，按日志先后；撤销过的那几轮不算。
+    第二个值：这期间跑过命令没有（命令的效果退不回去，要告诉你）"""
+    start = 0
+    for i, e in enumerate(events):
+        kind = e.get("type")
+        if (kind == "tool" and e.get("name") == "stage_done" and isinstance(e.get("stage"), int)) or kind == "stage_reset":
+            start = i + 1
+    first = next((i for i in range(start, len(events)) if events[i].get("type") == "user"
+                  and events[i].get("plan_stage") == n), None)
+    if first is None:
+        return [], False
+    undone = {e.get("turn_seq") for e in events if e.get("type") == "undo"}
+    edits: list[Event] = []
+    commands = False
+    turn: int | None = None
+    for e in events[first:]:
+        if e.get("type") == "user":
+            turn = e.get("seq")
+        if e.get("type") != "tool" or e.get("status") != "ok" or turn in undone:
+            continue
+        if e.get("name") in ("edit_file", "write_file") and e.get("file"):
+            edits.append(e)
+        elif e.get("name") == "run_command":
+            commands = True
+    return edits, commands
 
 
 def stage_message(state: PlanState, n: int, continuing: str = "") -> tuple[str, dict[str, Any]]:

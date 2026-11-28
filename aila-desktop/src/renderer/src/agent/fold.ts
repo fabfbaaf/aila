@@ -253,6 +253,8 @@ export class Transcript {
         else if (typeof e.plan_stage === 'number') this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('第 {n} 阶段', { n: e.plan_stage + 1 })), tag: 'stage' })
         else if (e.rejection) // 退回修改：text 是一句标题，detail 是代码按你的意见拼出来、交给她的那段话
           this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('退回修改')), tag: 'command', detail: String(e.text ?? '') })
+        else if (Array.isArray(e.handback)) // 派出去的活交回来：代码整理的报告，叫醒主模型汇总
+          this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? t('派出去的活交回来了')), tag: 'command', detail: String(e.text ?? '') })
         else if (typeof e.command === 'string')
           this.items.push({ kind: 'user', key: this.key(), text: String(e.title ?? `/${e.command}`), tag: 'command', detail: String(e.text ?? '') })
         else this.items.push({ kind: 'user', key: this.key(), text: String(e.text ?? '') })
@@ -370,6 +372,18 @@ export class Transcript {
         this.closeText()
         this.items.push({ kind: 'note', key: this.key(), text: e.approved ? (e.pause_each ? t('你批准了计划：每个阶段做完停一下') : t('你批准了计划：按阶段做下去')) : t('你没要这份计划') })
         break
+      case 'stage_reset': {
+        this.closeText()
+        const restored = Array.isArray(e.restored) ? e.restored.length : 0
+        const skipped = e.skipped && typeof e.skipped === 'object' ? Object.keys(e.skipped as object) : []
+        let text = restored
+          ? t('重做第 {n} 阶段：退回了这一阶段改的 {count} 个文件', { n: Number(e.stage ?? 0) + 1, count: restored })
+          : t('重做第 {n} 阶段', { n: Number(e.stage ?? 0) + 1 })
+        if (skipped.length) text += t('；没退回：{files}', { files: skipped.join('、') })
+        if (e.commands) text += t('（跑过的命令退不回去）')
+        this.items.push({ kind: 'note', key: this.key(), text })
+        break
+      }
       case 'plan_pause':
         this.closeText()
         this.items.push({ kind: 'note', key: this.key(), text: t('计划停在第 {n} 阶段：{why}', { n: Number(e.stage ?? 0) + 1, why: String(e.text ?? '') }) })
