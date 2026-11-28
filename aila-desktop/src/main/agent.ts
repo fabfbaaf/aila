@@ -30,6 +30,7 @@ import type {
 import type { AiResult } from '../shared/settings'
 import type { ClaudeQuotaConfig, ProviderQuota, QuotaRecord } from '../shared/providerQuotas'
 import type { McpPreviewItem, McpServerInfo } from '../shared/mcp'
+import type { AcceptanceEvent, DeliveryCard, LineComment, Verdict } from '../shared/delivery'
 import type { CatalogListing, Companion, ExtensionList, ExtensionPlan, ExtensionUpdate } from '../shared/extensions'
 import { tm } from './lang'
 
@@ -162,6 +163,16 @@ export class AgentRelay {
   /** 放弃分支（你的代码保持原样） */
   discard(sid: string): Promise<AiResult<AgentEvent>> {
     return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/discard`, undefined, 60000)
+  }
+
+  /** 交付卡（改动、测试、PR、CI 都是服务那边代码算的）；ci=false 不问 CI，快 */
+  delivery(sid: string, ci: boolean): Promise<AiResult<DeliveryCard>> {
+    return this.call('GET', `/agent/sessions/${encodeURIComponent(sid)}/delivery?ci=${ci}`, undefined, ci ? 45000 : 20000)
+  }
+
+  /** 验收：通过只记一笔；退回修改记一笔，服务那边接着开一轮（事件用 watch 接） */
+  accept(sid: string, verdict: Verdict, note: string, comments: LineComment[]): Promise<AiResult<AcceptanceEvent>> {
+    return this.call('POST', `/agent/sessions/${encodeURIComponent(sid)}/acceptance`, { verdict, note, comments })
   }
 
   /** 用用户确认过的轮次发请求，期间有新的一轮就由服务拒绝。 */

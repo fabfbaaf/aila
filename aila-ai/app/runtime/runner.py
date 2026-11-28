@@ -28,6 +28,7 @@ from ..extensions import ExtensionStore, skills_context
 from .commands import Command, load_commands, match
 from .collaboration import MAX_COLLABORATORS
 from .skilltool import read_skill_tool
+from . import acceptance
 from .delivery import DELIVERY, DeliveryError
 from .dispatch import Dispatch
 from .external import ExternalAgent
@@ -416,6 +417,41 @@ class Runtime:
             raise RuntimeError_("没有这个会话。")
         event = session.append({"type": "budget", "amount": amount})
         self._publish(sid, event)
+        return event
+
+    # ---------- 验收和交付（acceptance.py） ----------
+
+    async def delivery(self, sid: str, with_ci: bool = True) -> dict:
+        """交付卡：改了哪些文件、diff、最后一次测试、PR 和 CI、验收结论，全部代码算"""
+        session = self.store.get(sid)
+        if session is None:
+            raise RuntimeError_("没有这个会话。")
+        if session.kind == "computer":
+            raise RuntimeError_("电脑任务不在项目里，没有交付卡。")
+        root = session.workdir if session.workdir.is_dir() else session.cwd
+        gone = bool(session.events[0].get("branch")) and session.branch is None
+        return await asyncio.to_thread(acceptance.card, root, list(session.events), session.branch, gone, with_ci)
+
+    def accept(self, sid: str, verdict: Literal["accepted", "rejected"], note: str = "", comments: list | None = None) -> Event:
+        """验收：通过只记一笔；退回修改记一笔，再把意见（代码拼的）交给她接着在这个任务里改"""
+        session = self.store.get(sid)
+        if session is None:
+            raise RuntimeError_("没有这个会话。")
+        if self.running(sid):
+            raise RuntimeError_("她还在做，等这一轮做完再验收。")
+        if not any(e["type"] == "turn_end" for e in session.events):
+            raise RuntimeError_("还没做完一轮，没什么可以验收的。")
+        clean = acceptance.clean_comments(comments)
+        note = note.strip()[:4000]
+        if verdict == "rejected" and not note and not clean:
+            raise RuntimeError_("退回修改要写一句意见，或者在 diff 上点一行写。")
+        if verdict == "rejected":
+            agent, _, _ = self._ready(sid, "退回修改")  # 先看能不能接着做（分支放弃了、正在合并……），不能就别记这一笔
+        event = session.append({"type": acceptance.KIND, "verdict": verdict, "note": note, "comments": clean})
+        self._publish(sid, event)
+        if verdict == "rejected":
+            title = "退回修改" + (f"：{note}"[:80] if note else f"（{len(clean)} 条意见）")
+            self._begin(sid, agent, acceptance.rejection_text(note, clean), {"rejection": True, "title": title})
         return event
 
     def rename(self, sid: str, title: str) -> Session:

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from ..llm import Message, Usage
+from .acceptance import verdict_of
 from .pricing import PriceTable, validate_budget
 from .review import review_title
 
@@ -220,6 +221,8 @@ class Session:
             "edits": len({e["file"] for e in self.events if e["type"] == "tool" and e.get("status") == "ok"
                           and e.get("name") in ("edit_file", "write_file") and e.get("file")}),
             "pending": self.pending_confirm(),
+            # 验收：accepted 通过了、rejected 退回修改了；没验收过、或者验收后又做了一轮是 None（acceptance.py）
+            "acceptance": verdict_of(self.events),
         }
 
     def activity(self) -> dict[str, str] | None:

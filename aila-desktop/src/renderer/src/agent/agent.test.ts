@@ -55,6 +55,22 @@ describe('工作窗口：事件折叠', () => {
     ])
   })
 
+  it('验收是一行说明；退回修改那一轮显示标题，交给她的那段话可以展开看', () => {
+    const t = new Transcript()
+    t.apply(ev('start', { seq: 0, mode: 'ask' }))
+    t.apply(ev('acceptance', { seq: 1, verdict: 'rejected', note: '', comments: [{ file: 'a.py', line: 1, side: 'new', text: 'x' }] }))
+    t.apply(ev('user', { seq: 2, t: 1, text: '这次的改动验收没通过……', rejection: true, title: '退回修改（1 条意见）' }))
+    t.apply(ev('acceptance', { seq: 3, verdict: 'accepted', note: '可以了', comments: [] }))
+    t.apply(ev('acceptance', { seq: 4, verdict: 'rejected', note: '再想想', comments: [] }))
+    const rows = t.items.map((i) => (i.kind === 'user' ? `${i.tag}:${i.text}:${i.detail}` : i.kind === 'note' ? i.text : i.kind))
+    expect(rows).toEqual([
+      '你退回了修改（1 条意见）',
+      'command:退回修改（1 条意见）:这次的改动验收没通过……',
+      '你验收通过了：可以了',
+      '你退回了修改：再想想'
+    ])
+  })
+
   it('回放预算变更和每轮费用，未知价格和旧事件不伪装成零费用', () => {
     const t = new Transcript()
     t.apply(ev('start', { seq: 0, budget: 0 }))

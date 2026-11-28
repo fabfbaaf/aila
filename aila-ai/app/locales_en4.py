@@ -92,4 +92,14 @@ EN4: dict[str, str] = {
     "协作需要选择一个 Git 项目。": "Choose a Git project to collaborate.",
     "先在设置里登录第二个账号。": "Sign in to the second account in Settings first.",
     "没能创建第二个账号的目录。": "Could not create the second account's directory.",
+    # 验收和交付（runtime/acceptance.py）
+    "电脑任务不在项目里，没有交付卡。": "Computer tasks aren't in a project, so there's no delivery card.",
+    "她还在做，等这一轮做完再验收。": "She's still working. Review once this turn is done.",
+    "还没做完一轮，没什么可以验收的。": "Nothing to review yet: no turn has finished.",
+    "退回修改要写一句意见，或者在 diff 上点一行写。": "To send it back, write a note or click a line in the diff and comment.",
+    "这个任务还没改过文件。": "This task hasn't changed any files yet.",
+    "分支已经合并或放弃了：只列出改过的文件，diff 去项目的提交记录里看。": "The branch was merged or discarded. Only the changed files are listed; see the project's history for the diff.",
+    "这个项目不是 git 仓库：只列出改过的文件，看不了 diff。": "This project isn't a git repository. Only the changed files are listed, without a diff.",
+    "改了 {0} 个文件，只列出前 {1} 个。": "Changed {0} files; showing the first {1}.",
+    "问不到 CI：私有仓库要先装 gh 并登录（gh auth login），或者网络不通": "Couldn't get CI status. For a private repository, install gh and sign in (gh auth login), or check the network",
 }

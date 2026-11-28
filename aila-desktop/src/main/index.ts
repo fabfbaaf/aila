@@ -96,6 +96,7 @@ import { ENTRANCE_MS, cardBounds, emergePosition, homePosition, jumpHeight, jump
 import { presenterPosition, shouldIntro, type FxCommand } from '../shared/intro'
 import { IntroDirector } from './intro'
 import { registerAgentBudgetIpc } from './agentBudgetIpc'
+import { registerDeliveryIpc } from './deliveryIpc'
 import { registerAgentScreenshotIpc } from './agentScreenshotIpc'
 import { registerAgentCreateIpc } from './agentCreateIpc'
 import { registerUnderstandIpc } from './understandIpc'
@@ -1196,6 +1197,7 @@ function registerIpc(): void {
     diagnose: (id, text, depth) => codeDiagnose(AI_URL, id, text, depth)
   }, fromMainWindow)
   registerAgentBudgetIpc(ipcMain, agentRelay, fromAgent, sidOk)
+  registerDeliveryIpc(ipcMain, agentRelay, fromAgent, sidOk, (url) => shell.openExternal(url))
   ipcMain.handle('agent:merge', (e, sid: unknown, runTests: unknown) =>
     fromAgent(e) && sidOk(sid) ? agentRelay.merge(sid, runTests !== false) : notAllowed
   )
