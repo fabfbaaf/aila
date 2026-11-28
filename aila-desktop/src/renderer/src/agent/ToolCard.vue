@@ -4,6 +4,7 @@ import { t } from '../i18n'
 import { computed, ref, watch } from 'vue'
 import type { ToolItem } from './fold'
 import { renderMarkdown } from './markdown'
+import EvidenceSources from '../components/EvidenceSources.vue'
 
 const props = defineProps<{
   item: ToolItem
@@ -70,6 +71,7 @@ const summary = computed(() => {
     return n ? t('读了 {n} 行', { n }) : firstLine(c)
   }
   if (isEdit.value && props.item.status === 'ok') return c.match(/（\+\d+ −\d+）/)?.[0] ?? ''
+  if (props.item.evidence?.length) return t('{n} 条项目依据', { n: props.item.evidence.length })
   if (isCommand.value) return firstLine(c)
   if (props.item.name === 'delegate' && props.item.sub && props.item.status === 'ok') {
     const n = props.item.files?.length ?? 0
@@ -163,6 +165,9 @@ function lineClass(line: string): string {
         <img v-if="screenshot" :src="screenshot" :alt="t('编程任务截取的网页')" @error="screenshot = ''; screenshotStatus = t('截图显示不了。')" />
         <div v-else role="status">{{ screenshotStatus }}</div>
       </div>
+      <div v-else-if="item.evidence?.length" class="tool-evidence">
+        <EvidenceSources :sources="item.evidence" />
+      </div>
       <template v-else-if="isEdit && item.diff">
         <pre class="diff"><span v-for="(line, i) in diffLines" :key="i" :class="lineClass(line)">{{ line || ' ' }}
 </span></pre>
@@ -227,6 +232,10 @@ function lineClass(line: string): string {
 .head:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+.tool-evidence {
+  padding: 0 12px 8px;
 }
 
 .screenshot {

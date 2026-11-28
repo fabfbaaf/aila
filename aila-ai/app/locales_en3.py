@@ -345,4 +345,11 @@ EN3: dict[str, str] = {
     "把 MP4 保存到视频工程里，文件名用 .mp4。": "Save the video inside its project with an .mp4 extension.",
     "要用一个新的 MP4 文件名，所在的文件夹得已经存在。": "Choose a new MP4 filename in an existing folder.",
     "视频依赖的压缩包里有异常路径。": "The video tool archive contains an invalid path.",
+    "这条约定已更新或删除，重新查看项目记忆再试。": "This decision has changed or been removed. Open project memory and try again.",
+    "另一条当前约定已经写了同样的内容。": "Another active decision has the same text.",
+    "有资料已经删除，重新加载列表再试。": "Some documents have been deleted. Reload the list.",
+    "工作区已经不在了。": "The workspace is no longer available.",
+    "没有找到相关的项目资料或代码。": "No relevant project documents or code were found.",
+    "查项目资料和代码依据": "Find project documents and code evidence",
+    "要给搜索的内容。": "Enter a search query.",
 }

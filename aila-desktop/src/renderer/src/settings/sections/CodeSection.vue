@@ -3,6 +3,7 @@ import { t, joinList } from '../../i18n'
 import { onActivated, onDeactivated, ref } from 'vue'
 import type { CodeProject, FixStats } from '../../../../shared/settings'
 import { bridge } from '../../platform/bridge'
+import ProjectEvidence from './ProjectEvidence.vue'
 
 const api = bridge!
 const projects = ref<CodeProject[]>([])
@@ -10,6 +11,7 @@ const fixes = ref<FixStats | null>(null)
 const offline = ref('')
 const error = ref('')
 const adding = ref(false)
+const evidenceProject = ref('')
 let timer = 0
 
 async function load(): Promise<void> {
@@ -107,6 +109,9 @@ onDeactivated(() => clearTimeout(timer))
           <div v-if="p.ignoreFile?.length || p.ignore?.length" class="hint">
             {{ t('不看：') }}{{ joinList([...(p.ignoreFile ?? []), ...(p.ignore ?? [])]) }}
           </div>
+          <button class="link evidence-toggle" type="button" :aria-expanded="evidenceProject === p.id"
+            @click="evidenceProject = evidenceProject === p.id ? '' : p.id">{{ t('项目资料与问答') }}</button>
+          <ProjectEvidence v-if="evidenceProject === p.id" :project-id="p.id" />
           <div v-if="editing === p.id" class="ignore-edit">
             <textarea v-model="ignoreText" rows="4" spellcheck="false" :placeholder="t('一行一个，比如：\ndocs/examples\nfixtures\n*.min.js')"></textarea>
             <span class="hint">
@@ -148,6 +153,10 @@ onDeactivated(() => clearTimeout(timer))
 </template>
 
 <style scoped>
+.evidence-toggle {
+  margin-top: 6px;
+}
+
 .ignore-edit {
   display: flex;
   flex-direction: column;

@@ -26,6 +26,7 @@ ACTIONS = {
     "todo_write": lambda a: "更新待办清单",
     "code_search": lambda a: f"按意思搜「{str(a.get('query', ''))[:24]}」",
     "code_locate": lambda a: "按报错定位代码",
+    "project_evidence": lambda _: "查项目资料和代码依据",
     "code_symbol": lambda a: f"看 {str(a.get('name', ''))[:30]} 的调用关系",
     "explore": lambda a: f"派助手去查「{str(a.get('task', '')).strip()[:24]}」",
     "web_search": lambda a: f"搜网页「{str(a.get('query', ''))[:24]}」",

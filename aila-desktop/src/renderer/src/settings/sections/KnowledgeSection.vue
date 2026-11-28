@@ -1,15 +1,35 @@
 <script setup lang="ts">
 import { t, dateText, lang } from '../../i18n'
-import { onActivated, ref } from 'vue'
+import { onActivated, onMounted, ref } from 'vue'
 import type { KnowledgeDoc } from '../../../../shared/cloud'
 import { bridge } from '../../platform/bridge'
 import { store } from '../store'
+import type { DocumentSource } from '../../../../shared/evidence'
+import EvidenceSources from '../../components/EvidenceSources.vue'
 
 const api = bridge!
 const docs = ref<KnowledgeDoc[]>([])
 const offline = ref(false)
 const errors = ref<string[]>([])
 const adding = ref(false)
+const query = ref('')
+const searching = ref(false)
+const searched = ref<null | DocumentSource[]>(null)
+const searchError = ref('')
+
+async function inspect(): Promise<void> {
+  if (searching.value || !query.value.trim()) return
+  searching.value = true
+  searched.value = null
+  searchError.value = ''
+  try {
+    const result = await api.knowledgeSearch(query.value.trim())
+    if (result.ok && result.data) searched.value = result.data.map((hit, i) => ({ ...hit, id: 'd' + (i + 1) }))
+    else searchError.value = result.error ?? t('检索检查未完成')
+  } finally {
+    searching.value = false
+  }
+}
 
 async function load(): Promise<void> {
   try {
@@ -47,7 +67,16 @@ function date(iso: string): string {
   return dateText(d)
 }
 
-onActivated(load)
+let loadingVisible = false
+function loadVisible(): void {
+  if (loadingVisible) return
+  loadingVisible = true
+  void load().finally(() => { loadingVisible = false })
+}
+
+// 资料页是异步加载的，初次进入时组件可能晚于父页面的激活。
+onMounted(loadVisible)
+onActivated(loadVisible)
 </script>
 
 <template>
@@ -78,9 +107,29 @@ onActivated(load)
       <span class="hint">{{ t('扫描版 PDF（图片）要先做文字识别才能读。') }}</span>
     </div>
   </div>
+
+  <details v-if="!offline && docs.length" class="card inspect">
+    <summary>{{ t('检索检查') }}</summary>
+    <form class="actions" @submit.prevent="inspect">
+      <input v-model="query" maxlength="500" :aria-label="t('输入资料检索问题')" :placeholder="t('输入资料检索问题')" />
+      <button class="btn" type="submit" :disabled="searching || !query.trim()">{{ t('查资料') }}</button>
+    </form>
+    <p class="hint">{{ t('按资料库的排序显示摘录，这一步只在本机运行。') }}</p>
+    <p v-if="searchError" class="msg error" role="alert">{{ searchError }}</p>
+    <p v-else-if="searching" role="status">{{ t('正在查资料…') }}</p>
+    <p v-else-if="searched && !searched.length">{{ t('没有查到相关资料。') }}</p>
+    <EvidenceSources v-else-if="searched" :sources="searched" />
+  </details>
 </template>
 
 <style scoped>
+.inspect summary {
+  cursor: pointer;
+}
+.inspect input {
+  flex: 1;
+  min-width: 120px;
+}
 .name {
   word-break: break-all;
 }

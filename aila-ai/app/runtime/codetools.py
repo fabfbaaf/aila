@@ -27,7 +27,7 @@ class CodeAccess:
         self.root = root.resolve()
         self._registered_now = False
 
-    def _project(self) -> tuple[Project, str]:
+    def project(self) -> tuple[Project, str]:
         """工作区所在的项目，以及工作区在项目里的相对路径（就是项目根目录时为空）"""
         best: tuple[Project, str] | None = None
         for p in self.projects.all():
@@ -42,7 +42,7 @@ class CodeAccess:
         return self.projects.add(str(self.root)), ""
 
     def index(self) -> tuple[Project, CodeIndex, str]:
-        project, prefix = self._project()
+        project, prefix = self.project()
         return project, self.projects.fresh(project.id), prefix
 
     def note(self) -> str:

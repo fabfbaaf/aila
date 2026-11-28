@@ -7,6 +7,7 @@
  * - 一轮结束：一行统计（几步、多久、输入多少、命中缓存多少、输出多少）
  * - 整个会话：最新的待办清单、改过的文件、累计用量、权限模式、是不是正在做
  */
+import type { EvidenceSource } from '../../../shared/evidence'
 import type { AgentEvent, AgentMode, AgentUndoEvent } from '../../../shared/agent'
 import { isAgentScreenshotName } from '../../../shared/agent'
 import { validBudget, yuan } from '../../../shared/budget'
@@ -41,6 +42,7 @@ export interface ToolItem {
   todos?: TodoItem[]
   exitCode?: number | null
   screenshot?: string
+  evidence?: EvidenceSource[]
   confirm?: ConfirmState
   /** explore、delegate：派出去的助手用的模型、走了几步（报告在 content 里） */
   sub?: { model: string; steps: number }
@@ -122,6 +124,8 @@ export function actionOf(name: string, args: Record<string, unknown>): string {
       return t('按意思搜「{q}」', { q: s('query').slice(0, 24) })
     case 'code_locate':
       return t('按报错定位代码')
+    case 'project_evidence':
+      return t('查项目资料和代码依据')
     case 'code_symbol':
       return t('看 {name} 的调用关系', { name: s('name').slice(0, 30) })
     case 'explore':
@@ -338,6 +342,9 @@ export class Transcript {
         if (Array.isArray(e.files) && tool.name === 'delegate') tool.files = e.files.map(String)
         if (tool.name === 'browser_screenshot' && tool.status === 'ok' && isAgentScreenshotName(e.screenshot)) {
           tool.screenshot = e.screenshot
+        }
+        if (tool.name === 'project_evidence' && tool.status === 'ok' && Array.isArray(e.evidence)) {
+          tool.evidence = e.evidence as EvidenceSource[]
         }
         if (typeof e.diff === 'string') tool.diff = e.diff
         if (typeof e.file === 'string') {

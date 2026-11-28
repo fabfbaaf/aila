@@ -1,3 +1,4 @@
+import type { DocumentSource, ProjectAnswer, ProjectDocuments, ProjectEvidenceQuery } from '../shared/evidence'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { AI_SERVICE_URL, type Bond, type ChatEvent, type ChatMessage, type LiveReply } from '../shared/chat'
 import type { MoveTarget } from '../shared/move'
@@ -138,6 +139,7 @@ const api = {
   onMemoryChanged: (cb: (list: StoredMemory[]) => void): Unsubscribe => listen('memory:changed', cb),
 
   // 资料库（文件只存在本机的 AI 服务里）
+  knowledgeSearch: (query: string): Promise<AiResult<Omit<DocumentSource, 'id'>[]>> => ipcRenderer.invoke('knowledge:search', query),
   knowledgeList: (): Promise<KnowledgeDoc[]> => ipcRenderer.invoke('knowledge:list'),
   /** 弹出选择文件的对话框并上传；取消时返回 null */
   knowledgeAdd: (): Promise<KnowledgeAddResult | null> => ipcRenderer.invoke('knowledge:add'),
@@ -239,8 +241,9 @@ const api = {
   agentCommands: (cwd: string | null, kind: AgentKind): Promise<AiResult<AgentCommandList>> =>
     ipcRenderer.invoke('agent:commands', cwd, kind),
   agentMemory: (cwd: string): Promise<AiResult<AgentMemoryNote[]>> => ipcRenderer.invoke('agent:memory', cwd),
-  agentRemember: (cwd: string, text: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> =>
-    ipcRenderer.invoke('agent:memory-add', cwd, text),
+  agentRemember: (cwd: string, text: string, replaces?: string): Promise<AiResult<AgentMemoryNote & { added: boolean }>> =>
+    replaces === undefined ? ipcRenderer.invoke('agent:memory-add', cwd, text)
+      : ipcRenderer.invoke('agent:memory-add', cwd, text, replaces),
   agentForgetMemory: (cwd: string, id: string): Promise<AiResult<{ ok: boolean }>> => ipcRenderer.invoke('agent:memory-forget', cwd, id),
   /** 说一句话开始一轮；事件从 onAgentEvent 来 */
   agentSend: (sid: string, text: string, review = false, plan = false): void => ipcRenderer.send('agent:send', sid, text, review, plan),
@@ -337,6 +340,9 @@ const api = {
   studioShow: (id?: string): void => ipcRenderer.send('studio:show', id),
 
   // 代码库
+  codeDocuments: (id: string): Promise<AiResult<ProjectDocuments>> => ipcRenderer.invoke('code:documents', id),
+  codeSetDocuments: (id: string, linked: string[]): Promise<AiResult<ProjectDocuments>> => ipcRenderer.invoke('code:set-documents', id, linked),
+  codeEvidence: (id: string, body: ProjectEvidenceQuery): Promise<AiResult<ProjectAnswer>> => ipcRenderer.invoke('code:evidence', id, body),
   codeList: (): Promise<AiResult<CodeProject[]>> => ipcRenderer.invoke('code:list'),
   codeFixes: (): Promise<AiResult<FixStats>> => ipcRenderer.invoke('code:fixes'),
   /** 弹出选文件夹的对话框；取消了返回 null */

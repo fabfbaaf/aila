@@ -19,6 +19,7 @@ import type {
 } from '../shared/settings'
 import type { ChunkSource, CodeGraph, LocatedError, OutlineItem } from '../shared/workbench'
 import type { AreaView, ChainView, Diagnosis, EndpointInfo, ExplainDepth, ExplainTarget, Explanation, FileDetail, FunctionDetail } from '../shared/understand'
+import type { DocumentSource, ProjectAnswer, ProjectDocuments, ProjectEvidenceQuery } from '../shared/evidence'
 import { tm } from './lang'
 
 // ---------- 代码星图 ----------
@@ -92,6 +93,31 @@ export const codeDiagnose = (aiUrl: string, id: string, text: string, depth: Exp
   codePost<Diagnosis>(aiUrl, projectPath(id, 'diagnose'), { text, depth })
 
 // ---------- 代码库 ----------
+
+export const codeDocuments = (aiUrl: string, id: string): Promise<AiResult<ProjectDocuments>> =>
+  codeGet<ProjectDocuments>(aiUrl, `/code/projects/${encodeURIComponent(id)}/documents`)
+
+export function setCodeDocuments(aiUrl: string, id: string, linked: string[]): Promise<AiResult<ProjectDocuments>> {
+  return attempt(async () =>
+    json<ProjectDocuments>(await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/documents`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ linked }),
+      signal: AbortSignal.timeout(10000)
+    }))
+  )
+}
+
+export function codeEvidence(aiUrl: string, id: string, body: ProjectEvidenceQuery): Promise<AiResult<ProjectAnswer>> {
+  return attempt(async () =>
+    json<ProjectAnswer>(await fetch(`${aiUrl}/code/projects/${encodeURIComponent(id)}/evidence`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120000)
+    }))
+  )
+}
 
 export function listCodeProjects(aiUrl: string): Promise<AiResult<CodeProject[]>> {
   return attempt(async () => json<CodeProject[]>(await fetch(`${aiUrl}/code/projects`, { signal: AbortSignal.timeout(5000) })))
@@ -193,6 +219,18 @@ function describeDetail(detail: unknown): string | null {
     return String(detail[0].msg).replace(/^Value error, /, '')
   }
   return null
+}
+
+/** 只检查本机检索结果。 */
+export function searchKnowledge(aiUrl: string, query: string): Promise<AiResult<Omit<DocumentSource, 'id'>[]>> {
+  return attempt(async () =>
+    json<Omit<DocumentSource, 'id'>[]>(await fetch(aiUrl + '/knowledge/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(15000)
+    }))
+  )
 }
 
 export async function listKnowledge(aiUrl: string): Promise<KnowledgeDoc[]> {

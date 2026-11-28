@@ -22,7 +22,7 @@ export interface AgentSource {
   commands?(cwd: string | null, kind: AgentKind): Promise<AgentCommandList>
   /** 项目记忆：按项目目录看、加、删 */
   memory(cwd: string): Promise<AgentMemoryNote[]>
-  remember(cwd: string, text: string): Promise<AgentMemoryNote & { added: boolean }>
+  remember(cwd: string, text: string, replaces?: string): Promise<AgentMemoryNote & { added: boolean }>
   forgetMemory(cwd: string, id: string): Promise<void>
   get(sid: string): Promise<AgentSession>
   screenshot?(sid: string, name: string): Promise<string>
@@ -88,7 +88,7 @@ function desktop(api: NonNullable<typeof bridge>): AgentSource {
     remove: async (sid) => void unwrap(await api.agentDelete(sid)),
     commands: async (cwd, kind) => unwrap(await api.agentCommands(cwd, kind)),
     memory: async (cwd) => unwrap(await api.agentMemory(cwd)),
-    remember: async (cwd, text) => unwrap(await api.agentRemember(cwd, text)),
+    remember: async (cwd, text, replaces) => unwrap(await api.agentRemember(cwd, text, replaces)),
     forgetMemory: async (cwd, id) => void unwrap(await api.agentForgetMemory(cwd, id)),
     get: async (sid) => unwrap(await api.agentGet(sid)),
     screenshot: async (sid, name) => unwrap(await api.agentScreenshot(sid, name)),
@@ -189,7 +189,7 @@ function web(): AgentSource {
     remove: async (sid) => void (await call('DELETE', `/agent/sessions/${encodeURIComponent(sid)}`)),
     commands: (cwd, kind) => call('GET', `/agent/commands?${new URLSearchParams({ kind, ...(cwd ? { cwd } : {}) })}`),
     memory: (cwd) => call('GET', `/agent/memory?cwd=${encodeURIComponent(cwd)}`),
-    remember: (cwd, text) => call('POST', '/agent/memory', { cwd, text }),
+    remember: (cwd, text, replaces) => call('POST', '/agent/memory', { cwd, text, replaces }),
     forgetMemory: async (cwd, id) => void (await call('DELETE', '/agent/memory', { cwd, id })),
     get: (sid) => call('GET', `/agent/sessions/${sid}`),
     create: (cwd, mode, isolate, budget = null, kind = 'project', engine = null, model = '', collaborators = []) => call('POST', '/agent/sessions', {
