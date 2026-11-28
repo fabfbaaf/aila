@@ -104,7 +104,8 @@ onBeforeUnmount(() => page?.removeEventListener('mousedown', onOutside))
           <b>{{ g.title }}</b>
           <span v-if="g.loading" class="dim">{{ t('正在问有哪些模型…') }}</span>
           <button v-if="isAgentEngine(g.engine) && g.can_install" class="refresh" type="button" @click="emit('install', g.engine)">{{ t('官方安装') }}</button>
-          <button v-else-if="isAgentEngine(g.engine) && g.can_login && g.logged_in !== true" class="refresh" type="button" @click="emit('login', g.engine)">{{ t('登录') }}</button>
+          <!-- 只有确定没登录（logged_in 是 false）才显示「登录」：Antigravity、CodeBuddy 问不出登没登录（null），能用的时候不该让人以为要先登录 -->
+          <button v-else-if="isAgentEngine(g.engine) && g.can_login && g.logged_in === false" class="refresh" type="button" @click="emit('login', g.engine)">{{ t('登录') }}</button>
         </header>
         <p v-if="!g.ready && g.problem" class="why">{{ g.problem }}<template v-if="g.hints[0]"> · {{ g.hints[0] }}</template></p>
         <p v-else-if="g.installs_adapter" class="why">{{ t('第一次用时会自动装它的适配器（要联网，一两分钟）') }}</p>

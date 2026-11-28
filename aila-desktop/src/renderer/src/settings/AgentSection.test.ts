@@ -104,6 +104,21 @@ describe('本机 Agent', () => {
     expect(desktop.agentLocalLogin).toHaveBeenCalledWith('codex-alt')
   })
 
+  it('问不出登没登录的（Antigravity、CodeBuddy）不说「登录」，只给不显眼的「换账号」', async () => {
+    desktop.available = true
+    const agy = {
+      id: 'antigravity', title: 'Antigravity', path: 'C:/agy/agy.exe', version: '1.5', logged_in: null, adapter: true,
+      native: true, ready: true, can_login: true, problem: '', hints: []
+    }
+    desktop.agentLocal.mockResolvedValue({ ok: true, data: [agy] })
+    const root = await mount(LocalAgentsCard)
+    expect(find(root, (item) => item.tag === 'button' && text(item) === '登录')).toBeUndefined()
+    const swap = find(root, (item) => item.tag === 'button' && text(item) === '换账号')!
+    expect(swap.props['aria-label']).toBe('换 Antigravity 的账号')
+    await swap.props.onClick()
+    expect(desktop.agentLocalLogin).toHaveBeenCalledWith('antigravity')
+  })
+
   it('打开设置后检查安装，缺少程序时给出官方地址，重新检查后显示已装版本和登录状态', async () => {
     desktop.available = true
     const missing = {

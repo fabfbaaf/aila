@@ -166,4 +166,7 @@ export const EN12: Record<string, string> = {
   "消费上限": "Spending cap",
   "月额度": "Monthly allowance",
   "credits": "credits",
+  "换账号": "Switch account",
+  "换 {name} 的账号": "Switch the {name} account",
+  "问不出它登没登录：能用就不用管；要换账号、或者用的时候说没登录，点这里": "Its sign-in status can't be checked. If it works, leave it; click here to switch accounts or if it says you're signed out"
 }
