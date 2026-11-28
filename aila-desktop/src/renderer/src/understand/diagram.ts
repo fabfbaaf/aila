@@ -116,6 +116,23 @@ export function orderColumns(layer: Map<string, number>, links: { source: string
   return cols
 }
 
+/**
+ * 从 a 连到隔了几列的 b：中间那几列里有方块挡在这条线经过的高度上，就绕开——走这几列所有方块的上面或下面
+ * （哪边离两头近走哪边；上面贴边了就走下面）。没挡着返回 null（直接画弯线）
+ */
+export function aroundBetween(boxes: Box[], a: Box, b: Box, y1: number, y2: number): { left: number; right: number; y: number } | null {
+  const between = boxes.filter((x) => x !== a && x !== b && x.x > a.x + a.w && x.x + x.w < b.x)
+  if (!between.length) return null
+  const lo = Math.min(y1, y2) - 8
+  const hi = Math.max(y1, y2) + 8
+  if (!between.some((x) => x.y < hi && x.y + x.h > lo)) return null
+  const top = Math.min(...between.map((x) => x.y)) - 16
+  const bottom = Math.max(...between.map((x) => x.y + x.h)) + 16
+  const mid = (y1 + y2) / 2
+  const y = top >= 14 && Math.abs(top - mid) <= Math.abs(bottom - mid) ? top : bottom
+  return { left: Math.min(...between.map((x) => x.x)) - 12, right: Math.max(...between.map((x) => x.x + x.w)) + 12, y }
+}
+
 function place(cols: string[][], firstLayer: number, links: PlainLink[]): Diagram {
   const tallest = Math.max(1, ...cols.map((c) => c.length))
   const boxes: Box[] = []
@@ -139,10 +156,21 @@ function place(cols: string[][], firstLayer: number, links: PlainLink[]): Diagra
     let ly: number
     if (!back) {
       const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2
-      const dx = Math.max(30, (x2 - x1) / 2)
-      path = `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`
-      lx = (x1 + x2) / 2
-      ly = (y1 + y2) / 2 - 6
+      const detour = aroundBetween(boxes, a, b, y1, y2)
+      if (detour) {
+        // 隔了一列以上、中间的方块挡着：先拐到中间那几列的上面（或下面），横着过去，再拐下来，不从方块后面穿过
+        const { left, right, y } = detour
+        const g1 = Math.max(20, (left - x1) / 2)
+        const g2 = Math.max(20, (x2 - right) / 2)
+        path = `M${x1},${y1} C${x1 + g1},${y1} ${left - g1},${y} ${left},${y} L${right},${y} C${right + g2},${y} ${x2 - g2},${y2} ${x2},${y2}`
+        lx = (left + right) / 2
+        ly = y - 5
+      } else {
+        const dx = Math.max(30, (x2 - x1) / 2)
+        path = `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`
+        lx = (x1 + x2) / 2
+        ly = (y1 + y2) / 2 - 6
+      }
     } else {
       // 往回连：从下边绕过去，不压在方块上
       const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y + b.h

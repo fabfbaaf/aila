@@ -83,6 +83,25 @@ describe('平面图怎么排', () => {
     expect(layoutChain({ start: 'x', nodes: [], links: [] }).boxes).toEqual([])
   })
 
+  it('隔了一列的线绕开中间的方块，不从方块后面穿过', () => {
+    // desk → ai → server，另有 desk → server 直连：中间的 ai 正好挡着
+    const view: AreaView = {
+      path: '', name: '整个项目', parent: null, children: [child('desk'), child('ai'), child('server')], outside: [],
+      links: [{ source: 'desk', target: 'ai', kinds: { http: 120 }, via: [] }, { source: 'ai', target: 'server', kinds: { http: 2 }, via: [] },
+        { source: 'desk', target: 'server', kinds: { http: 9 }, via: [] }],
+      entries: [], hubs: [], hidden: 0
+    }
+    const d = layoutArea(view)
+    const ai = d.boxes.find((b) => b.id === 'ai')!
+    const long = d.edges.find((e) => e.source === 'desk' && e.target === 'server')!
+    expect(long.path).toContain(' L') // 拐过去、横着走、再拐回来
+    expect(long.ly + 5 <= ai.y - 10 || long.ly + 5 >= ai.y + ai.h + 10).toBe(true) // 线上的字在方块外面
+    expect(long.lx).toBeGreaterThan(ai.x - 20)
+    expect(long.lx).toBeLessThan(ai.x + ai.w + 20)
+    const short = d.edges.find((e) => e.source === 'desk' && e.target === 'ai')!
+    expect(short.path).not.toContain(' L') // 相邻两列照常画弯线
+  })
+
   it('选中一个方块时，它和连着它的一起亮', () => {
     const edges = [{ source: 'a', target: 'b' }, { source: 'c', target: 'a' }, { source: 'c', target: 'd' }]
     expect([...neighbours(edges, 'a')].sort()).toEqual(['a', 'b', 'c'])
