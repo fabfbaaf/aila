@@ -77,7 +77,7 @@ import { cleanRoute, routeForSection, toHash, type ShellRoute } from '../shared/
 import { TRAY_16, TRAY_32 } from './trayImage'
 import { DesktopKeeper, type BriefingState } from './desktopKeeper'
 import { discoveries } from './discoveries'
-import { DISCOVERY_SOURCES, isDiscoveryId, isDiscoverySource } from '../shared/discoveries'
+import { cleanDiscoveryRule, DISCOVERY_SOURCES, isDiscoveryId, isDiscoverySource } from '../shared/discoveries'
 import { Drops } from './drops'
 import type { DesktopPrefs } from '../shared/desktop'
 import { AgentRelay } from './agent'
@@ -1593,6 +1593,16 @@ function registerIpc(): void {
   // 拖给她的文件、剪贴板：只认角色窗口（她身上才能拖、对她说才会去看）
   const fromCharacter = (e: { sender: Electron.WebContents }): boolean => !!win && e.sender === win.webContents
   ipcMain.handle('discoveries:state', (e) => (fromMain(e) ? discoveries.state(AI_URL) : MAIN_ONLY))
+  ipcMain.handle('discoveries:save', (e, raw: unknown) => {
+    if (!fromMain(e)) return MAIN_ONLY
+    const rule = cleanDiscoveryRule(raw)
+    return rule ? discoveries.save(AI_URL, rule) : MAIN_ONLY
+  })
+  ipcMain.handle('discoveries:history', (e, source: unknown, before: unknown) => {
+    if (!fromMain(e) || (source !== undefined && !isDiscoverySource(source))
+        || (before !== undefined && !isDiscoveryId(before))) return MAIN_ONLY
+    return discoveries.history(AI_URL, source, before)
+  })
   ipcMain.handle('discoveries:change', (e, source: unknown, action: unknown) => {
     if (!isDiscoverySource(source) || !(fromMain(e) || (fromCharacter(e) && action === 'less'))) return MAIN_ONLY
     if (action !== 'less' && action !== 'pause') return MAIN_ONLY

@@ -23,6 +23,7 @@ export const TABLE_FILES = [
 export const TABLES: Record<string, string[]> = {
   'src/renderer/src/settings/sections/MemorySection.vue': ['GROUPS'],
   'src/renderer/src/settings/sections/DesktopSection.vue': ['REASONS'],
+  'src/renderer/src/settings/sections/DiscoveryRules.vue': ['FOCUS_LABEL', 'DELIVERY_LABEL', 'ORIGIN_LABEL', 'STATUS_LABEL'],
   'src/renderer/src/settings/sections/AccountSection.vue': ['STATUS'],
   'src/renderer/src/settings/sections/StatusSection.vue': ['NAMES'],
   'src/renderer/src/settings/sections/ExtensionsSection.vue': ['LINE_NAMES'],

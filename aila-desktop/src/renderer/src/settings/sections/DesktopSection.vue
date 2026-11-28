@@ -6,7 +6,7 @@ import { REPORT_TIMES, SIT_BREAK_CHOICES, type DesktopPrefs, type DesktopStatus 
 import { WORKS_BUDGET_CHOICES, WORKS_EVERY_CHOICES } from '../../../../shared/studio'
 import { bridge } from '../../platform/bridge'
 import Toggle from '../Toggle.vue'
-import type { DiscoveryAction, DiscoverySource, DiscoveryState, DiscoveryTopic } from '../../../../shared/discoveries'
+import DiscoveryRules from './DiscoveryRules.vue'
 import { LANG_PREFS, type LangPref } from '../../../../shared/i18n'
 
 const api = bridge!
@@ -53,39 +53,6 @@ async function setDnd(on: boolean): Promise<void> {
   await api.desktopSetDnd(on)
 }
 
-const found = ref<DiscoveryState | null>(null)
-const sharingError = ref('')
-const sharingBusy = ref(false)
-const FOCUS_LABEL: Record<DiscoveryTopic['focus'], string> = {
-  all: '官方更新',
-  releases: '模型发布',
-  pricing: '定价变化',
-  web: '联网能力'
-}
-
-async function loadDiscoveries(): Promise<void> {
-  const result = await api.discoveryState()
-  sharingError.value = result.ok ? '' : result.error ?? t('现在看不了关注清单。')
-  if (result.ok) found.value = result.data ?? null
-}
-
-async function setSharing(on: boolean): Promise<void> {
-  await set({ proactiveSharing: on })
-  if (on) await loadDiscoveries()
-}
-
-async function changeTopic(source: DiscoverySource, action: DiscoveryAction): Promise<void> {
-  if (sharingBusy.value) return
-  sharingBusy.value = true
-  try {
-    const result = await api.discoveryChange(source, action)
-    sharingError.value = result.ok ? '' : result.error ?? t('这次没改成，过会儿再试。')
-    if (result.ok) found.value = result.data ?? null
-  } finally {
-    sharingBusy.value = false
-  }
-}
-
 const reported = ref('')
 
 async function reportNow(): Promise<void> {
@@ -110,10 +77,7 @@ onMounted(() => {
   off = api.onDesktopStatus((s) => (status.value = s))
 })
 onBeforeUnmount(() => off?.())
-onActivated(async () => {
-  await load()
-  if (status.value?.prefs.proactiveSharing) await loadDiscoveries()
-})
+onActivated(load)
 </script>
 
 <template>
@@ -240,42 +204,13 @@ onActivated(async () => {
     <div class="card">
       <h3>{{ t('主动分享') }}</h3>
       <div class="row">
-        <span class="label" id="sharing-toggle-label">{{ t('从对话学习关注主题') }}</span>
+        <span class="label" id="sharing-toggle-label">{{ t('启用主动分享') }}</span>
         <div>
-          <Toggle aria-labelledby="sharing-toggle-label" :model-value="status.prefs.proactiveSharing" @update:model-value="setSharing" />
-          <span class="hint">{{ t('可以跟她说「以后 Gemini 出新模型告诉我」。她也会留意你反复聊到的模型、价格和联网能力，查到官方更新再来讲。') }}</span>
+          <Toggle aria-labelledby="sharing-toggle-label" :model-value="status.prefs.proactiveSharing" @update:model-value="(on) => set({ proactiveSharing: on })" />
+          <span class="hint">{{ t('打开后她会检查关注规则。你也可以说「以后 Gemini 出新模型告诉我」。') }}</span>
         </div>
       </div>
-      <template v-if="status.prefs.proactiveSharing">
-        <div class="row">
-          <span class="label">{{ t('正在关注') }}</span>
-          <div>
-            <button class="btn" @click="loadDiscoveries">{{ t('刷新关注清单') }}</button>
-            <p v-if="sharingError" class="hint" role="status">{{ sharingError }}</p>
-            <p v-else-if="found && !found.topics.some(topic => topic.state === 'active')" class="hint">
-              {{ t('还没有关注主题。现在可以去和她聊。') }}
-            </p>
-            <ul v-if="found?.topics.some(topic => topic.state === 'active')" class="discovery-list">
-              <li v-for="topic in found.topics.filter(topic => topic.state === 'active')" :key="topic.source">
-                <strong>{{ topic.name }}</strong>
-                <span class="hint">{{ t(FOCUS_LABEL[topic.focus]) }} · {{ topic.slow ? t('低频分享') : t('有更新就分享') }}</span>
-                <button v-if="!topic.slow" class="btn" :disabled="sharingBusy" @click="changeTopic(topic.source, 'less')">{{ t('少分享这类') }}</button>
-                <button class="btn" :disabled="sharingBusy" @click="changeTopic(topic.source, 'pause')">{{ t('停止关注') }}</button>
-              </li>
-            </ul>
-          </div>
-        </div>
-        <div v-if="found?.reports.length" class="row">
-          <span class="label">{{ t('最近发现') }}</span>
-          <ul class="discovery-list">
-            <li v-for="report in found.reports" :key="report.id">
-              <strong>{{ report.title }}</strong>
-              <p class="hint">{{ report.summary }}</p>
-              <button class="btn" @click="api.discoverySource(report.source)">{{ t('看官方来源') }}</button>
-            </li>
-          </ul>
-        </div>
-      </template>
+      <DiscoveryRules />
     </div>
 
     <div class="card">
@@ -328,9 +263,6 @@ onActivated(async () => {
 </template>
 
 <style scoped>
-.discovery-list { padding: 0; margin: 8px 0 0; list-style: none; }
-.discovery-list li { padding-block: 8px; overflow-wrap: anywhere; }
-.discovery-list .btn { margin: 6px 8px 0 0; }
 
 .state {
   margin-left: 6px;
