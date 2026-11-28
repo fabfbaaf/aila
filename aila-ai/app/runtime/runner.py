@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from ..builtin_skills import task_skills
 from ..code import CodeProjects
 from ..code.fix import FixError, git, repo_root
 from ..computer import build_computer_context, computer_shell
@@ -51,6 +52,7 @@ from .shell import Shell, find_shell
 from .snapshots import Snapshots
 from .subagent import Explorer
 from .webtools import WebAccess
+from .video import VideoRuntime
 from .workers import Workers, open_workers
 from .taskwork import TaskWork, TaskWorkError
 from .tools import CodingTools
@@ -120,6 +122,7 @@ class Runtime:
         # MCP 外部工具服务（和对话共用 aila-ai/mcp.json，你在设置页加）：第一次用到时在后台开起来
         # 扩展包（app/extensions.py）：命令、本事、外部工具服务
         self.extensions = extensions or ExtensionStore(data_dir / "extensions")
+        self.video = VideoRuntime(data_dir / "video-runtime")
         self.mcp = McpManager(mcp_config or data_dir / "mcp.json", extensions=self.extensions)
         self.model_factory = model_factory
         # 「快模型」：派出去查资料的子 Agent 用（explore 工具），没给就和主模型一样
@@ -187,8 +190,8 @@ class Runtime:
             raise RuntimeError_(f"不认识的权限模式：{mode}")
         root = root.resolve()
         model = self.model_factory()
-        # 启用的扩展带的本事：开会话时定下来（只放名字和简介），之后装卸扩展不改这个会话的开头，前缀缓存不断
-        skills = self.extensions.skills()
+        # 可用本事的名字固定在会话开头，之后装卸扩展不改开头，前缀缓存不断
+        skills = task_skills(self.extensions)
         skill_note = skills_context(skills) + (ENGLISH_NOTE if self.language() == "en" else "")
         skill_meta = {**team_meta, **({"skills": [s.name for s in skills]} if skills else {})}
         if kind == "computer":
@@ -345,9 +348,13 @@ class Runtime:
         mode = session.mode if session.mode in MODES else "ask"
         browser = None
         # 会话开头列了扩展的本事：给她一个读全文的工具（放在工具列表最后，顺序固定）
-        skill_tools = [read_skill_tool(self.extensions, session.events[0]["skills"])] if session.events[0].get("skills") else []
+        skill_names = session.events[0].get("skills", [])
+        skill_tools = [read_skill_tool(self.extensions, skill_names)] if skill_names else []
+        if "hyperframes-video" in skill_names:
+            skill_tools.append(self.video.tool(workspace))
         if computer:
-            extra = [*plan_tools(session.events), *skill_tools]
+            web = WebAccess(self.fast_factory, self.web_search).tools() if "paper-lookup" in skill_names else []
+            extra = [*plan_tools(session.events), *web, *skill_tools]
             policy = ComputerPolicy(session.cwd, self.computer_rules, mode, data_dir=self.data_dir, env_file=ENV_FILE)
         else:
             extra = CodeAccess(self.code_projects(), session.cwd).tools() if self.code_projects else []
@@ -588,7 +595,7 @@ class Runtime:
             raise RuntimeError_(str(err)) from err
 
     def commands(self, cwd: str | Path | None, kind: str = "project") -> dict[str, Command]:
-        """这个项目能用的自定义命令（每次现读：改了命令文件马上生效）。电脑任务只用自己的"""
+        """列出任务可以使用的命令；改了命令文件马上生效。"""
         project = Path(cwd) if cwd and kind != "computer" else None
         return load_commands(project, self.data_dir / "commands", self.extensions.command_dirs())
 

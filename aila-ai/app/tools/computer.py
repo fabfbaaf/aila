@@ -81,7 +81,7 @@ def computer_task_skill(runtime: Callable[[], Runtime]) -> Skill:
 
     tool = Tool(
         "computer_task",
-        "用户要在这台电脑上完成整理文件、批量改名、用 Office 处理资料等多步操作时用。"
+        "用户要在这台电脑上完成整理文件、批量改名、做短视频、查论文并保存简报等多步操作时用。"
         "先问用户开个电脑任务做，批准后在任务页出方案、按阶段推进。一两步小事可用 computer_command。",
         {"type": "object", "properties": {"task": {"type": "string", "description": "用户要完成的目标及必要细节"}},
          "required": ["task"]},

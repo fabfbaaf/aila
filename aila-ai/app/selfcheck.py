@@ -79,6 +79,17 @@ def _app() -> None:
     import app.main  # noqa: F401 —— uvicorn 按字符串导入它
 
 
+def _skills() -> None:
+    from .builtin_skills import BUILTIN_SKILLS
+    from .extensions import read_skill_file, scan_skills
+
+    skills = {s.name: s for s in scan_skills(BUILTIN_SKILLS, "", "")}
+    read_skill_file(skills["paper-lookup"])
+    read_skill_file(skills["hyperframes-video"], "examples/title-card.html")
+    for name in ("paper-lookup", "make-video"):
+        (BUILTIN_SKILLS / "commands" / f"{name}.md").read_text(encoding="utf-8")
+
+
 CHECKS: dict[str, Callable[[], None]] = {
     "服务": _app,
     "代码解析": _code,
@@ -89,6 +100,7 @@ CHECKS: dict[str, Callable[[], None]] = {
     "浏览器驱动": _browser,
     "截屏": _screen,
     "外部工具": _mcp,
+    "内置本事": _skills,
 }
 
 

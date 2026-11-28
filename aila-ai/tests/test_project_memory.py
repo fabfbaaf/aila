@@ -135,7 +135,7 @@ def test_system_prompt_and_tool_list_mention_remember(tmp_path: Path) -> None:
     rt = Runtime(tmp_path / "data", lambda: Scripted([["好"]]), shell=SHELL)
     sid = rt.create(str(project(tmp_path))).id
     names = [t["function"]["name"] for t in rt.agent(sid).tools.specs]
-    assert names[-1] == "remember" and "remember" in SYSTEM_PROMPT
+    assert names[-3:] == ["remember", "read_skill", "render_video"] and "remember" in SYSTEM_PROMPT
 
 
 # ---------- 接口 ----------

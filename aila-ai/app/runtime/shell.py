@@ -103,6 +103,12 @@ def clean_env() -> dict[str, str]:
 
 
 async def run(shell: Shell, command: str, cwd: Path, timeout: float = DEFAULT_TIMEOUT) -> CommandResult:
+    return await run_argv(shell.argv(command), cwd, timeout)
+
+
+async def run_argv(argv: list[str], cwd: Path, timeout: float = DEFAULT_TIMEOUT,
+                   *, env: dict[str, str] | None = None) -> CommandResult:
+    """用同一套超时、输出和进程清理逻辑运行固定的程序参数。"""
     timeout = max(1.0, min(float(timeout or DEFAULT_TIMEOUT), MAX_TIMEOUT))
     kwargs: dict = {}
     if WIN:
@@ -111,9 +117,9 @@ async def run(shell: Shell, command: str, cwd: Path, timeout: float = DEFAULT_TI
         kwargs["start_new_session"] = True
     t0 = time.perf_counter()
     proc = await asyncio.create_subprocess_exec(
-        *shell.argv(command),
+        *argv,
         cwd=cwd,
-        env=clean_env(),
+        env=env if env is not None else clean_env(),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,

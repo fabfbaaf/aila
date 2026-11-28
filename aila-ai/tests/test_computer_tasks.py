@@ -72,7 +72,8 @@ def test_computer_creation_guards_and_legacy_project(home: Path, tmp_path: Path)
     session = rt.create("Z:/ignored", kind="computer", budget=0.5)
     assert session.cwd == home and session.kind == "computer"
     assert session.summary()["kind"] == "computer" and session.budget == 0.5
-    assert session.events[0]["kind"] == "computer" and session.context == "<电脑环境>测试环境</电脑环境>"
+    assert session.events[0]["kind"] == "computer" and session.context.startswith("<电脑环境>测试环境</电脑环境>")
+    assert "paper-lookup" in session.context and "hyperframes-video" in session.context
     agent = rt.agent(session.id)
     assert isinstance(agent.tools.ws, ComputerWorkspace) and isinstance(agent.policy, ComputerPolicy)
     assert {"propose_plan", "stage_done", "stage_blocked"} <= agent.tools.tools.keys()

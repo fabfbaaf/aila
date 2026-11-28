@@ -176,6 +176,10 @@ class Policy:
     def decide(self, kind: str, command: str = "") -> Decision:
         if kind in ("read", "meta", "web"):
             return Decision("allow")
+        if kind == "video":
+            if self.mode == "read_only":
+                return Decision("deny", "现在是只读模式，不能渲染并保存视频。")
+            return Decision("ask", "要运行浏览器渲染并保存视频，首次使用可能下载渲染依赖。")
         if kind == "delegate":
             if self.mode == "read_only":
                 return Decision("deny", "现在是只读模式，不能派人改代码（可以派 role=review 的审查员）。")

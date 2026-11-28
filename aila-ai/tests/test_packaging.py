@@ -13,10 +13,9 @@ def test_every_data_file_is_bundled() -> None:
         if not f.is_file() or f.suffix in (".py", ".pyc") or "__pycache__" in f.parts:
             continue
         rel = f.relative_to(ROOT)
-        # add-data 写的是文件本身或者它所在的文件夹（用 / 拼的 ROOT / 'app' / ... 形式）
+        # 整个目录打包时，PyInstaller 也会收下其中的子目录。
         parts = [f"'{p}'" for p in rel.parts]
-        folder = " / ".join(parts[:-1])
-        if " / ".join(parts) not in script and f"ROOT / {folder}}}" not in script:
+        if not any("ROOT / " + " / ".join(parts[:i]) + "}" in script for i in range(1, len(parts) + 1)):
             missing.append(rel.as_posix())
     assert missing == [], f"这些文件没打进安装包：{missing}"
 

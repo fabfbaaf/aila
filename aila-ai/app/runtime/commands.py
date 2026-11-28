@@ -2,9 +2,10 @@
 
 放在哪：
 - 项目里的 `.aila/commands/<名字>.md`：跟着项目走，可以提交进仓库给别人用
-- 你自己的 `<数据目录>/commands/<名字>.md`：每个项目都能用（电脑任务只用这些）
+- 你自己的 `<数据目录>/commands/<名字>.md`：每个项目和电脑任务都能用
+- 随程序发布的内置本事带的任务命令（例如 /paper-lookup、/make-video）
 - 装好并启用的扩展包里的 `commands/<名字>.md`（见 app/extensions.py）
-同名时项目里的优先，其次是你自己的，最后是扩展的；和内置命令（/review、/plan……）重名的不算，内置的优先。
+同名时依次用项目里的、自定义的、内置本事带的、扩展带的命令。/review、/plan 等运行时命令始终优先。
 
 文件格式：开头可选一段 `---` 包起来的说明（`description: 一句话`），下面是要交给她的话；
 `$ARGUMENTS` 换成命令后面写的内容（没写这个占位、但带了内容时，接在最后）。
@@ -17,6 +18,8 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from ..builtin_skills import BUILTIN_SKILLS
 
 NAME = re.compile(r"^[\w一-鿿-]{1,40}$")
 MAX_CHARS = 20_000
@@ -35,7 +38,7 @@ class Command:
     name: str
     description: str
     body: str
-    source: str  # project / user / extension:<扩展 id>
+    source: str  # project / user / builtin / extension:<扩展 id>
     path: Path
 
     def expand(self, args: str) -> str:
@@ -91,6 +94,7 @@ def load_commands(project: Path | None, user_dir: Path,
     out: dict[str, Command] = {}
     for ext_id, folder in reversed(extensions or []):  # 两个扩展同名：按 id 排在前面的算
         out.update({c.name.lower(): c for c in _scan(folder, f"extension:{ext_id}")})
+    out.update({c.name.lower(): c for c in _scan(BUILTIN_SKILLS / "commands", "builtin")})
     out.update({c.name.lower(): c for c in _scan(user_dir, "user")})
     if project is not None:
         out.update({c.name.lower(): c for c in _scan(project / ".aila" / "commands", "project")})

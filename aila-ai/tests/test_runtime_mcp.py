@@ -231,7 +231,8 @@ async def test_agent_uses_mcp_tools_with_confirmation(tmp_path: Path) -> None:
     assert rt.mcp.configs()["fake"].always_allow == ["write_note"]
     # 工具列表在一轮开始前对齐：MCP 的放在最后
     names = [t["function"]["name"] for t in model.requests[0][1]]
-    assert names[-6:] == [t.full_name for t in rt.mcp.tools()] and names[-7] == "remember"
+    assert names[-6:] == [t.full_name for t in rt.mcp.tools()]
+    assert names[-9:-6] == ["remember", "read_skill", "render_video"]
     await rt.shutdown()
     assert rt.mcp.servers == {}
 
